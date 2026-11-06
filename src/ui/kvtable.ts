@@ -247,23 +247,33 @@ async function pasteInto<T extends KVRow>(
   // 预填表格里已有的行，让人整体改一遍再覆盖，而不是每次粘贴都从零开始。
   const current = rowsToText(rows);
   const clip = (await pasteText()).trim();
-  const text =
-    (await askText({
-      title: "批量粘贴",
-      label: "每行一对，支持 name: value 或 name=value；行首加 # 表示禁用该行",
-      value: current,
-      placeholder: "Content-Type: application/json\nAuthorization: Bearer {{token}}",
-      multiline: true,
-      rows: 8,
-      hint: current
-        ? `已填入当前 ${rows.length} 行，确定后整体替换；空行会被忽略。`
-        : "Enter 换行，Ctrl+Enter 确定；空行会被忽略。",
-      replaceAction:
-        clip && clip !== current ? { label: "用剪贴板内容替换", text: clip } : undefined,
-    })) ?? "";
-  if (text.trim() === current.trim()) return;
-  const parsed = parsePairs(text);
+  const submitted = await askText({
+    title: "批量粘贴",
+    label: "每行一对，支持 name: value 或 name=value；行首加 # 表示禁用该行",
+    value: current,
+    placeholder: "Content-Type: application/json\nAuthorization: Bearer {{token}}",
+    multiline: true,
+    rows: 8,
+    hint: current
+      ? `已填入当前 ${rows.length} 行，确定后整体替换；空行会被忽略。`
+      : "Enter 换行，Ctrl+Enter 确定；空行会被忽略。",
+    replaceAction:
+      clip && clip !== current ? { label: "用剪贴板内容替换", text: clip } : undefined,
+  });
+  // 取消就什么都不做：不能把「取消」当成一份空内容去解析，那样会弹出「没有识别出键值对」。
+  if (submitted === null) return;
+  const next = submitted.trim();
+  if (next === current.trim()) return;
+  const parsed = parsePairs(next);
   if (parsed.length === 0) {
+    // 主动清空内容是一种明确意图：把表格清空。
+    if (next === "") {
+      const count = rows.length;
+      rows.length = 0;
+      repaint();
+      toast(`已清空 ${count} 项`);
+      return;
+    }
     await askAlert({
       title: "没有识别出键值对",
       message: "请检查格式：每行一条，用冒号、等号或制表符分隔名称与值。",

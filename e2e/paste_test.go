@@ -140,3 +140,56 @@ func TestPastePrefill(t *testing.T) {
 	}
 	h.shot(t, "36-paste-prefill")
 }
+
+// 打开批量粘贴后什么都不改：点「取消」应当安静退出，点「确定」也不该报「没有识别出键值对」。
+func TestPasteCancel(t *testing.T) {
+	h.clearOverlays(t)
+	newTab(t)
+
+	h.clickText(t, ".subtab", "请求头")
+	h.wait(t, "请求头页签激活", `[...document.querySelectorAll('.subtab')].some(s => s.classList.contains('active') && s.textContent.trim() === '请求头')`)
+	h.wait(t, "请求头表格出现", `!!document.querySelector('.kv-foot')`)
+
+	h.eval(t, `(() => {
+		const add = [...document.querySelectorAll('.kv-foot .link-btn')].find(b => b.textContent.trim() === '添加一行');
+		add.click();
+		const row = [...document.querySelectorAll('.kv-row')].pop();
+		const k = row.querySelector('.kv-key');
+		const v = row.querySelector('.kv-value');
+		k.value = 'X-Keep'; k.dispatchEvent(new Event('input', { bubbles: true }));
+		v.value = 'kept'; v.dispatchEvent(new Event('input', { bubbles: true }));
+		return true;
+	})()`, nil)
+	h.wait(t, "行已填好", `[...document.querySelectorAll('.kv-key')].some(n => n.value === 'X-Keep')`)
+
+	// 1) 不改内容直接取消：不弹任何提示，数据保持原样。
+	h.clickText(t, ".kv-foot .link-btn", "批量粘贴")
+	h.wait(t, "粘贴框打开", `!!document.querySelector('.prompt-textarea')`)
+	h.clickText(t, ".prompt-dialog .btn", "取消")
+	h.wait(t, "粘贴框关闭", `!document.querySelector('.prompt-backdrop')`)
+	time.Sleep(150 * time.Millisecond)
+	if h.exists(t, ".prompt-backdrop") {
+		t.Fatalf("点取消后弹出了提示框（%s），取消应当是安静退出", h.text(t, ".prompt-dialog"))
+	}
+	var afterCancel string
+	h.eval(t, `JSON.stringify([...document.querySelectorAll('.kv-key')].map(n => n.value))`, &afterCancel)
+	if !strings.Contains(afterCancel, "X-Keep") {
+		t.Fatalf("取消把原有行弄丢了：%s", afterCancel)
+	}
+
+	// 2) 不改内容直接确定：同样不该报「没有识别出键值对」。
+	h.clickText(t, ".kv-foot .link-btn", "批量粘贴")
+	h.wait(t, "粘贴框再次打开", `!!document.querySelector('.prompt-textarea')`)
+	h.clickText(t, ".prompt-dialog .btn", "确定")
+	h.wait(t, "粘贴框关闭", `!document.querySelector('.prompt-backdrop')`)
+	time.Sleep(150 * time.Millisecond)
+	if h.exists(t, ".prompt-backdrop") {
+		t.Fatalf("没改内容直接确定也弹出了提示框（%s）", h.text(t, ".prompt-dialog"))
+	}
+	var afterOk string
+	h.eval(t, `JSON.stringify([...document.querySelectorAll('.kv-key')].map(n => n.value))`, &afterOk)
+	if !strings.Contains(afterOk, "X-Keep") {
+		t.Fatalf("直接确定把原有行弄丢了：%s", afterOk)
+	}
+	h.shot(t, "37-paste-cancel")
+}
