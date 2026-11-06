@@ -667,10 +667,27 @@ interface CurlExportOptions {
 }
 
 /** 根据请求生成 cURL 命令文本，按 curl 常见风格用反斜杠换行。 */
+function appendQuery(url: string, key: string, value: string): string {
+  try {
+    const u = new URL(url);
+    u.searchParams.set(key, value);
+    return u.toString();
+  } catch {
+    // 地址还没补协议（相对地址）时 new URL 会抛错，退回手拼。
+    const sep = url.includes("?") ? "&" : "?";
+    return `${url}${sep}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
+  }
+}
+
 export function toCurl(request: ApiRequest, opts: CurlExportOptions): string {
-  const url = buildURL(request, opts.resolve);
+  let url = buildURL(request, opts.resolve);
   const lines: string[] = [];
   const method = request.method.toUpperCase();
+  const auth = request.auth;
+  // API Key 放在查询串时，导出的地址必须把它拼回去，否则对方拿到命令会 401。
+  if (auth.type === "apikey" && auth.in === "query" && auth.key.trim()) {
+    url = appendQuery(url, opts.resolve(auth.key), opts.resolve(auth.value));
+  }
 
   if (method !== "GET") lines.push(`-X ${method}`);
   lines.push(`${shellQuote(url)}`);
@@ -680,7 +697,6 @@ export function toCurl(request: ApiRequest, opts: CurlExportOptions): string {
     lines.push(`-H ${shellQuote(`${h.key}: ${opts.resolve(h.value)}`)}`);
   }
 
-  const auth = request.auth;
   if (auth.type === "bearer" && auth.token) {
     lines.push(`-H ${shellQuote(`Authorization: Bearer ${opts.resolve(auth.token)}`)}`);
   }

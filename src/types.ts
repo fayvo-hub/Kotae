@@ -212,6 +212,8 @@ export interface PersistedWorkspace {
   sidebarWidth: number;
   responseHeight: number;
   sidebarTab: "collections" | "history";
+  /** 侧边栏是否收起，落库后重启能保持用户的布局。 */
+  sidebarCollapsed: boolean;
   onboardingDone: boolean;
   /** 关闭窗口时最小化到托盘。桌面外壳启动时读它，用户在托盘菜单里改它。 */
   closeToTray: boolean;

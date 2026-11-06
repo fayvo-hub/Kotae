@@ -15,18 +15,16 @@ import {
   openHistory,
   openNode,
   openTab,
-  pasteText,
   persist,
   renameCollection,
   renameNode,
-  setPendingCurl,
   state,
   toast,
   toggleFolder,
   toggleSidebar,
   toggleUI,
 } from "../store";
-import { CurlError, emptyRequest, parseCurl } from "../curl";
+import { emptyRequest } from "../curl";
 import { System } from "../mygo";
 import { askConfirm, askText } from "./prompt";
 import { formatDuration, formatRelative, methodTone } from "../util";
@@ -451,22 +449,3 @@ async function removeFolder(collectionId: string, nodeId: string, name: string):
   if (ok) deleteNode(collectionId, nodeId);
 }
 
-/** cURL 快捷导入：从剪贴板读取并解析。 */
-export async function importCurlFromClipboard(): Promise<void> {
-  const text = await pasteText();
-  if (!text.trim()) {
-    toggleUI("curlOpen", true);
-    return;
-  }
-  try {
-    const result = parseCurl(text);
-    setPendingCurl({ request: result.request, warnings: result.warnings, source: text });
-  } catch (err) {
-    if (err instanceof CurlError) {
-      toggleUI("curlOpen", true);
-      toast(`剪贴板内容解析失败（第 ${err.line} 行）：${err.message}`, "error");
-    } else {
-      toast(`解析失败：${(err as Error).message}`, "error");
-    }
-  }
-}

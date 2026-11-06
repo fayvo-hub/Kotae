@@ -70,7 +70,7 @@ AI 代理修改本仓库时的强制规则。与 `~/.pi/agent/AGENTS.md` 冲突�
 - 界面可以读 `state`、也可以直接改纯 UI 字段，但改完必须触发重绘（`emit()` 或 `window.dispatchEvent(new CustomEvent("mygo:rerender-…"))`）；凡是会落库的字段（`src/db.ts` 里 settings 表登记的那些）必须同时调 `persist()`，否则重启后回到旧值
 - 顶部菜单/托盘/深链只发 `desktop:command` 事件，页面复用同一套 store action；不要在 Go 侧复制一份业务逻辑
 - 热点文件（每次改动只做与任务直接相关的局部编辑，新增功能优先落新模块）：
-  `src/store.ts`（1134 行）、`src/ui/overlays.ts`（950）、`src/main.ts`（855）、`src/ui/request.ts`（727）、`src/curl.ts`（715）、`src/db.ts`（555）
+  `src/store.ts`（1232 行）、`src/ui/overlays.ts`（976）、`src/main.ts`（1000）、`src/ui/request.ts`（803）、`src/curl.ts`（732）、`src/db.ts`（558）
 - 新 TS 模块约 500 行时反思职责，约 800 行必须拆
 - 禁止 `as any` / `@ts-ignore` / `@ts-expect-error`（当前 0 处，保持）；`tsconfig` 是 `strict` + `noUncheckedIndexedAccess`，用真实的类型收窄解决报错
 

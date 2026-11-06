@@ -140,6 +140,7 @@ function snapshot(): PersistedWorkspace {
     sidebarWidth: state.sidebarWidth,
     responseHeight: state.responseHeight,
     sidebarTab: state.sidebarTab,
+    sidebarCollapsed: state.sidebarCollapsed,
     onboardingDone: state.onboardingDone,
     closeToTray: state.closeToTray,
   };
@@ -204,6 +205,7 @@ function applyPersisted(p: Partial<PersistedWorkspace>): void {
   state.sidebarWidth = clamp(p.sidebarWidth ?? DEFAULT_SIDEBAR_WIDTH, 208, 520);
   state.responseHeight = clamp(p.responseHeight ?? DEFAULT_RESPONSE_HEIGHT, 140, 900);
   state.sidebarTab = p.sidebarTab === "history" ? "history" : "collections";
+  state.sidebarCollapsed = p.sidebarCollapsed === true;
   state.onboardingDone = p.onboardingDone === true;
   state.tabs = Array.isArray(p.tabs)
     ? p.tabs.map((t) => ({
@@ -1212,6 +1214,7 @@ export function applyPendingCurl(target: "replace" | "newTab"): void {
 
 export function toggleSidebar(): void {
   state.sidebarCollapsed = !state.sidebarCollapsed;
+  persist();
   emit();
 }
 

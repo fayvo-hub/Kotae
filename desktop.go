@@ -22,9 +22,8 @@ var trayPNG []byte
 
 // DesktopCommand 是桌面集成发给页面的指令。
 type DesktopCommand struct {
-	// Action 是页面要执行的动作：new-request、import-curl、save、
-	// toggle-sidebar、command-palette、open-env、open-settings、
-	// toggle-theme、about。
+	// Action 是页面要执行的动作：new-request、import-curl、save、close-tab、
+	// toggle-sidebar、command-palette、open-env、open-settings、toggle-theme。
 	Action string `json:"action"`
 	// Text 是随动作带过去的内容，例如深链里的 cURL 命令。
 	Text string `json:"text,omitempty"`

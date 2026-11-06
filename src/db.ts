@@ -272,6 +272,7 @@ export async function load(): Promise<PersistedWorkspace> {
     sidebarWidth: int(settings.get("sidebarWidth"), 288),
     responseHeight: int(settings.get("responseHeight"), 340),
     sidebarTab: settings.get("sidebarTab") === "history" ? "history" : "collections",
+    sidebarCollapsed: settings.get("sidebarCollapsed") === "1",
     onboardingDone: settings.get("onboardingDone") === "1",
     closeToTray: settings.get("closeToTray") !== "0",
   };
@@ -388,6 +389,7 @@ function rows(data: PersistedWorkspace): Row[] {
     ["sidebarWidth", String(data.sidebarWidth)],
     ["responseHeight", String(data.responseHeight)],
     ["sidebarTab", data.sidebarTab],
+    ["sidebarCollapsed", data.sidebarCollapsed ? "1" : "0"],
     ["onboardingDone", data.onboardingDone ? "1" : "0"],
     ["closeToTray", data.closeToTray ? "1" : "0"],
   ];
@@ -549,6 +551,7 @@ function normalize(p: Partial<PersistedWorkspace>): PersistedWorkspace {
     sidebarWidth: typeof p.sidebarWidth === "number" ? p.sidebarWidth : 288,
     responseHeight: typeof p.responseHeight === "number" ? p.responseHeight : 340,
     sidebarTab: p.sidebarTab === "history" ? "history" : "collections",
+    sidebarCollapsed: p.sidebarCollapsed === true,
     onboardingDone: p.onboardingDone === true,
     closeToTray: p.closeToTray !== false,
   };

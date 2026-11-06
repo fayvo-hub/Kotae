@@ -187,6 +187,8 @@ const res = await fetch("https://api.example.com/items", {
 
 # 二、AI 开发手段接入与验证结果
 
+> 历史记录：本章记录的是脚手架安装当天（应用还叫 `mygo-api`、尚未改名 `MyGo API`）的实际状态与逐条命令输出。项目后续的配置、产物名与版本以 `mygo.config.ts`、`README.md` 和 `AGENTS.md` 为准。
+
 ## 2.1 结论先行
 
 调研确认：**MyGo 官方公开的 AI 开发相关手段只有一项 —— agent skills**（`mygo install-skills` 命令 + 两个 `init` 模板自动安装的 `.agents/skills/`）。文档中没有 MCP server、没有编辑器插件、没有其他助手集成方式。
@@ -386,7 +388,7 @@ error: the dev server exited: exit status 1
 | 键盘快捷键 | Ctrl+Enter 发送、Ctrl+S 保存、Ctrl+N 新建请求、Ctrl+F 查找响应、Esc 取消当前请求 | 必须 | 是 | 需自研（webview 键盘事件） |
 | 请求/响应分栏可拖拽 | 上下/左右分栏，分隔条可拖动调整比例 | 必须 | 是 | 需自研（布局） |
 | 首次打开引导 | 空状态页提示"粘贴 cURL 或新建一个请求"，点击可直达对应操作 | 必须 | 是 | 需自研（"好用"关键项） |
-| 深色 / 浅色跟随系统 | 界面跟随系统主题自动切换 | 必须 | 是 | mygo 直接支撑（webview 内 `light-dark()`；窗口 `BackgroundColor` 已用 `light-dark(#f6f7f9, #0f1115)`） |
+| 深色 / 浅色跟随系统 | 界面跟随系统主题自动切换 | 必须 | 是 | mygo 直接支撑（webview 内 `light-dark()`；窗口 `BackgroundColor` 已用 `light-dark(#f4f5f7, #0d0e12)`） |
 | 窗口位置与大小记忆 | 记住上次窗口位置、尺寸 | 必须 | 是 | mygo 直接支撑（`WindowOptions.StateKey`，脚手架已配 `"main"`） |
 | 命令面板（Ctrl+K） | 快速搜索集合、历史、环境并跳转 | 可选 | 是 | 需自研（"好用"关键项） |
 | 侧边栏折叠 | 集合/历史侧边栏可收起，给编辑区更多空间 | 可选 | 是 | 需自研 |

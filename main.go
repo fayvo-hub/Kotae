@@ -140,6 +140,20 @@ type OpenedFile struct {
 // SaveText 弹出「另存为」对话框，把文本写入用户选择的位置，返回保存路径；
 // 用户取消时返回空字符串。
 func (s *System) SaveText(ctx context.Context, suggestedName string, content string) (string, error) {
+	return saveBytes(ctx, suggestedName, []byte(content))
+}
+
+// SaveBase64 同 SaveText，但把 base64 内容解码成原始字节再写盘，
+// 用于下载二进制响应（图片、压缩包）而不损坏内容。
+func (s *System) SaveBase64(ctx context.Context, suggestedName string, data string) (string, error) {
+	raw, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		return "", err
+	}
+	return saveBytes(ctx, suggestedName, raw)
+}
+
+func saveBytes(ctx context.Context, suggestedName string, content []byte) (string, error) {
 	path, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
 		Parent:      mygo.CallerWindow(ctx),
 		Title:       "保存文件",
@@ -151,7 +165,7 @@ func (s *System) SaveText(ctx context.Context, suggestedName string, content str
 	if path == "" {
 		return "", nil
 	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(path, content, 0o644); err != nil {
 		return "", err
 	}
 	return path, nil

@@ -80,6 +80,15 @@ func TestStoragePersistsAcrossRestart(t *testing.T) {
 	if n := h.count(t, ".tree-row"); n < 5 {
 		t.Fatalf("重启后集合树只剩 %d 行，数据可能没读回来\n目录内容：%s", n, listDir(h.userData))
 	}
+
+	// 侧边栏折叠状态也要落库：重启后不该把用户的布局改回去。
+	h.pressKeys(t, "b", true, false)
+	h.wait(t, "侧边栏收起", `document.querySelector('.sidebar-host').classList.contains('collapsed')`)
+	waitForCommit(t, filepath.Join(h.userData, "workspace.db"), time.Now())
+	h.restart(t)
+	h.wait(t, "重启后侧边栏仍收起", `document.querySelector('.sidebar-host').classList.contains('collapsed')`)
+	h.pressKeys(t, "b", true, false)
+	h.wait(t, "侧边栏重新展开", `!document.querySelector('.sidebar-host').classList.contains('collapsed')`)
 }
 
 // waitForCommit 等到数据库（或它的 WAL 文件）在 since 之后被写过，

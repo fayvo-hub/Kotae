@@ -68,8 +68,6 @@ function statusBar(tab: Tab, res: ResponseRecord): HTMLElement {
   }
   if (res.redirected) meta.append(chip("提示", "跟随了重定向"));
 
-  if (tab.requestTab === "options") meta.append(chip("", ""));
-
   const actions = el("div", { class: "status-actions" });
   if (!res.error) {
     if (res.binary && res.base64) {
@@ -523,17 +521,12 @@ function headersView(tab: Tab, res: ResponseRecord): HTMLElement {
 
 async function saveBody(tab: Tab, res: ResponseRecord): Promise<void> {
   const name = suggestedFileName(tab, res);
-  let content: string;
-  if (res.binary && res.base64) {
-    // 二进制：写回原始字节（Go 侧按 base64 解码不够直接，这里用文本形式不行，
-    // 因此二进制响应只保存 base64 文本；如需原始文件请用「复制」配合其他工具）。
-    content = res.base64;
-    toast("二进制响应已按 base64 文本保存", "info");
-  } else {
-    content = res.body;
-  }
   try {
-    const saved = await System.saveText(name, content);
+    // 二进制响应直接把原始字节写盘，不能把 base64 文本当文件存。
+    const saved =
+      res.binary && res.base64
+        ? await System.saveBase64(name, res.base64)
+        : await System.saveText(name, res.body);
     if (saved) toast(`已保存到 ${saved}`, "success");
   } catch (err) {
     toast(`保存失败：${(err as Error).message}`, "error");

@@ -7,9 +7,8 @@ import { call, event } from "mygo-runtime";
 /** DesktopCommand 是桌面集成发给页面的指令。 */
 export interface DesktopCommand {
   /**
-   * Action 是页面要执行的动作：new-request、import-curl、save、
-   * toggle-sidebar、command-palette、open-env、open-settings、
-   * toggle-theme、about。
+   * Action 是页面要执行的动作：new-request、import-curl、save、close-tab、
+   * toggle-sidebar、command-palette、open-env、open-settings、toggle-theme。
    */
   action: string;
   /** Text 是随动作带过去的内容，例如深链里的 cURL 命令。 */
@@ -100,6 +99,13 @@ export const System = {
   /** PickFile 弹出文件对话框并读取选中的文件；用户取消时 Path 为空。 */
   pickFile(title: string): Promise<PickedFile> {
     return call("System.PickFile", title);
+  },
+  /**
+   * SaveBase64 同 SaveText，但把 base64 内容解码成原始字节再写盘，
+   * 用于下载二进制响应（图片、压缩包）而不损坏内容。
+   */
+  saveBase64(suggestedName: string, data: string): Promise<string> {
+    return call("System.SaveBase64", suggestedName, data);
   },
   /**
    * SaveText 弹出「另存为」对话框，把文本写入用户选择的位置，返回保存路径；
