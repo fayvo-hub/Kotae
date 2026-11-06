@@ -154,13 +154,24 @@ function safeDecode(s: string): string {
   }
 }
 
-/** 补齐协议：用户只写 host 时默认 http。 */
-export function normalizeURL(raw: string): string {
-  const t = raw.trim();
-  if (!t) return "";
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(t)) return t;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(t) && !t.includes("://")) return t;
+/**
+ * 发送前的协议兜底：变量解析完仍然没有协议才补 http://。
+ * 只在发请求时用，不回填地址栏——地址栏保持用户原样输入。
+ * 顺带清理旧版存下的 `http://{{var}}`（协议写在变量外面那种脏数据）。
+ */
+export function ensureScheme(url: string): string {
+  const t = stripSchemeBeforeVar(url);
+  if (!t) return t;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(t)) return t;
   return `http://${t}`;
+}
+
+/**
+ * 去掉写在变量外面的协议：`http://{{baseUrl}}/x` → `{{baseUrl}}/x`。
+ * 协议由变量值带，否则插值后会拼成 `http://https://…` 打不开的地址。
+ */
+export function stripSchemeBeforeVar(url: string): string {
+  return url.trim().replace(/^https?:\/\/(?=\{\{)/i, "");
 }
 
 // ---- 变量插值 ----

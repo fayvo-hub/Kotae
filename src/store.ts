@@ -17,7 +17,7 @@ import type {
 } from "./types";
 import { init as openStorage, load as readStorage, save as writeStorage } from "./db";
 import { buildURL, cloneRequest, emptyRequest, toCurl } from "./curl";
-import { guessName, interpolate, splitURL, uid, type VarScope } from "./util";
+import { ensureScheme, guessName, interpolate, splitURL, uid, type VarScope } from "./util";
 
 export interface Toast {
   id: string;
@@ -385,7 +385,7 @@ export async function send(): Promise<void> {
   const tab = activeTab();
   if (!tab || tab.sending) return;
 
-  let url = buildURL(tab.request, resolveText);
+  let url = ensureScheme(buildURL(tab.request, resolveText));
   if (!url.trim()) {
     toast("请先填写请求地址", "error");
     return;

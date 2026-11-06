@@ -17,7 +17,7 @@ import {
 import { System } from "../mygo";
 import { CurlError, parseCurl } from "../curl";
 import { METHODS, type AuthType, type BodyMode, type HttpMethod, type Tab } from "../types";
-import { interpolate, normalizeURL, prettyJSON } from "../util";
+import { ensureScheme, interpolate, lookupVar, prettyJSON, stripSchemeBeforeVar } from "../util";
 import { scope as storeScope } from "../store";
 
 const COMMON_HEADERS = [
@@ -76,6 +76,30 @@ function urlBar(tab: Tab): HTMLElement {
   for (const m of METHODS) methodSelect.append(el("option", { attr: { value: m }, text: m }));
   methodSelect.value = tab.request.method;
 
+  // 变量高亮层：与输入框共用字体与内边距，输入框文字设为透明确保留光标。
+  const mirrorInner = el("div", { class: "url-mirror-inner" });
+  const mirror = el("div", {
+    class: "url-mirror",
+    attr: { "aria-hidden": "true" },
+  });
+  mirror.append(mirrorInner);
+
+  const paintHighlight = (): void => {
+    mirrorInner.replaceChildren(...urlTokens(urlInput.value));
+    urlInput.title = urlTitle(urlInput.value);
+  };
+  const syncHighlightScroll = (): void => {
+    mirrorInner.style.transform = `translateX(${-urlInput.scrollLeft}px)`;
+  };
+  // 输入过程中就地更新「实际地址」预览，不重渲染整块面板（避免抢焦点）。
+  const paintPreview = (): void => {
+    const node = document.querySelector<HTMLElement>(".pane-preview-url");
+    if (!node) return;
+    const draft: Tab = { ...tab, request: { ...tab.request, url: urlInput.value } };
+    const text = urlInput.value.trim() ? ensureScheme(buildPreview(draft)) : "";
+    node.textContent = text || "（尚未填写地址）";
+  };
+
   const urlInput = el("input", {
     class: "url-input",
     attr: {
@@ -87,6 +111,9 @@ function urlBar(tab: Tab): HTMLElement {
     on: {
       input: () => {
         setUrlInvalid(urlInput, false);
+        paintHighlight();
+        syncHighlightScroll();
+        paintPreview();
       },
       paste: (ev) => {
         const text = ev.clipboardData?.getData("text") ?? "";
@@ -103,20 +130,19 @@ function urlBar(tab: Tab): HTMLElement {
         }
         if (ev.key === "Enter") urlInput.blur();
       },
+      // 失焦只存原样输入：不自动补协议，也不改写用户写的变量模板。
+      // 协议在发送时按解析后的地址兜底（见 util.ensureScheme）。
+      scroll: () => syncHighlightScroll(),
       blur: () => {
         const raw = urlInput.value;
         if (!raw.trim()) return;
-        if (!/^[a-z][a-z0-9+.-]*:/i.test(raw.trim())) {
-          urlInput.value = normalizeURL(raw);
-          applyURL(urlInput.value);
-          return;
-        }
         applyURL(raw);
         setUrlInvalid(urlInput, false);
       },
     },
   });
   urlInput.value = tab.request.url;
+  paintHighlight();
 
   const sendBtn = el("button", {
     class: "btn primary send-btn",
@@ -152,10 +178,47 @@ function urlBar(tab: Tab): HTMLElement {
   fill(
     bar,
     el("div", { class: "url-method" }, methodSelect),
-    el("div", { class: "url-field" }, urlInput, unresolvedBadge(tab)),
+    el("div", { class: "url-field" }, el("div", { class: "url-input-wrap" }, mirror, urlInput), unresolvedBadge(tab)),
     el("div", { class: "url-actions" }, saveBtn, copyCurlBtn, curlBtn, sendBtn),
   );
   return bar;
+}
+
+/** 把地址拆成普通文本与变量片段，变量片段单独上色。 */
+function urlTokens(text: string): Node[] {
+  const out: Node[] = [];
+  const re = /\{\{\s*([^{}]+?)\s*\}\}/g;
+  const scope = storeScope();
+  let last = 0;
+  for (const m of text.matchAll(re)) {
+    const at = m.index ?? 0;
+    if (at > last) out.push(document.createTextNode(text.slice(last, at)));
+    const name = m[1] ?? "";
+    const value = lookupVar(name, scope);
+    out.push(
+      el("span", {
+        class: `url-var${value === undefined ? " missing" : ""}`,
+        text: m[0],
+      }),
+    );
+    last = at + m[0].length;
+  }
+  if (last < text.length) out.push(document.createTextNode(text.slice(last)));
+  return out;
+}
+
+/** 地址栏悬停提示：完整地址 + 每个变量的解析值。 */
+function urlTitle(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return "输入请求地址，支持 {{变量}} 与直接粘贴 cURL";
+  const lines = [`完整地址：${trimmed}`];
+  const scope = storeScope();
+  const names = [...new Set([...trimmed.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)].map((m) => m[1] ?? ""))];
+  for (const name of names) {
+    const value = lookupVar(name, scope);
+    lines.push(value === undefined ? `{{${name}}} = 未定义` : `{{${name}}} = ${value}`);
+  }
+  return lines.join("\n");
 }
 
 function setUrlInvalid(input: HTMLInputElement, invalid: boolean): void {
@@ -260,15 +323,15 @@ function paramsPane(tab: Tab): HTMLElement {
     emptyHint: "暂无查询参数",
   });
   const preview = el("div", { class: "pane-preview" });
-  const url = tab.request.url ? buildPreview(tab) : "";
+  const url = tab.request.url ? ensureScheme(buildPreview(tab)) : "";
   preview.append(el("span", { class: "pane-preview-label", text: "实际地址" }));
-  preview.append(el("code", { text: url || "（尚未填写地址）" }));
+  preview.append(el("code", { class: "pane-preview-url", text: url || "（尚未填写地址）" }));
   fill(host, hint, table, preview);
   return host;
 }
 
 function buildPreview(tab: Tab): string {
-  const base = interpolate(tab.request.url, storeScope()).text;
+  const base = interpolate(stripSchemeBeforeVar(tab.request.url), storeScope()).text;
   const pairs = tab.request.params
     .filter((p) => p.enabled && p.key.trim())
     .map(

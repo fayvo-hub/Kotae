@@ -23,11 +23,13 @@ func TestBoot(t *testing.T) {
 	if n := h.count(t, ".tree-row"); n < 3 {
 		t.Fatalf("侧边栏只有 %d 行，固定数据没加载", n)
 	}
-	var envCount int
-	h.eval(t, `document.querySelectorAll('.env-select option').length`, &envCount)
-	if envCount < 1 {
+	h.click(t, ".env-pill-btn")
+	h.wait(t, "环境下拉展开", `!!document.querySelector('.env-menu')`)
+	if n := h.count(t, ".env-menu-item[role=option]"); n < 1 {
 		t.Fatalf("环境下拉里没有环境")
 	}
+	h.click(t, ".env-pill-btn")
+	h.wait(t, "环境下拉收起", `!document.querySelector('.env-menu')`)
 	// 状态栏显示环境名与统计。
 	if status := h.text(t, ".status-left"); !strings.Contains(status, "固定环境") {
 		t.Fatalf("状态栏没有显示当前环境：%q", status)

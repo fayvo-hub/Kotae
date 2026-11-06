@@ -400,11 +400,15 @@ func (hb *harness) send(t *testing.T) {
 	for {
 		sending := strings.Contains(hb.text(t, ".send-btn"), "取消")
 		after := hb.text(t, ".status-bar")
-		if !sending && after != "" && (after != before || time.Since(start) > 1200*time.Millisecond) {
+		if !sending && (after != before || time.Since(start) > 1200*time.Millisecond) {
 			return
 		}
 		if time.Since(start) > 25*time.Second {
-			t.Fatalf("等请求结束超时\n应用日志：\n%s", hb.appLog())
+			var url, toasts, scene string
+			hb.eval(t, `(document.querySelector('.url-input') || {}).value || ''`, &url)
+			hb.eval(t, `[...document.querySelectorAll('.toast')].map(n => n.textContent).join(' | ')`, &toasts)
+			hb.eval(t, `JSON.stringify({body: document.body.innerHTML.length, btn: (document.querySelector('.send-btn')||{}).textContent || '', errs: window.__zz || []})`, &scene)
+			t.Fatalf("等请求结束超时\n地址：%s\n状态栏：%s\n提示：%s\n现场：%s\n应用日志：\n%s", url, after, toasts, scene, hb.appLog())
 		}
 		time.Sleep(40 * time.Millisecond)
 	}

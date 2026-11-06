@@ -43,6 +43,9 @@ func TestPackagedBuildLoadsEmbeddedFrontend(t *testing.T) {
 	app := exec.Command(exe)
 	app.Env = append(os.Environ(),
 		"MYGO_AUTOMATION="+sock,
+		// 与日常开发测试同一套隔离：改名 + 独立数据目录，不然会和
+		// 本机正在运行的正式版撞单实例锁，第二个实例会把参数转交过去然后退出。
+		"MYGO_API_E2E=1",
 		"MYGO_API_USER_DATA="+filepath.Join(t.TempDir(), "userdata"),
 		"NO_COLOR=1",
 	)

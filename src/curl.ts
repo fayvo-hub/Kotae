@@ -5,7 +5,7 @@
 
 import type { ApiRequest, FormField, HttpMethod, KV, RequestOptions } from "./types";
 import { METHODS } from "./types";
-import { splitURL, uid } from "./util";
+import { splitURL, stripSchemeBeforeVar, uid } from "./util";
 
 export class CurlError extends Error {
   /** 出错位置在原始文本中的行号（从 1 开始）。 */
@@ -652,7 +652,8 @@ function shellQuote(value: string): string {
 
 /** 把查询参数拼回完整 URL。 */
 export function buildURL(request: ApiRequest, resolve: (t: string) => string): string {
-  const base = resolve(request.url).trim();
+  // 变量外面写的协议先摘掉，协议交给变量值（发送与预览都走这里）。
+  const base = resolve(stripSchemeBeforeVar(request.url)).trim();
   const pairs = request.params
     .filter((p) => p.enabled && p.key.trim() !== "")
     .map((p) => `${encodeURIComponent(resolve(p.key))}=${encodeURIComponent(resolve(p.value))}`);

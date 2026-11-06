@@ -28,6 +28,7 @@ import {
   closeTab,
   copyText,
   createCollection,
+  createEnv,
   currentCurl,
   emit,
   errText,
@@ -299,34 +300,130 @@ function render(): void {
   restoreFocus(focus);
 }
 
+/** 顶栏环境下拉是否展开（只影响外观，不进存储）。 */
+let envMenuOpen = false;
+
+function closeEnvMenu(): void {
+  if (!envMenuOpen) return;
+  envMenuOpen = false;
+  renderEnv();
+}
+
 function renderEnv(): void {
   const active = state.envs.find((e) => e.id === state.activeEnvId);
   const name = active?.name ?? "无环境";
   document.documentElement.dataset.envName = name;
+  const countOf = (env: (typeof state.envs)[number]): number =>
+    env.vars.filter((v) => v.enabled && v.key).length;
+  const count = active ? countOf(active) : 0;
 
-  const select = el("select", {
-    class: "env-select",
-    attr: { "aria-label": "当前环境" },
+  const trigger = el("button", {
+    class: "env-pill-btn",
+    attr: {
+      type: "button",
+      "aria-haspopup": "listbox",
+      "aria-expanded": envMenuOpen ? "true" : "false",
+      title: "切换环境（Ctrl+E 编辑变量）",
+    },
     on: {
-      change: () => {
-        setEnv(select.value);
-        toast(`已切换到环境「${select.selectedOptions[0]?.textContent ?? ""}」`);
+      click: () => {
+        envMenuOpen = !envMenuOpen;
+        renderEnv();
       },
     },
   });
-  for (const env of state.envs) {
-    select.append(el("option", { attr: { value: env.id }, text: env.name }));
-  }
-  if (active) select.value = active.id;
+  trigger.append(
+    icon("globe"),
+    el("span", { class: "env-pill-name", text: name }),
+    el("span", { class: "env-count-badge", text: String(count) }),
+    icon("chevronDown", "env-caret"),
+  );
 
-  const count = active ? active.vars.filter((v) => v.enabled && v.key).length : 0;
-  const wrap = el("div", { class: "env-pill", attr: { title: "当前环境变量（Ctrl+E 编辑）" } });
-  wrap.append(icon("globe"), select, el("span", { class: "env-count-badge", text: String(count) }));
-  wrap.addEventListener("click", (ev) => {
-    if ((ev.target as HTMLElement).tagName === "SELECT") return;
-    toggleUI("envOpen", true);
+  const edit = el("button", {
+    class: "env-pill-edit",
+    attr: { type: "button", title: "编辑环境变量（Ctrl+E）", "aria-label": "编辑环境变量" },
+    on: {
+      click: () => {
+        envMenuOpen = false;
+        toggleUI("envOpen", true);
+      },
+    },
   });
+  edit.append(icon("sliders"));
+
+  const wrap = el("div", { class: `env-pill${envMenuOpen ? " open" : ""}` });
+  wrap.append(trigger, el("span", { class: "env-pill-sep" }), edit);
+  if (envMenuOpen) wrap.append(envMenu(active?.id, countOf));
   fill(envHost, wrap);
+}
+
+/** 环境下拉面板：切换 + 新建 + 进入管理。 */
+function envMenu(
+  activeId: string | undefined,
+  countOf: (env: (typeof state.envs)[number]) => number,
+): HTMLElement {
+  const menu = el("div", { class: "env-menu", attr: { role: "listbox", "aria-label": "切换环境" } });
+  menu.append(el("div", { class: "env-menu-label", text: "切换环境" }));
+
+  for (const env of state.envs) {
+    const isActive = env.id === activeId;
+    const item = el("button", {
+      class: `env-menu-item${isActive ? " active" : ""}`,
+      attr: { type: "button", role: "option", "aria-selected": isActive ? "true" : "false" },
+      on: {
+        click: () => {
+          envMenuOpen = false;
+          if (!isActive) {
+            setEnv(env.id);
+            toast(`已切换到环境「${env.name}」`);
+          } else {
+            renderEnv();
+          }
+        },
+      },
+    });
+    item.append(
+      el("span", { class: "env-menu-dot" }),
+      el("span", { class: "env-menu-name", text: env.name }),
+      el("span", { class: "env-menu-count", text: String(countOf(env)) }),
+    );
+    if (isActive) item.append(icon("check", "env-menu-check"));
+    menu.append(item);
+  }
+
+  menu.append(el("div", { class: "env-menu-sep" }));
+
+  const create = el("button", {
+    class: "env-menu-item action",
+    attr: { type: "button" },
+    on: {
+      click: () => {
+        envMenuOpen = false;
+        createEnv(`环境 ${state.envs.length + 1}`);
+        toggleUI("envOpen", true);
+      },
+    },
+  });
+  create.append(icon("plus"), el("span", { class: "env-menu-name", text: "新建环境" }));
+
+  const manage = el("button", {
+    class: "env-menu-item action",
+    attr: { type: "button" },
+    on: {
+      click: () => {
+        envMenuOpen = false;
+        toggleUI("envOpen", true);
+      },
+    },
+  });
+  manage.append(
+    icon("sliders"),
+    el("span", { class: "env-menu-name", text: "管理环境变量…" }),
+    el("kbd", { class: "env-menu-key", text: "Ctrl+E" }),
+  );
+
+  menu.append(create, manage);
+  return menu;
 }
 
 function renderSidebar(): void {
@@ -712,6 +809,14 @@ function bindEvents(): void {
   window.addEventListener("mygo:toggle-sidebar", () => toggleSidebar());
 
   window.addEventListener("keydown", onKeydown);
+
+  // 环境下拉点外面就收起来（和系统菜单一致的手感）。
+  document.addEventListener("click", (ev) => {
+    if (!envMenuOpen) return;
+    const target = ev.target as Element | null;
+    if (target?.closest(".env-pill")) return;
+    closeEnvMenu();
+  });
 }
 
 function onKeydown(ev: KeyboardEvent): void {
@@ -730,6 +835,10 @@ function onKeydown(ev: KeyboardEvent): void {
   }
   if (!mod) {
     if (ev.key === "Escape") {
+      if (envMenuOpen) {
+        closeEnvMenu();
+        return;
+      }
       if (overlaySignature() !== "on|false|false|false|false|false") {
         closeAll();
         // 首次引导页在 Esc 下也作为「关闭」处理。
