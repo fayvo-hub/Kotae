@@ -125,3 +125,49 @@ func TestURLSchemeFix(t *testing.T) {
 		t.Fatalf("带变量的地址发送失败：%q\n现场：%s\n应用日志：\n%s", got, scene, h.appLog())
 	}
 }
+
+// 表单（可含文件）的行尾同时有「改为文件字段」按钮和删除按钮，两者不得重叠，
+// 值输入框也不能被按钮盖住。
+func TestFormFileRowLayout(t *testing.T) {
+	h.clearOverlays(t)
+	newTab(t)
+
+	h.clickText(t, ".subtab", "请求体")
+	h.wait(t, "请求体面板出现", `!!document.querySelector('.segmented')`)
+	h.clickText(t, ".segmented-item", "表单（可含文件）")
+	h.wait(t, "表单表格渲染", `!!document.querySelector('.kv-foot')`)
+	h.clickText(t, ".kv-foot .link-btn", "添加一行")
+	h.wait(t, "出现一行表单字段", `document.querySelectorAll('.kv-row').length > 0`)
+
+	var report string
+	h.eval(t, `(() => {
+		const row = document.querySelector('.kv-row');
+		const rect = (el) => (el ? el.getBoundingClientRect() : null);
+		const value = rect(row.querySelector('.kv-value'));
+		const del = rect(row.querySelector('.kv-del'));
+		const extra = rect(row.querySelector('.file-btn, .icon-btn:not(.kv-del)'));
+		const overlap = (a, b) => a && b && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+		return JSON.stringify({
+			valueRight: Math.round(value.right),
+			delLeft: Math.round(del.left),
+			delPosition: getComputedStyle(row.querySelector('.kv-del')).position,
+			valueCoversDel: value.right > del.left + 0.5,
+			extraOverlapsDel: overlap(extra, del),
+			extra: extra ? Math.round(extra.width) : 0,
+		});
+	})()`, &report)
+
+	if strings.Contains(report, `"delPosition":"absolute"`) {
+		t.Fatalf("有额外控件的行里删除按钮仍在绝对定位：%s", report)
+	}
+	if strings.Contains(report, `"valueCoversDel":true`) {
+		t.Fatalf("值输入框压到了删除按钮：%s", report)
+	}
+	if strings.Contains(report, `"extraOverlapsDel":true`) {
+		t.Fatalf("「改为文件字段」按钮与删除按钮重叠：%s", report)
+	}
+	if strings.Contains(report, `"extra":0`) {
+		t.Fatalf("这一行没有渲染额外控件，用例没测到目标：%s", report)
+	}
+	h.shot(t, "33-form-file-row")
+}

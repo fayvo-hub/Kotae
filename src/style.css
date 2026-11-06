@@ -2170,6 +2170,23 @@ textarea.kv-value {
   color: var(--bad);
 }
 
+/* 行尾除删除按钮外还有「改为文件字段」「选择文件」这类控件时，删除按钮回到文档流，
+   不让绝对定位的按钮压住它们（表单可含文件模式）。 */
+.kv-row:has(> .file-btn, > .icon-btn:not(.kv-del)) > .icon-btn.kv-del {
+  position: static;
+  align-self: center;
+}
+
+/* 同上：值框右缘不再需要为浮动删除按钮留空。 */
+.kv-row:has(> .file-btn, > .icon-btn:not(.kv-del)) > .kv-value {
+  padding-right: 8px;
+}
+
+/* 普通行里的「改为文件字段」图标按钮与输入框垂直对齐（行内是 flex-start）。 */
+.kv-row > .icon-btn:not(.kv-del) {
+  align-self: center;
+}
+
 .kv-empty {
   padding: 16px 14px;
   color: var(--text-3);
