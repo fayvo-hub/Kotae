@@ -3,7 +3,7 @@
 import { el, fill, icon, iconButton } from "./dom";
 import { highlightMarkup, highlightText, jsonTree, looksJson, setTreeExpanded } from "./jsonview";
 import { System } from "../mygo";
-import type { ResponseRecord, Tab } from "../types";
+import type { ResponseRecord, SentRecord, Tab } from "../types";
 import { copyText, toast } from "../store";
 import { formatBytes, formatDuration } from "../util";
 import { prettyJSON } from "../util";
@@ -130,9 +130,10 @@ function resTabs(tab: Tab, res: ResponseRecord): HTMLElement {
   const wrap = el("div", { class: "response-body" });
 
   const strip = el("div", { class: "subtabs response-subtabs" });
-  const tabs: { key: "body" | "headers"; label: string; count: number }[] = [
+  const tabs: { key: Tab["responseTab"]; label: string; count: number }[] = [
     { key: "body", label: "响应体", count: 0 },
     { key: "headers", label: "响应头", count: res.headers.length },
+    { key: "request", label: "请求", count: tab.sent ? tab.sent.headers.length : 0 },
   ];
   for (const t of tabs) {
     const active = tab.responseTab === t.key;
@@ -158,8 +159,164 @@ function resTabs(tab: Tab, res: ResponseRecord): HTMLElement {
   strip.append(el("span", { class: "spacer" }), tools);
 
   wrap.append(strip);
-  wrap.append(tab.responseTab === "body" ? bodyView(tab, res) : headersView(tab, res));
+  if (tab.responseTab === "body") wrap.append(bodyView(tab, res));
+  else if (tab.responseTab === "headers") wrap.append(headersView(tab, res));
+  else wrap.append(requestView(tab));
   return wrap;
+}
+
+/** 「请求」页签：实际发出去的方法、地址、头与体，出问题时先看这里。 */
+function requestView(tab: Tab): HTMLElement {
+  const host = el("div", { class: "body-view headers-view" });
+  const sent = tab.sent;
+  if (!sent) {
+    fill(
+      host,
+      el(
+        "div",
+        { class: "response-empty" },
+        icon("send"),
+        el("p", { text: "还没有发送过请求" }),
+        el("p", { class: "muted", text: "发送一次后，这里会显示实际发出的方法、地址、请求头与请求体。" }),
+      ),
+    );
+    return host;
+  }
+
+  const head = el("div", { class: "sent-head" });
+  head.append(el("span", { class: `method-tag tone-${sent.method.toLowerCase()}`, text: sent.method }));
+  head.append(el("span", { class: "sent-url", attr: { title: sent.url }, text: sent.url }));
+  head.append(
+    el("span", { class: "muted small", text: sentAt(sent.at) }),
+    el("button", {
+      class: "link-btn",
+      attr: { type: "button" },
+      text: "复制地址",
+      on: { click: () => void copyText(sent.url, "已复制实际地址") },
+    }),
+  );
+  host.append(head);
+  host.append(sentHeaders(sent));
+  host.append(sentBody(sent));
+  host.append(sentOptions(sent));
+  return host;
+}
+
+function sentAt(at: number): string {
+  const d = new Date(at);
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} 发出`;
+}
+
+function sentSection(text: string, extra: HTMLElement[] = []): HTMLElement {
+  const row = el("div", { class: "sent-section" });
+  row.append(el("span", { text }));
+  row.append(el("span", { class: "spacer" }));
+  for (const node of extra) row.append(node);
+  return row;
+}
+
+function sentRows(rows: [string, string][], copyHint?: (key: string, value: string) => string): HTMLElement {
+  const list = el("div", { class: "headers-list" });
+  for (const [key, value] of rows) {
+    const row = el("div", { class: "header-row" });
+    row.append(el("span", { class: "header-key", text: key }));
+    row.append(el("span", { class: "header-value", text: value }));
+    if (copyHint) {
+      const line = copyHint(key, value);
+      row.append(
+        iconButton("copy", "复制这一条", () => {
+          void copyText(line);
+        }),
+      );
+    }
+    list.append(row);
+  }
+  return list;
+}
+
+function sentHeaders(sent: SentRecord): HTMLElement {
+  const box = el("div");
+  const copyAll = el("button", {
+    class: "link-btn",
+    attr: { type: "button" },
+    text: "复制全部",
+    on: {
+      click: () => {
+        void copyText(sent.headers.map(([k, v]) => `${k}: ${v}`).join("\n"), "已复制请求头");
+      },
+    },
+  });
+  box.append(sentSection(`请求头 ${sent.headers.length}`, [copyAll]));
+  if (sent.headers.length === 0) {
+    box.append(el("p", { class: "muted small", text: "本次请求没有设置任何请求头。" }));
+    return box;
+  }
+  box.append(sentRows(sent.headers, (k, v) => `${k}: ${v}`));
+  return box;
+}
+
+function sentBody(sent: SentRecord): HTMLElement {
+  const box = el("div");
+  const body = sent.body;
+  if (body.kind === "none") {
+    box.append(sentSection("请求体"));
+    box.append(el("p", { class: "muted small", text: "本次请求没有请求体（GET/HEAD，或请求体形态选了「无」）。" }));
+    return box;
+  }
+
+  if (body.kind === "text") {
+    const label = `请求体 · ${body.contentType || "未设置 Content-Type"} · ${body.chars} 字符${
+      body.truncated ? "（已截断）" : ""
+    }`;
+    const copy = el("button", {
+      class: "link-btn",
+      attr: { type: "button" },
+      text: "复制",
+      on: { click: () => void copyText(body.text, "已复制请求体") },
+    });
+    box.append(sentSection(label, [copy]));
+    box.append(el("pre", { class: "sent-body", text: body.text }));
+    if (body.truncated) {
+      box.append(el("p", { class: "muted small", text: "请求体超过 64 KB，这里只保留前 64 KB。" }));
+    }
+    return box;
+  }
+
+  const rows: [string, string][] = [...body.fields];
+  for (const f of body.files) rows.push([f.key, `${f.name} · ${formatBytes(f.size)}`]);
+  const label = `请求体 · ${body.contentType === "multipart/form-data" ? "multipart/form-data（boundary 由发送时生成）" : body.contentType} · ${rows.length} 项`;
+  box.append(sentSection(label));
+  if (rows.length === 0) {
+    box.append(el("p", { class: "muted small", text: "请求体里没有任何启用的字段。" }));
+    return box;
+  }
+  box.append(sentRows(rows));
+  return box;
+}
+
+function sentOptions(sent: SentRecord): HTMLElement {
+  const redirects: Record<SentRecord["redirect"], string> = {
+    follow: "自动跟随（最多 20 次）",
+    manual: "不跟随（拿到 3xx 与 Location）",
+    error: "遇到重定向即报错",
+  };
+  const auths: Record<SentRecord["authType"], string> = {
+    none: "无认证",
+    bearer: "Bearer Token（写入 Authorization）",
+    basic: "Basic 用户名密码（写入 Authorization）",
+    apikey: "API Key（头部或查询串）",
+  };
+  const rows: [string, string][] = [
+    ["超时", sent.timeoutMs > 0 ? `${sent.timeoutMs} ms` : "不超时"],
+    ["重定向", redirects[sent.redirect]],
+    ["Cookie", sent.keepCookies ? "保留（多次请求共享登录态）" : "不保留"],
+    ["认证", auths[sent.authType]],
+  ];
+  const box = el("div");
+  box.append(sentSection("本次选项"));
+  box.append(sentRows(rows));
+  return box;
 }
 
 function bodyTools(tab: Tab, res: ResponseRecord): HTMLElement {

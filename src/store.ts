@@ -14,6 +14,11 @@ import type {
   Tab,
   ThemeMode,
   TreeNode,
+  SentBody,
+  SentFile,
+  SentRecord,
+  RedirectMode,
+  AuthType,
 } from "./types";
 import { init as openStorage, load as readStorage, save as writeStorage } from "./db";
 import { buildURL, cloneRequest, emptyRequest, toCurl } from "./curl";
@@ -490,6 +495,17 @@ export async function send(): Promise<void> {
 
   tab.sending = true;
   tab.response = undefined;
+  // 真正发出去的东西先记一份：排查时看的就是这份快照，不是编辑区里可能又改过的状态。
+  tab.sent = buildSentRecord({
+    method: methodUpper,
+    url,
+    headers,
+    body,
+    timeoutMs,
+    redirect: tab.request.options.redirect,
+    keepCookies: tab.request.options.keepCookies,
+    authType: auth.type,
+  });
   emit();
 
   const started = performance.now();
@@ -525,6 +541,69 @@ export async function send(): Promise<void> {
     controllers.delete(tab.id);
     emit();
   }
+}
+
+/** 文本请求体快照上限：够看清问题，又不会把大文本整份留在内存里。 */
+const SENT_TEXT_LIMIT = 64 * 1024;
+
+interface SentInput {
+  method: string;
+  url: string;
+  headers: Headers;
+  body: BodyInit | undefined;
+  timeoutMs: number;
+  redirect: RedirectMode;
+  keepCookies: boolean;
+  authType: AuthType;
+}
+
+function buildSentRecord(input: SentInput): SentRecord {
+  const headers: [string, string][] = [];
+  input.headers.forEach((value, key) => headers.push([key, value]));
+  headers.sort((a, b) => a[0].localeCompare(b[0]));
+  return {
+    method: input.method,
+    url: input.url,
+    headers,
+    body: sentBodyOf(input.body, input.headers),
+    timeoutMs: input.timeoutMs,
+    redirect: input.redirect,
+    keepCookies: input.keepCookies,
+    authType: input.authType,
+    at: Date.now(),
+  };
+}
+
+function sentBodyOf(body: BodyInit | undefined, headers: Headers): SentBody {
+  if (body === undefined) return { kind: "none" };
+  if (body instanceof FormData) {
+    const fields: [string, string][] = [];
+    const files: SentFile[] = [];
+    body.forEach((value, key) => {
+      if (typeof value === "string") fields.push([key, value]);
+      else files.push({ key, name: value.name || "file", size: value.size });
+    });
+    return { kind: "form", contentType: "multipart/form-data", fields, files };
+  }
+  if (body instanceof URLSearchParams) {
+    return {
+      kind: "form",
+      contentType: "application/x-www-form-urlencoded",
+      fields: Array.from(body.entries()),
+      files: [],
+    };
+  }
+  if (typeof body === "string") {
+    const truncated = body.length > SENT_TEXT_LIMIT;
+    return {
+      kind: "text",
+      contentType: headers.get("content-type") ?? "",
+      text: truncated ? body.slice(0, SENT_TEXT_LIMIT) : body,
+      chars: body.length,
+      truncated,
+    };
+  }
+  return { kind: "none" };
 }
 
 async function fetchFrom(input: string, init: RequestInit): Promise<Response> {

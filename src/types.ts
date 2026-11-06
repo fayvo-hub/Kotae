@@ -129,6 +129,36 @@ export interface ResponseRecord {
   errorKind?: "network" | "timeout" | "aborted" | "invalid";
 }
 
+/** multipart 里的一个文件：只记名字与大小，不重复存内容。 */
+export interface SentFile {
+  key: string;
+  name: string;
+  size: number;
+}
+
+/** 实际发出的请求体形态。 */
+export type SentBody =
+  | { kind: "none" }
+  | { kind: "text"; contentType: string; text: string; chars: number; truncated: boolean }
+  | { kind: "form"; contentType: string; fields: [string, string][]; files: SentFile[] };
+
+/**
+ * 最近一次实际发出的请求快照。变量已插值、认证头已合并、自动 Content-Type 已补上，
+ * 就是真正交给 fetch 的内容，出问题时直接看它。只存在内存，不写进数据库。
+ */
+export interface SentRecord {
+  method: string;
+  url: string;
+  headers: [string, string][];
+  body: SentBody;
+  timeoutMs: number;
+  redirect: RedirectMode;
+  keepCookies: boolean;
+  authType: AuthType;
+  /** 发送时刻（毫秒时间戳）。 */
+  at: number;
+}
+
 export interface Tab {
   id: string;
   name: string;
@@ -138,9 +168,11 @@ export interface Tab {
   /** 来源于集合中的某个请求（用于 Ctrl+S 直接保存回原位置）。 */
   origin?: { collectionId: string; nodeId: string };
   response?: ResponseRecord;
+  /** 最近一次实际发出的请求快照（排查用，不落盘）。 */
+  sent?: SentRecord;
   sending: boolean;
   /** 响应区分栏当前展示的页签。 */
-  responseTab: "body" | "headers";
+  responseTab: "body" | "headers" | "request";
   /** 响应体展示方式。 */
   bodyView: "pretty" | "raw";
   /** 响应体搜索词。 */
@@ -187,5 +219,5 @@ export interface PersistedWorkspace {
 
 export type PersistedTab = Omit<
   Tab,
-  "response" | "sending" | "search" | "requestTab" | "bodyView" | "responseTab"
+  "response" | "sent" | "sending" | "search" | "requestTab" | "bodyView" | "responseTab"
 >;
