@@ -2,11 +2,8 @@ package main
 
 import (
 	_ "embed"
-	"encoding/json"
 	"log"
 	"net/url"
-	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -37,17 +34,18 @@ type DesktopCommand struct {
 // 对应的类型与订阅入口。
 var desktopEvent = mygo.NewEvent[DesktopCommand]("desktop:command")
 
-const prefFileName = "desktop.json"
-
-// desktopPrefs 是只属于桌面外壳的偏好，与页面保存的 workspace.json 分开：
-// 即使页面数据被重置，窗口行为也保持用户的选择。
-type desktopPrefs struct {
+// DesktopPrefs 是桌面外壳的偏好，和业务数据一起存在 SQLite 的 settings 表里：
+// Go 侧只保留内存里的当前值，真正的持久化由页面写库完成。
+type DesktopPrefs struct {
 	CloseToTray bool `json:"closeToTray"`
 }
 
+// desktopPrefsEvent 把用户在图钉菜单里改过的偏好通知给页面，由页面写库。
+var desktopPrefsEvent = mygo.NewEvent[DesktopPrefs]("desktop:prefs")
+
 var (
 	deskMu         sync.Mutex
-	prefs          = desktopPrefs{CloseToTray: true}
+	prefs          = DesktopPrefs{CloseToTray: true}
 	mainWin        *mygo.Window
 	tray           *mygo.Tray
 	trayReady      bool
@@ -133,59 +131,36 @@ func shouldHideOnClose() bool {
 	return !quitting && trayReady && prefs.CloseToTray
 }
 
-func prefsPath() string {
-	dir, err := mygo.App.Path(mygo.PathUserData)
-	if err != nil {
-		return prefFileName
-	}
-	return filepath.Join(dir, prefFileName)
-}
-
-// loadPrefs 读取桌面偏好；文件不存在或损坏时沿用默认值。
-func loadPrefs() {
-	b, err := os.ReadFile(prefsPath())
-	if err != nil {
-		return
-	}
-	var p desktopPrefs
-	if err := json.Unmarshal(b, &p); err != nil {
-		log.Printf("桌面偏好损坏，已忽略：%v", err)
-		return
-	}
-	deskMu.Lock()
-	prefs = p
-	deskMu.Unlock()
-}
-
-func savePrefs() {
-	deskMu.Lock()
-	snapshot := prefs
-	deskMu.Unlock()
-	b, err := json.MarshalIndent(snapshot, "", "  ")
-	if err != nil {
-		return
-	}
-	path := prefsPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		log.Printf("保存桌面偏好失败：%v", err)
-		return
-	}
-	if err := os.WriteFile(path, b, 0o644); err != nil {
-		log.Printf("保存桌面偏好失败：%v", err)
-	}
-}
-
 // setCloseToTray 切换「关闭窗口时最小化到托盘」。窗口的关闭处理现读这个值，
-// 所以不需要重新注册监听；勾选项同时同步到托盘的 checkbox。
+// 所以不需要重新注册监听；勾选项同时同步到托盘的 checkbox，并通知页面写库。
 func setCloseToTray(on bool) {
 	deskMu.Lock()
 	prefs.CloseToTray = on
 	item := trayItem
+	ready := desktopReady
+	win := mainWin
 	deskMu.Unlock()
-	savePrefs()
 	if item != nil {
 		item.SetChecked(on)
 	}
+	if ready && win != nil {
+		if err := desktopPrefsEvent.Emit(win, DesktopPrefs{CloseToTray: on}); err != nil {
+			log.Printf("同步桌面偏好失败：%v", err)
+		}
+	}
+}
+
+// ApplyDesktopPrefs 由页面在启动时调用，把 SQLite 里存的偏好交给桌面外壳。
+// 不写库、也不再回发事件，避免启动时自激。
+func (s *System) ApplyDesktopPrefs(closeToTray bool) error {
+	deskMu.Lock()
+	prefs.CloseToTray = closeToTray
+	item := trayItem
+	deskMu.Unlock()
+	if item != nil {
+		item.SetChecked(closeToTray)
+	}
+	return nil
 }
 
 // quitApp 真正退出应用，绕过「关闭到托盘」的拦截。
@@ -398,7 +373,6 @@ func markDesktopReady() {
 // setupDesktop 装配桌面集成：菜单、托盘、关闭行为、深链与单实例回调。
 // 在应用就绪后调用一次。
 func setupDesktop() {
-	loadPrefs()
 	mygo.App.SetMenu(buildAppMenu())
 	setupTray()
 }

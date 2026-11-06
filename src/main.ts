@@ -41,6 +41,7 @@ import {
   setActiveTab,
   setEnv,
   setPendingCurl,
+  setCloseToTray,
   setTheme,
   state,
   subscribe,
@@ -577,7 +578,7 @@ function welcomeCard(): HTMLElement {
   foot.append(
     el("span", {
       class: "muted small",
-      text: "数据保存在本机 userData 目录的 workspace.json，不会上传到任何服务器。",
+      text: "数据保存在本机 userData 目录的 workspace.db（SQLite），不会上传到任何服务器。",
     }),
     el("button", {
       class: "btn primary",
@@ -845,6 +846,8 @@ function bindDesktop(): void {
         break;
     }
   });
+  // 用户在托盘菜单里改过「关闭到托盘」后，Go 侧把新值发过来，由页面写库。
+  events.desktopPrefs.on((prefs) => setCloseToTray(prefs.closeToTray));
   // 告诉 Go 侧页面已就绪：启动阶段积压的菜单 / 深链指令现在可以发了。
   void System.desktopReady().catch(() => {});
 }

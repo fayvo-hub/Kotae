@@ -1,4 +1,4 @@
-// 应用的数据模型。所有对象都是纯 JSON（可被 System.saveState 直接序列化），
+// 应用的数据模型。所有对象都是纯 JSON（可被 JSON.stringify 直接序列化），
 // 只有 Tab 里的运行时字段（sending / 响应）在持久化前会被剔除。
 
 export type HttpMethod =
@@ -181,6 +181,8 @@ export interface PersistedWorkspace {
   responseHeight: number;
   sidebarTab: "collections" | "history";
   onboardingDone: boolean;
+  /** 关闭窗口时最小化到托盘。桌面外壳启动时读它，用户在托盘菜单里改它。 */
+  closeToTray: boolean;
 }
 
 export type PersistedTab = Omit<

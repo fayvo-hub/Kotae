@@ -17,15 +17,17 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/netproxy"
 	"github.com/egoist/mygo/plugins/fetch"
+	"github.com/egoist/mygo/plugins/sqlite"
 	"github.com/egoist/mygo/transfer"
 )
 
 // maxFileSize 是本地读文件（multipart 文件字段、导入备份）的上限。
 const maxFileSize = 32 << 20
 
-// stateFileName 是工作区状态（集合、历史、环境、打开的标签）的落盘文件名，
-// 位于系统给本应用分配的 userData 目录，随应用数据一起卸载。
-const stateFileName = "workspace.json"
+// legacyStateFileName 是早期版本用 JSON 文件保存工作区的文件名。现在的数据都
+// 存在 userData 目录下的 SQLite 库里，这个文件只在启动时被读一次并改名归档，
+// 之后不再读写。
+const legacyStateFileName = "workspace.json"
 
 // toggleJar 是一个可以整体开关的 Cookie 罐：界面上关闭「保持 Cookie」时，
 // 请求不再携带、也不再记录 Cookie；关闭时清空已保存的 Cookie。
@@ -212,38 +214,27 @@ func readFile(path string) (OpenedFile, error) {
 	return OpenedFile{Path: path, Name: filepath.Base(path), Content: base64.StdEncoding.EncodeToString(b)}, nil
 }
 
-// LoadState 读取上次的工作区状态；文件不存在时返回空字符串（首次启动）。
-func (s *System) LoadState() string {
-	b, err := os.ReadFile(s.statePath())
-	if err != nil {
-		return ""
-	}
-	return string(b)
-}
-
-// SaveState 覆盖写入工作区状态。先写临时文件再改名，避免写到一半断电
-// 把已有数据弄坏。
-func (s *System) SaveState(content string) error {
+// TakeLegacyState 返回早期 JSON 工作区文件的内容，并把文件改名成
+// workspace.json.bak：内容由页面导入 SQLite，导入成功前不会丢掉原始数据，
+// 导入后也不会被再次读取。
+func (s *System) TakeLegacyState() (string, error) {
 	dir, err := mygo.App.Path(mygo.PathUserData)
 	if err != nil {
-		return err
+		return "", err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	tmp := filepath.Join(dir, stateFileName+".tmp")
-	if err := os.WriteFile(tmp, []byte(content), 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, filepath.Join(dir, stateFileName))
-}
-
-func (s *System) statePath() string {
-	dir, err := mygo.App.Path(mygo.PathUserData)
+	path := filepath.Join(dir, legacyStateFileName)
+	b, err := os.ReadFile(path)
 	if err != nil {
-		return stateFileName
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
 	}
-	return filepath.Join(dir, stateFileName)
+	if err := os.Rename(path, path+".bak"); err != nil {
+		// 改名失败也把内容交出去：页面导入成功后不会再写这个文件。
+		log.Printf("归档旧的工作区文件失败：%v", err)
+	}
+	return string(b), nil
 }
 
 // OpenDataDir 用系统文件管理器打开数据目录。
@@ -316,6 +307,8 @@ func main() {
 	client := &http.Client{Transport: netproxy.Transport(), Jar: jar}
 
 	mygo.Use(fetch.New(fetch.Options{Client: client}))
+	// 存储层是 SQLite：插件把预编译的 sqlite3 通过 purego 加载，不需要 cgo。
+	mygo.Use(sqlite.Plugin)
 	mygo.Bind(&System{jar: jar})
 
 	setupAppHooks()

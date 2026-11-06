@@ -1,5 +1,6 @@
 // 浮层：cURL 导入确认、保存请求、环境变量、设置、命令面板。
 
+import { databaseFile } from "../db";
 import { el, fill, icon, iconButton, icons } from "./dom";
 import { kvTable } from "./kvtable";
 import {
@@ -645,7 +646,13 @@ export function settingsDialog(): HTMLElement {
       el("span", { class: "info-key", text: "运行平台" }),
       el("span", { text: `${info.platform}/${info.arch}` }),
     );
-    fill(infoBox, versionLine, dirRow, platformRow);
+    // 存储层：整个工作区在一个 SQLite 文件里，路径就是数据目录下的这个文件名。
+    const dbRow = el("div", { class: "info-row" });
+    dbRow.append(
+      el("span", { class: "info-key", text: "数据库" }),
+      el("code", { class: "path", text: `${databaseFile()}（SQLite，WAL 模式）` }),
+    );
+    fill(infoBox, versionLine, dirRow, dbRow, platformRow);
   });
 
   const footer = el("div", { class: "dialog-foot" });

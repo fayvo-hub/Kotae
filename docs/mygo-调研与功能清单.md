@@ -444,8 +444,9 @@ cURL 解析是首版核心能力，实现归属为"需自研或引入开源库"�
 
 | 层 | 路径 | 内容 |
 | --- | --- | --- |
-| Go 桌面壳 | `main.go` | 窗口、Cookie 罐开关、剪贴板、文件选择/保存、工作区读写 `workspace.json`、系统通知、打开数据目录；`mygo.Use(fetch.New(...))` 挂 Go 侧 HTTP 客户端（跟随系统代理） |
+| Go 桌面壳 | `main.go` | 窗口、Cookie 罐开关、剪贴板、文件选择/保存、旧工作区迁移（`workspace.json` → `workspace.db`）、系统通知、打开数据目录；`mygo.Use(fetch.New(...))` 挂 Go 侧 HTTP 客户端（跟随系统代理）、`mygo.Use(sqlite.Plugin)` 挂 SQLite |
 | 请求/状态层 | `src/store.ts` | 标签页、集合树、历史、环境与全局变量、插值、发送与取消、持久化 |
+| 存储层 | `src/db.ts` | SQLite 建表、整库读回、按差异提交的写回（WAL + 事务）、旧 JSON 一次性迁移 |
 | cURL | `src/curl.ts` | 自研轻量解析器与 cURL 生成器（3.10 的方案一） |
 | 界面 | `src/main.ts`、`src/ui/*`、`src/style.css` | 外壳、请求/响应/侧边栏面板、浮层、命令面板、设计系统 |
 

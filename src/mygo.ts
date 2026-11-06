@@ -16,6 +16,14 @@ export interface DesktopCommand {
   text?: string;
 }
 
+/**
+ * DesktopPrefs 是桌面外壳的偏好，和业务数据一起存在 SQLite 的 settings 表里：
+ * Go 侧只保留内存里的当前值，真正的持久化由页面写库完成。
+ */
+export interface DesktopPrefs {
+  closeToTray: boolean;
+}
+
 /** Info 描述应用本身与运行环境。 */
 export interface Info {
   name: string;
@@ -47,6 +55,13 @@ export interface PickedFile {
  * Cookie 开关。全部是纯本地操作，不产生网络请求。
  */
 export const System = {
+  /**
+   * ApplyDesktopPrefs 由页面在启动时调用，把 SQLite 里存的偏好交给桌面外壳。
+   * 不写库、也不再回发事件，避免启动时自激。
+   */
+  applyDesktopPrefs(closeToTray: boolean): Promise<void> {
+    return call("System.ApplyDesktopPrefs", closeToTray);
+  },
   /** ClearCookies 清空已记录的 Cookie。 */
   clearCookies(): Promise<void> {
     return call("System.ClearCookies");
@@ -65,10 +80,6 @@ export const System = {
   /** Info 返回应用信息，供「关于」与设置面板展示。 */
   info(): Promise<Info> {
     return call("System.Info");
-  },
-  /** LoadState 读取上次的工作区状态；文件不存在时返回空字符串（首次启动）。 */
-  loadState(): Promise<string> {
-    return call("System.LoadState");
   },
   /** Notify 用系统通知提示请求完成（窗口不在前台时的长请求）。 */
   notify(title: string, body: string): Promise<void> {
@@ -91,13 +102,6 @@ export const System = {
     return call("System.PickFile", title);
   },
   /**
-   * SaveState 覆盖写入工作区状态。先写临时文件再改名，避免写到一半断电
-   * 把已有数据弄坏。
-   */
-  saveState(content: string): Promise<void> {
-    return call("System.SaveState", content);
-  },
-  /**
    * SaveText 弹出「另存为」对话框，把文本写入用户选择的位置，返回保存路径；
    * 用户取消时返回空字符串。
    */
@@ -107,6 +111,14 @@ export const System = {
   /** SetCookies 开关 Cookie 会话保持，关闭时清空已记录的 Cookie。 */
   setCookies(open: boolean): Promise<void> {
     return call("System.SetCookies", open);
+  },
+  /**
+   * TakeLegacyState 返回早期 JSON 工作区文件的内容，并把文件改名成
+   * workspace.json.bak：内容由页面导入 SQLite，导入成功前不会丢掉原始数据，
+   * 导入后也不会被再次读取。
+   */
+  takeLegacyState(): Promise<string> {
+    return call("System.TakeLegacyState");
   },
 } as const;
 
@@ -119,4 +131,6 @@ export const events = {
    * 对应的类型与订阅入口。
    */
   desktopCommand: event<DesktopCommand>("desktop:command"),
+  /** desktopPrefsEvent 把用户在图钉菜单里改过的偏好通知给页面，由页面写库。 */
+  desktopPrefs: event<DesktopPrefs>("desktop:prefs"),
 } as const;

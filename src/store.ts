@@ -1,6 +1,6 @@
 // 应用状态与所有写操作。界面只读 state、调用 action，然后由 subscribe 触发重绘。
 
-import { System } from "./mygo";
+import { System, events } from "./mygo";
 import type {
   ApiRequest,
   Collection,
@@ -15,6 +15,7 @@ import type {
   ThemeMode,
   TreeNode,
 } from "./types";
+import { init as openStorage, load as readStorage, save as writeStorage } from "./db";
 import { buildURL, cloneRequest, emptyRequest, toCurl } from "./curl";
 import { guessName, interpolate, splitURL, uid, type VarScope } from "./util";
 
@@ -38,6 +39,8 @@ export interface State {
   responseHeight: number;
   sidebarTab: "collections" | "history";
   onboardingDone: boolean;
+  /** 关闭窗口时最小化到托盘。由桌面外壳启动时读取，用户在托盘菜单里修改。 */
+  closeToTray: boolean;
   /** 侧边栏是否收起。 */
   sidebarCollapsed: boolean;
   /** 界面浮层状态，不持久化。 */
@@ -70,6 +73,7 @@ function blankState(): State {
     responseHeight: 340,
     sidebarTab: "collections",
     onboardingDone: false,
+    closeToTray: true,
     sidebarCollapsed: false,
     commandOpen: false,
     settingsOpen: false,
@@ -99,61 +103,68 @@ export function emit(): void {
   for (const fn of listeners) fn();
 }
 
-// ---- 持久化 ----
+// ---- 持久化（SQLite） ----
 
 let saveTimer: number | undefined;
 let saveWarned = false;
+/** 写入串行队列：上一次事务没结束时不并发开第二个。 */
+let queue: Promise<void> = Promise.resolve();
 
-/** 序列化当前工作区（剔除运行时字段）并写入 userData 目录。 */
+/** 让开运行时字段，得到要落库的工作区快照。 */
+function snapshot(): PersistedWorkspace {
+  return {
+    version: STORAGE_VERSION,
+    collections: state.collections,
+    history: state.history.slice(0, 200),
+    envs: state.envs,
+    activeEnvId: state.activeEnvId,
+    globals: state.globals,
+    tabs: state.tabs.map((t) => ({
+      id: t.id,
+      name: t.name,
+      request: t.request,
+      dirty: t.dirty,
+      origin: t.origin,
+    })),
+    activeTabId: state.activeTabId,
+    theme: state.theme,
+    sidebarWidth: state.sidebarWidth,
+    responseHeight: state.responseHeight,
+    sidebarTab: state.sidebarTab,
+    onboardingDone: state.onboardingDone,
+    closeToTray: state.closeToTray,
+  };
+}
+
+/** 把当前工作区写进 SQLite（合并 220ms 内的连续改动）。 */
 export function persist(): void {
   if (!state.ready) return;
   window.clearTimeout(saveTimer);
   saveTimer = window.setTimeout(() => {
-    const data: PersistedWorkspace = {
-      version: STORAGE_VERSION,
-      collections: state.collections,
-      history: state.history.slice(0, 200),
-      envs: state.envs,
-      activeEnvId: state.activeEnvId,
-      globals: state.globals,
-      tabs: state.tabs.map((t) => ({
-        id: t.id,
-        name: t.name,
-        request: t.request,
-        dirty: t.dirty,
-        origin: t.origin,
-      })),
-      activeTabId: state.activeTabId,
-      theme: state.theme,
-      sidebarWidth: state.sidebarWidth,
-      responseHeight: state.responseHeight,
-      sidebarTab: state.sidebarTab,
-      onboardingDone: state.onboardingDone,
-    };
-    void System.saveState(JSON.stringify(data)).catch((err: unknown) => {
-      // 持久化失败只提示一次，避免连续编辑时反复弹出同一条错误。
-      if (saveWarned) return;
-      saveWarned = true;
-      toast(`本地保存失败：${errText(err)}`, "error");
+    queue = queue.then(async () => {
+      try {
+        await writeStorage(snapshot());
+        saveWarned = false;
+      } catch (err) {
+        // 写库失败只提示一次，避免连续编辑时反复弹出同一条错误。
+        if (saveWarned) return;
+        saveWarned = true;
+        toast(`本地保存失败：${errText(err)}`, "error");
+      }
     });
   }, 220);
 }
 
-/** 启动时读回工作区；文件损坏时保留一份备份并从头开始。 */
+/** 启动时读回工作区；首次运行时把旧版 JSON 工作区迁入数据库。 */
 export async function load(): Promise<void> {
-  let raw: string;
   try {
-    raw = await System.loadState();
-  } catch {
-    raw = "";
-  }
-  if (raw.trim()) {
-    try {
-      const parsed = JSON.parse(raw) as Partial<PersistedWorkspace>;
-      applyPersisted(parsed);
-    } catch {
-      toast("本地数据损坏，已忽略并重新开始（原文件仍然保留）", "error");
+    const migrated = await openStorage();
+    if (migrated.legacyBroken) {
+      toast("旧的工作区文件无法解析，已跳过并改名备份（workspace.json.bak）", "error");
     }
+    applyPersisted(migrated.imported ?? (await readStorage()));
+  } catch (err) {
+    toast(`打开本地数据库失败，本次不保存改动：${errText(err)}`, "error");
   }
   if (state.envs.length === 0) {
     state.envs = [defaultEnv()];
@@ -168,6 +179,8 @@ export async function load(): Promise<void> {
   }
   state.ready = true;
   applyTheme();
+  // 把存在库里的桌面偏好交给 Go 侧的桌面外壳（托盘 menu 的勾选状态）。
+  void System.applyDesktopPrefs(state.closeToTray).catch(() => {});
   emit();
 }
 
@@ -1110,4 +1123,12 @@ export function toggleSidebar(): void {
 export function finishOnboarding(): void {
   state.onboardingDone = true;
   persist();
+}
+
+/** 用户在托盘菜单里改了「关闭到托盘」：只记录，Go 侧已经先改好了自己的状态。 */
+export function setCloseToTray(on: boolean): void {
+  if (state.closeToTray === on) return;
+  state.closeToTray = on;
+  persist();
+  emit();
 }

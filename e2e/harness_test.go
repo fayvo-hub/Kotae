@@ -30,6 +30,11 @@ type harness struct {
 	logs   string
 	bin    string
 	env    []string
+	// userData 是本次 e2e 的临时用户数据目录（workspace.db 就落在这里）。
+	userData string
+	// launches 记录第几次启动，用来给每次启动换一个自动化 socket 路径
+	// （上一个进程被杀掉后 socket 文件仍留在磁盘上，同一路径会 bind 失败）。
+	launches int
 }
 
 var (
@@ -109,7 +114,8 @@ func start(root string) (*harness, error) {
 	hb.web = httptest.NewServer(fileServer(filepath.Join(root, "dist")))
 
 	// 固定测试数据只在 e2e 里用：写进临时 userData，占位符换成真实地址。
-	userData := filepath.Join(tmp, "userdata")
+	hb.userData = filepath.Join(tmp, "userdata")
+	userData := hb.userData
 	if err := os.MkdirAll(userData, 0o755); err != nil {
 		return hb, err
 	}
@@ -125,26 +131,43 @@ func start(root string) (*harness, error) {
 		return hb, err
 	}
 
-	sock := filepath.Join(tmp, "automation.sock")
-	hb.cmd = exec.Command(bin)
-	hb.cmd.Dir = root
 	hb.env = append(os.Environ(),
-		"MYGO_AUTOMATION="+sock,
 		"MYGO_API_E2E=1",
 		"MYGO_API_USER_DATA="+userData,
 		"MYGO_DEV_URL="+hb.web.URL,
 		"NO_COLOR=1",
 	)
-	hb.cmd.Env = hb.env
-	logFile, err := os.Create(hb.logs)
-	if err != nil {
+	if err := hb.launch(); err != nil {
 		return hb, err
 	}
-	hb.cmd.Stdout = logFile
-	hb.cmd.Stderr = logFile
-	if err := hb.cmd.Start(); err != nil {
-		return hb, fmt.Errorf("启动应用失败：%w", err)
+
+	// 等固定数据从 workspace.json 进来（集合名出现在侧边栏）。
+	if err := hb.client.WaitFor(hb.win, 20*time.Second, "固定测试数据加载", `[...document.querySelectorAll('.tree-label')].some(el => el.textContent.trim() === '固定用例')`); err != nil {
+		return hb, err
 	}
+	return hb, nil
+}
+
+// launch 用当前 hb.env 起一个应用进程并等到页面画完，可重复调用（重启验证用）。
+func (hb *harness) launch() error {
+	if hb.tmp == "" || hb.bin == "" {
+		return fmt.Errorf("harness 还没准备好二进制")
+	}
+	hb.launches++
+	sock := filepath.Join(hb.tmp, fmt.Sprintf("automation-%d.sock", hb.launches))
+	cmd := exec.Command(hb.bin)
+	cmd.Dir = hb.root
+	cmd.Env = append(append([]string{}, hb.env...), "MYGO_AUTOMATION="+sock)
+	logFile, err := os.OpenFile(hb.logs, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("启动应用失败：%w", err)
+	}
+	hb.cmd = cmd
 
 	// 等自动化 socket 出现，再等页面把自己画出来。
 	deadline := time.Now().Add(60 * time.Second)
@@ -155,32 +178,42 @@ func start(root string) (*harness, error) {
 			break
 		}
 		if time.Now().After(deadline) {
-			return hb, fmt.Errorf("等应用打开自动化 socket 超时：%w", err)
+			return fmt.Errorf("等应用打开自动化 socket 超时：%w", err)
 		}
 		time.Sleep(120 * time.Millisecond)
 	}
 
 	if err := hb.waitWindow(60 * time.Second); err != nil {
-		return hb, err
+		return err
 	}
-	// 页面脚本就绪：根节点与侧边栏都在了才算画完。
+	// 页面脚本就绪：首屏画完了才算可用。
 	if err := hb.client.WaitFor(hb.win, 60*time.Second, "首屏渲染", `!!document.querySelector('.topbar .brand-name')`); err != nil {
-		return hb, err
+		return err
 	}
 	// 收集页面错误，最后一个用例统一检查。
-	if err := hb.client.Eval(hb.win, `(() => {
+	return hb.client.Eval(hb.win, `(() => {
   window.__e2eErrors = [];
   addEventListener('error', ev => window.__e2eErrors.push(String(ev.message || ev.error)));
   addEventListener('unhandledrejection', ev => window.__e2eErrors.push('unhandledrejection: ' + String(ev.reason && ev.reason.message || ev.reason)));
   return true;
-})()`, nil); err != nil {
-		return hb, err
+})()`, nil)
+}
+
+// restart 杀掉进程再用同一个用户数据目录启动一次，用来验证数据真的落了盘。
+func (hb *harness) restart(t *testing.T) {
+	t.Helper()
+	if hb.client != nil {
+		_ = hb.client.Close()
+		hb.client = nil
 	}
-	// 等固定数据从 workspace.json 进来（集合名出现在侧边栏）。
-	if err := hb.client.WaitFor(hb.win, 20*time.Second, "固定测试数据加载", `[...document.querySelectorAll('.tree-label')].some(el => el.textContent.trim() === '固定用例')`); err != nil {
-		return hb, err
+	if hb.cmd != nil && hb.cmd.Process != nil {
+		_ = hb.cmd.Process.Kill()
+		_, _ = hb.cmd.Process.Wait()
+		hb.cmd = nil
 	}
-	return hb, nil
+	if err := hb.launch(); err != nil {
+		t.Fatalf("重启应用失败：%v\n应用日志：\n%s", err, hb.appLog())
+	}
 }
 
 func (hb *harness) waitWindow(timeout time.Duration) error {

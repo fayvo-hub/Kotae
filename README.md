@@ -51,7 +51,13 @@ npx mygo-cli vet .          # go vet + 原生 UI 生命周期检查
 
 ## 数据存储
 
-工作区（集合、历史、环境、标签页、界面偏好）保存在 MyGo 的 userData 目录下的 `workspace.json`，写入走临时文件 + 重命名，避免写坏。路径可在「设置 → 关于」看到，并可用同行的「打开数据目录」直接打开。桌面外壳自己的偏好（是否关闭到托盘）放在同目录的 `desktop.json`，删掉它等于恢复默认。不要时可整目录删除，应用会从头开始。
+存储层是 SQLite：整个工作区（集合、文件夹、请求、历史、环境与变量、标签页、界面偏好、是否关闭到托盘）都落在一个文件里——MyGo userData 目录下的 `workspace.db`。路径可在「设置 → 关于」看到，并可用同行的「打开数据目录」直接打开。
+
+- 驱动是 MyGo 的 sqlite 插件（`@mygo-plugins/sqlite` + Go 侧 `mygo.Use(sqlite.Plugin)`）：预编译的 sqlite3 通过 purego 加载，不需要 cgo；`mygo dev` / `mygo build` 会把对应平台的原生库打进产物，想换自编译版本可用环境变量 `MYGO_SQLITE_LIBRARY` 指定。
+- 建表语句在 `src/db.ts` 的 `SCHEMA` 里：`collections` / `folders` / `requests` / `history` / `environments` / `variables` / `tabs` / `settings` / `meta`。集合树的层级与顺序由 `position` 列还原，文件夹与请求共用一个序号空间。
+- 写入用 WAL 模式 + `busy_timeout`，每次保存只提交与上次快照不同的行（`INSERT … ON CONFLICT DO UPDATE` 与按主键 `DELETE`），整批包在一个 `BEGIN IMMEDIATE` 事务里；界面上的连续编辑由 220ms 防抖合批。
+- 从旧版本升级时，首次启动会把 `workspace.json` 读进来迁进数据库，然后把原文件改名成 `workspace.json.bak`（不删除；解析失败则跳过迁移并在界面提示）。桌面的 `desktop.json` 已经取消，偏好并入 `settings` 表。
+- 整个数据目录可以删掉，应用会从头开始。
 
 ## 测试
 
@@ -65,14 +71,14 @@ MYGO_E2E_KEEP=1 npm run e2e        # 保留临时目录（含应用日志）便�
 MYGO_E2E_PACKAGING=1 npm run e2e   # 追加验证打包产物：跑一次 mygo build，断言界面来自二进制
 ```
 
-覆盖率（20 个用例）：首屏与固定数据加载、GET/POST 发送与保真（方法、头、查询串、认证）、重定向、错误状态码、超时中文提示、未定义变量拦截、纯文本与二进制响应、Cookie 罐、cURL 导入与导入后发送、保存对话框与新建集合、环境变量面板、命令面板、主题切换、历史记录、页面无未捕获错误，以及桌面层：深链导入、系统菜单新建请求、关闭到托盘后从第二个实例恢复窗口。
+覆盖率（22 个用例）：首屏与固定数据加载、GET/POST 发送与保真（方法、头、查询串、认证）、重定向、错误状态码、超时中文提示、未定义变量拦截、纯文本与二进制响应、Cookie 罐、cURL 导入与导入后发送、保存对话框与新建集合、环境变量面板、命令面板、主题切换、历史记录、页面无未捕获错误；存储层：`workspace.json` 一次性迁移成 `workspace.db`、新建集合后连续重启两次数据仍在（证明写的是数据库而不是内存）；以及桌面层：深链导入、系统菜单新建请求、关闭到托盘后从第二个实例恢复窗口。
 
-固定测试数据在 `e2e/fixtures/workspace.json`，只在 e2e 里用：测试每次复制到临时目录作为 userData 再启动应用，占位符 `__BASE_URL__` 会替换成本地桩服务的随机端口，所以不会碰到你本机的工作区。桩服务在 `e2e/echo.go`（回显请求、慢响应、重定向、错误码、Cookie、二进制、文本）。截图写到 `e2e/artifacts/`（已 gitignore）。
+固定测试数据在 `e2e/fixtures/workspace.json`，只在 e2e 里用（以旧版 JSON 工作区的形式投喂，启动时走一次真实的迁移路径）：测试每次复制到临时目录作为 userData 再启动应用，占位符 `__BASE_URL__` 会替换成本地桩服务的随机端口，所以不会碰到你本机的工作区。桩服务在 `e2e/echo.go`（回显请求、慢响应、重定向、错误码、Cookie、二进制、文本）。截图写到 `e2e/artifacts/`（已 gitignore）。
 
 ## 桌面集成
 
 - **菜单栏**：文件（新建请求 Ctrl+N、导入 cURL Ctrl+I、保存到集合 Ctrl+S、收起/展开侧边栏 Ctrl+B、关闭窗口、退出）、编辑（撤销/重做/剪切/复制/粘贴/删除/全选，用系统 Role 保留输入框语义）、视图（命令面板 Ctrl+K、管理环境 Ctrl+E、设置 Ctrl+,、切换深色/浅色、重新加载界面、开发者工具、缩放、全屏）、帮助（关于 MyGo API、打开数据目录）。菜单项把动作作为 `desktop:command` 事件发给页面，页面复用同一套 store 逻辑，快捷键与页面内的监听不会打架。
-- **托盘**：托盘菜单提供显示主窗口、新建请求、导入 cURL、关闭到托盘开关、退出。关闭窗口时按该开关隐藏窗口而不是退出（默认开启），偏好写在 userData 下的 `desktop.json`，与 `workspace.json` 分开。Linux 需要 `libayatana-appindicator3`，未安装时托盘创建失败会被记日志，应用其余部分照常工作。
+- **托盘**：托盘菜单提供显示主窗口、新建请求、导入 cURL、关闭到托盘开关、退出。关闭窗口时按该开关隐藏窗口而不是退出（默认开启），偏好存在数据库的 `settings` 表里，启动时由页面交给 Go 侧。Linux 需要 `libayatana-appindicator3`，未安装时托盘创建失败会被记日志，应用其余部分照常工作。
 - **单实例与深链**：第二次启动不会开新窗口，参数转给已在运行的实例。支持 `mygo-api://new`、`mygo-api://settings`、`mygo-api://import?curl=<URL 编码的 cURL>`，最后一种会直接把命令送进导入浮层并自动解析。
 - **关于面板**：走系统标准面板（`ShowAboutPanel`），应用名与版本取自构建时的配置。
 
@@ -86,7 +92,7 @@ npx mygo-cli build -skip-installer    # 只要可执行文件
 npx mygo-cli build -platform linux/amd64,darwin/universal   # 交叉编译（需要各平台的打包工具）
 ```
 
-Windows 安装包是 NSIS 做的按用户安装：装到 `%LOCALAPPDATA%\Programs\MyGoAPI`，建开始菜单快捷方式，完成页可勾选桌面快捷方式，卸载项出现在「设置 → 应用」（显示名、版本、发布者取自上面的配置）。支持 `/S` 静默安装，卸载同样支持 `/S`；卸载会删掉程序目录、快捷方式与卸载注册项，**不会删** userData 里的工作区数据——那是用户资产，需要的话自己删。NSIS 未安装时 mygo 会自己下载一份。macOS 出 `.app` 与 `.dmg`，Linux 出可执行文件、`.deb`、`.tar.gz`（含 install.sh）与 PKGBUILD。
+Windows 安装包是 NSIS 做的按用户安装：装到 `%LOCALAPPDATA%\Programs\MyGoAPI`，建开始菜单快捷方式，完成页可勾选桌面快捷方式，卸载项出现在「设置 → 应用」（显示名、版本、发布者取自上面的配置）。支持 `/S` 静默安装，卸载同样支持 `/S`；卸载会删掉程序目录、快捷方式与卸载注册项，**不会删** userData 里的工作区数据——那是用户资产，需要的话自己删。NSIS 未安装时 mygo 会自己下载一份。SQLite 的原生库（Windows 上是 `mygo-sqlite3.dll`，约 1.4 MB）由 `mygo build` 自动放到可执行文件旁边并一起打进安装包，所以安装后的目录里有它，不用额外装数据库。macOS 出 `.app` 与 `.dmg`，Linux 出可执行文件、`.deb`、`.tar.gz`（含 install.sh）与 PKGBUILD。
 
 签名与更新：
 
