@@ -295,6 +295,9 @@ func setupTray() {
 		tray = nil
 		return
 	}
+	// Windows 上左键单击图标只上报点击、不弹菜单（菜单走右键），所以直接单击就能回到窗口；
+	// macOS 有菜单时由系统先弹菜单，用户从菜单里选「显示主窗口」。
+	tray.OnClick(func() { showMainWindow() })
 	trayReady = true
 }
 
