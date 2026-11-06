@@ -476,6 +476,25 @@ func (hb *harness) pressKeys(t *testing.T, key string, ctrl, shift bool) {
 	hb.eval(t, script, &ok)
 }
 
+// pressKeysOn 把按键事件派发到指定元素上（元素自己的 keydown 监听才会收到）。
+func (hb *harness) pressKeysOn(t *testing.T, selector, key string, ctrl, shift bool) {
+	t.Helper()
+	script := fmt.Sprintf(`(() => {
+  const node = document.querySelector(%s);
+  if (!node) return false;
+  node.focus();
+  node.dispatchEvent(new KeyboardEvent('keydown', {
+    key: %s, ctrlKey: %t, shiftKey: %t, bubbles: true, cancelable: true,
+  }));
+  return true;
+})()`, jsString(selector), jsString(key), ctrl, shift)
+	var ok bool
+	hb.eval(t, script, &ok)
+	if !ok {
+		t.Fatalf("按键目标不存在：%s", selector)
+	}
+}
+
 // jsString 把字符串安全地嵌进页面脚本。
 func jsString(s string) string {
 	b, _ := json.Marshal(s)

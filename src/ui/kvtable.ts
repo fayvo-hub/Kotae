@@ -235,15 +235,20 @@ async function pasteInto<T extends KVRow>(
   opts: KVTableOptions<T>,
   repaint: () => void,
 ): Promise<void> {
-  let text = await pasteText();
-  if (!text.trim()) {
-    text =
-      (await askText({
-        title: "批量粘贴",
-        label: "每行一对，支持 name: value 或 name=value",
-        placeholder: "Content-Type: application/json",
-      })) ?? "";
-  }
+  // 剪贴板里有内容就预填进对话框，让人先看清、能改、能取消，而不是静默直接覆盖表格。
+  const clip = (await pasteText()).trim();
+  const text =
+    (await askText({
+      title: "批量粘贴",
+      label: "每行一对，支持 name: value 或 name=value",
+      value: clip,
+      placeholder: "Content-Type: application/json\nAuthorization: Bearer {{token}}",
+      multiline: true,
+      rows: 8,
+      hint: clip
+        ? "已从剪贴板预填，可直接修改。Enter 换行，Ctrl+Enter 确定。"
+        : "Enter 换行，Ctrl+Enter 确定；空行会被忽略。",
+    })) ?? "";
   if (!text.trim()) return;
   const parsed = parsePairs(text);
   if (parsed.length === 0) {

@@ -9,6 +9,10 @@ interface TextOptions {
   value?: string;
   placeholder?: string;
   confirmText?: string;
+  /** 多行输入：Enter 换行，Ctrl/Cmd+Enter 提交。 */
+  multiline?: boolean;
+  rows?: number;
+  hint?: string;
 }
 
 interface ConfirmOptions {
@@ -35,15 +39,10 @@ function shell(head: HTMLElement, body: HTMLElement, foot: HTMLElement): HTMLEle
   return dialog;
 }
 
-function backdropOf(dialog: HTMLElement, onDismiss: () => void): HTMLElement {
-  const backdrop = el("div", {
-    class: "backdrop prompt-backdrop",
-    on: {
-      mousedown: (ev) => {
-        if (ev.target === backdrop) onDismiss();
-      },
-    },
-  });
+// 点遮罩不关闭：这类对话框里常有刚粘贴进来的一批内容，误点外部就丢数据。
+// 关闭只有两条路——Esc 或底部按钮。
+function backdropOf(dialog: HTMLElement): HTMLElement {
+  const backdrop = el("div", { class: "backdrop prompt-backdrop" });
   backdrop.append(dialog);
   return backdrop;
 }
@@ -61,28 +60,49 @@ export function askText(options: TextOptions): Promise<string | null> {
     };
 
     const title = el("h2", { text: options.title });
-    const input = el("input", {
-      class: "text-input",
-      attr: {
-        placeholder: options.placeholder ?? "",
-        spellcheck: "false",
-        autocomplete: "off",
-      },
-      on: {
-        keydown: (ev) => {
-          if (ev.key === "Enter") {
-            ev.preventDefault();
-            finish(input.value.trim() || null);
-          }
-        },
-      },
-    });
+    const multiline = options.multiline === true;
+    const input = multiline
+      ? el("textarea", {
+          class: "text-input prompt-textarea",
+          attr: {
+            placeholder: options.placeholder ?? "",
+            spellcheck: "false",
+            rows: String(options.rows ?? 6),
+            "aria-label": options.label ?? options.title,
+          },
+          on: {
+            keydown: (ev) => {
+              if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) {
+                ev.preventDefault();
+                finish((input as HTMLTextAreaElement).value.trim() || null);
+              }
+            },
+          },
+        })
+      : el("input", {
+          class: "text-input",
+          attr: {
+            placeholder: options.placeholder ?? "",
+            spellcheck: "false",
+            autocomplete: "off",
+            "aria-label": options.label ?? options.title,
+          },
+          on: {
+            keydown: (ev) => {
+              if (ev.key === "Enter") {
+                ev.preventDefault();
+                finish((input as HTMLInputElement).value.trim() || null);
+              }
+            },
+          },
+        });
     input.value = options.value ?? "";
 
     const body = el("div", { class: "dialog-body" });
     const field = el("label", { class: "field" });
     if (options.label) field.append(el("span", { class: "field-label", text: options.label }));
     field.append(input);
+    if (options.hint) field.append(el("span", { class: "field-hint", text: options.hint }));
     body.append(field);
 
     const foot = el("div", { class: "dialog-foot" });
@@ -101,7 +121,8 @@ export function askText(options: TextOptions): Promise<string | null> {
     foot.append(el("span", { class: "spacer" }), cancel, ok);
 
     const dialog = shell(title, body, foot);
-    const backdrop = backdropOf(dialog, () => finish(null));
+    if (multiline) dialog.classList.add("wide");
+    const backdrop = backdropOf(dialog);
     const onKey = (ev: KeyboardEvent): void => {
       if (ev.key === "Escape") {
         ev.stopPropagation();
@@ -155,7 +176,7 @@ export function askConfirm(options: ConfirmOptions): Promise<boolean> {
     foot.append(el("span", { class: "spacer" }), cancel, ok);
 
     const dialog = shell(title, body, foot);
-    const backdrop = backdropOf(dialog, () => finish(false));
+    const backdrop = backdropOf(dialog);
     const onKey = (ev: KeyboardEvent): void => {
       if (ev.key === "Escape") {
         ev.stopPropagation();
@@ -200,7 +221,7 @@ export function askAlert(options: AlertOptions): Promise<void> {
       on: { click: () => finish() },
     });
     foot.append(el("span", { class: "spacer" }), ok);
-    backdrop = backdropOf(shell(title, body, foot), () => finish());
+    backdrop = backdropOf(shell(title, body, foot));
 
     const onKey = (ev: KeyboardEvent): void => {
       if (ev.key === "Escape" || ev.key === "Enter") {

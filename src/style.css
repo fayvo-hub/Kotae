@@ -3107,6 +3107,23 @@ mark,
   max-width: 420px;
 }
 
+/* 多行输入的提示框要更宽，否则长 URL/头部值被折得看不清。 */
+.prompt-dialog.wide {
+  max-width: 560px;
+}
+
+.prompt-textarea {
+  height: auto;
+  min-height: 132px;
+  padding: 8px 10px;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  line-height: 1.55;
+  resize: vertical;
+  white-space: pre;
+  overflow: auto;
+}
+
 .confirm-box {
   display: flex;
   gap: 11px;

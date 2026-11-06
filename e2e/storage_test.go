@@ -39,6 +39,7 @@ func TestStorageMigratesLegacyWorkspace(t *testing.T) {
 	}
 
 	// 设置面板的「关于」里要能看到存储层用的是哪个文件。
+	h.clearOverlays(t)
 	h.pressKeys(t, ",", true, false)
 	h.wait(t, "设置浮层出现", `!!document.querySelector('.info-box')`)
 	if text := h.text(t, ".info-box"); !strings.Contains(text, "workspace.db") {

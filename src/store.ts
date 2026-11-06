@@ -1059,14 +1059,25 @@ export async function copyText(text: string, label = "已复制"): Promise<void>
 }
 
 export async function pasteText(): Promise<string> {
+  // 剪贴板读取在个别环境下会卡住（窗口失焦、剪贴板被别的进程占用），
+  // 它是批量粘贴的辅助步骤，不能让调用它的对话框跟着一起卡死。
+  const withTimeout = async (task: Promise<string>, ms: number): Promise<string> => {
+    let timer = 0;
+    try {
+      return await Promise.race([
+        task.catch(() => ""),
+        new Promise<string>((resolve) => {
+          timer = window.setTimeout(() => resolve(""), ms);
+        }),
+      ]);
+    } finally {
+      window.clearTimeout(timer);
+    }
+  };
+  const fromApp = await withTimeout(System.pasteText(), 400);
+  if (fromApp) return fromApp;
   try {
-    const text = await System.pasteText();
-    if (text) return text;
-  } catch {
-    // 继续尝试 webview 剪贴板
-  }
-  try {
-    return await navigator.clipboard.readText();
+    return await withTimeout(navigator.clipboard.readText(), 400);
   } catch {
     return "";
   }
