@@ -362,6 +362,23 @@ export function closeTab(id: string): void {
   emit();
 }
 
+/** 关闭除这一条以外的所有标签页。 */
+export function closeOtherTabs(id: string): void {
+  const keep = state.tabs.find((t) => t.id === id);
+  if (!keep) return;
+  state.tabs.splice(0, state.tabs.length, keep);
+  state.activeTabId = keep.id;
+  persist();
+  emit();
+}
+
+/** 关闭全部标签页，只留下一个新的空白请求。 */
+export function closeAllTabs(): void {
+  state.tabs.splice(0, state.tabs.length);
+  state.activeTabId = null;
+  openTab(emptyRequest(), "未命名请求");
+}
+
 export function setActiveTab(id: string): void {
   if (state.activeTabId === id) return;
   state.activeTabId = id;
@@ -1291,7 +1308,9 @@ export async function pasteText(): Promise<string> {
       window.clearTimeout(timer);
     }
   };
-  const fromApp = await withTimeout(System.pasteText(), 400);
+  // 应用侧最多等 1 秒（Go 打开剪贴板的耐心值），等不到再顺序退到 WebView 的接口。
+  // 两路必须串行：同时开系统剪贴板会让两边都失败。
+  const fromApp = await withTimeout(System.pasteText(), 1200);
   if (fromApp) return fromApp;
   try {
     return await withTimeout(navigator.clipboard.readText(), 400);

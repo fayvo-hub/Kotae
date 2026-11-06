@@ -5,7 +5,6 @@ package e2e
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/url"
 	"os/exec"
 	"strings"
@@ -45,21 +44,6 @@ func TestDeepLinkImportFromSecondInstance(t *testing.T) {
 	h.wait(t, "深链内容自动解析出预览", `!!document.querySelector('.preview-card')`)
 	h.shot(t, "15-deep-link")
 	h.clearOverlays(t)
-}
-
-func TestMenuNewRequest(t *testing.T) {
-	h.clearOverlays(t)
-	before := h.count(t, ".tab")
-	err := h.client.Menu(h.win, "文件", "新建请求")
-	if err != nil {
-		t.Skipf("当前平台不支持从外面点系统菜单：%v", err)
-	}
-	h.wait(t, "菜单动作打开新标签页", fmt.Sprintf(`document.querySelectorAll('.tab').length > %d`, before))
-	after := h.count(t, ".tab")
-	if after <= before {
-		t.Fatalf("菜单「新建请求」没有新增标签页：%d → %d", before, after)
-	}
-	h.shot(t, "16-menu-new-request")
 }
 
 func TestCloseToTrayAndRestore(t *testing.T) {

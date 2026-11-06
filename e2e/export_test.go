@@ -39,8 +39,13 @@ func TestExportCurlKeepsApiKeyInQuery(t *testing.T) {
 	h.clickText(t, ".segmented-item", "放在查询参数")
 	time.Sleep(200 * time.Millisecond)
 
-	h.click(t, `[title*="复制为 cURL"]`)
-	h.wait(t, "出现已复制提示", `[...document.querySelectorAll('.toast')].some(el => (el.textContent || '').includes('cURL'))`)
+	// 行内「复制为 cURL」按钮已去重（顶栏导入 + 代码片段 + 快捷键），这里走快捷键。
+	h.pressKeys(t, "c", true, true)
+	// 剪贴板写失败时也超时，所以等「任何提示」再把文案打出来，便于定位是复制失败还是别的原因。
+	h.wait(t, "出现复制结果提示", `document.querySelectorAll('.toast').length > 0`)
+	if got := h.text(t, ".toast"); !strings.Contains(got, "已复制") {
+		t.Fatalf("复制 cURL 失败：%q", got)
+	}
 
 	got := clipboard(t)
 	if !strings.Contains(got, "curl") {

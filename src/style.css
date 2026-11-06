@@ -927,6 +927,23 @@ kbd {
   margin: 5px 4px;
   background: var(--border);
 }
+/* 标签页右键菜单：沿用手风琴菜单的排版，只把定位换成鼠标位置。 */
+.ctx-menu {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 60;
+  min-width: 168px;
+}
+
+.ctx-menu .env-menu-item .env-menu-name {
+  flex: 1 1 auto;
+}
+
+.ctx-menu .env-menu-item.danger .env-menu-name,
+.ctx-menu .env-menu-item.danger .env-menu-key {
+  color: var(--bad);
+}
 
 .env-menu-item.action {
   color: var(--text-2);

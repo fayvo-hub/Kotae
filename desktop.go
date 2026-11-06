@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 
@@ -230,85 +229,11 @@ func quitApp() {
 	mygo.App.Quit()
 }
 
-// buildAppMenu 构造中文应用菜单。角色项负责编辑与窗口行为，本应用自己的
-// 动作统一发给页面执行，保证菜单、快捷键、界面三处行为只有一份实现。
-func buildAppMenu() *mygo.Menu {
-	items := []*mygo.MenuItem{{Role: mygo.RoleAppMenu}}
-	// macOS 的应用菜单已含「关于」与「退出」，其他平台放在文件与帮助菜单里。
-	if runtime.GOOS != "darwin" {
-		items = append(items, &mygo.MenuItem{Label: "文件", Submenu: []*mygo.MenuItem{
-			{Label: "新建请求", Accelerator: "CmdOrCtrl+N", Click: cmdItem("new-request", "")},
-			{Label: "导入 cURL…", Accelerator: "CmdOrCtrl+I", Click: cmdItem("import-curl", "")},
-			{Label: "保存到集合…", Accelerator: "CmdOrCtrl+S", Click: cmdItem("save", "")},
-			mygo.Separator(),
-			{Label: "收起 / 展开侧边栏", Accelerator: "CmdOrCtrl+B", Click: cmdItem("toggle-sidebar", "")},
-			mygo.Separator(),
-			// Ctrl+W 留给「关标签页」：这是浏览器与各类编辑器里最牢固的肌肉记忆，
-			// 关窗口必须另找组合键，否则用户关标签总会把整个窗口收进托盘。
-			{Label: "关闭当前标签页", Accelerator: "CmdOrCtrl+W", Click: cmdItem("close-tab", "")},
-			{Role: mygo.RoleClose, Label: "关闭窗口", Accelerator: "CmdOrCtrl+Shift+W"},
-			{Label: "退出 MyGo API", Click: func(*mygo.MenuItem, *mygo.Window) { quitApp() }},
-		}})
-	}
-	items = append(items,
-		&mygo.MenuItem{Label: "编辑", Submenu: []*mygo.MenuItem{
-			{Role: mygo.RoleUndo, Label: "撤销"},
-			{Role: mygo.RoleRedo, Label: "重做"},
-			mygo.Separator(),
-			{Role: mygo.RoleCut, Label: "剪切"},
-			{Role: mygo.RoleCopy, Label: "复制"},
-			{Role: mygo.RolePaste, Label: "粘贴"},
-			{Role: mygo.RoleDelete, Label: "删除"},
-			mygo.Separator(),
-			{Role: mygo.RoleSelectAll, Label: "全选"},
-		}},
-		&mygo.MenuItem{Label: "视图", Submenu: []*mygo.MenuItem{
-			{Label: "命令面板…", Accelerator: "CmdOrCtrl+K", Click: cmdItem("command-palette", "")},
-			{Label: "生成代码片段…", Accelerator: "CmdOrCtrl+Shift+G", Click: cmdItem("snippets", "")},
-			{Label: "导入 Postman / HAR…", Accelerator: "CmdOrCtrl+Shift+I", Click: cmdItem("import-postman", "")},
-			{Label: "管理环境…", Accelerator: "CmdOrCtrl+E", Click: cmdItem("open-env", "")},
-			{Label: "设置…", Accelerator: "CmdOrCtrl+,", Click: cmdItem("open-settings", "")},
-			{Label: "切换深色 / 浅色", Click: cmdItem("toggle-theme", "")},
-			mygo.Separator(),
-			{Role: mygo.RoleReload, Label: "重新加载界面"},
-			{Role: mygo.RoleToggleDevTools, Label: "开发者工具"},
-			mygo.Separator(),
-			{Role: mygo.RoleResetZoom, Label: "实际大小"},
-			{Role: mygo.RoleZoomIn, Label: "放大"},
-			{Role: mygo.RoleZoomOut, Label: "缩小"},
-			mygo.Separator(),
-			{Role: mygo.RoleToggleFullScreen, Label: "全屏"},
-		}},
-	)
-	if runtime.GOOS == "darwin" {
-		items = append(items, &mygo.MenuItem{Role: mygo.RoleWindowMenu})
-	}
-	items = append(items, &mygo.MenuItem{Label: "帮助", Submenu: []*mygo.MenuItem{
-		{Label: "关于 MyGo API", Click: func(*mygo.MenuItem, *mygo.Window) {
-			showAbout()
-		}},
-		{Label: "打开数据目录", Click: func(*mygo.MenuItem, *mygo.Window) {
-			openDataDir()
-		}},
-	}})
-	return mygo.NewMenu(items)
-}
-
 // cmdItem 把菜单项变成一条发给页面的指令。
 func cmdItem(action, text string) func(*mygo.MenuItem, *mygo.Window) {
 	return func(*mygo.MenuItem, *mygo.Window) {
 		sendDesktop(DesktopCommand{Action: action, Text: text})
 	}
-}
-
-// showAbout 打开系统标准的「关于」面板。
-func showAbout() {
-	mygo.App.ShowAboutPanel(mygo.AboutPanelOptions{
-		ApplicationName:    mygo.App.Name(),
-		ApplicationVersion: mygo.App.Version(),
-		Copyright:          "本地轻量级 HTTP 调试工具",
-		Credits:            "纯本地运行，数据只保存在这台机器上。",
-	})
 }
 
 // buildTrayMenu 构造托盘菜单：常用动作 + 两个偏好开关 + 退出。
@@ -447,10 +372,10 @@ func markDesktopReady() {
 	}
 }
 
-// setupDesktop 装配桌面集成：菜单、托盘、关闭行为、深链与单实例回调。
-// 在应用就绪后调用一次。
+// setupDesktop 装配桌面集成：托盘、关闭行为、深链与单实例回调。
+// 在应用就绪后调用一次。不设置应用菜单栏 —— 界面里的按钮与快捷键是唯一入口，
+// 系统托盘承担「没有窗口时也能操作」的那部分职责。
 func setupDesktop() {
-	mygo.App.SetMenu(buildAppMenu())
 	setupTray()
 	// 页面调用 ApplyDesktopPrefs 时会按库里的值再对一次；这里先按默认值注册，
 	// 免得到页面就绪前那段时间快捷键不可用。

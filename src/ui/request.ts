@@ -6,8 +6,6 @@ import {
   abortSend,
   activeTab,
   applyURL,
-  copyText,
-  currentCurl,
   mutate,
   send,
   setPendingCurl,
@@ -163,17 +161,6 @@ function urlBar(tab: Tab): HTMLElement {
     sendBtn.append(icon("send"), el("span", { text: "发送" }));
   }
 
-  const curlBtn = el("button", {
-    class: "btn",
-    attr: { type: "button", title: "导入 cURL 命令（Ctrl+I）" },
-    on: { click: () => toggleUI("curlOpen", true) },
-  });
-  curlBtn.append(icon("terminal"), el("span", { text: "导入 cURL" }));
-
-  const copyCurlBtn = iconButton("copy", "复制为 cURL（Ctrl+Shift+C）", () => {
-    void copyText(currentCurl(true), "已复制 cURL 命令");
-  });
-
   const snippetBtn = iconButton("code", "生成代码片段（Ctrl+Shift+G）", () => {
     toggleUI("snippetsOpen", true);
   });
@@ -186,7 +173,9 @@ function urlBar(tab: Tab): HTMLElement {
     bar,
     el("div", { class: "url-method" }, methodSelect),
     el("div", { class: "url-field" }, el("div", { class: "url-input-wrap" }, mirror, urlInput), unresolvedBadge(tab)),
-    el("div", { class: "url-actions" }, saveBtn, snippetBtn, copyCurlBtn, curlBtn, sendBtn),
+    // 与顶栏、快捷键重复的动作不在这里重复放：导入 cURL 在顶栏与 Ctrl+I，
+    // 复制 cURL 走代码片段（选 cURL）或 Ctrl+Shift+C。
+    el("div", { class: "url-actions" }, saveBtn, snippetBtn, sendBtn),
   );
   return bar;
 }

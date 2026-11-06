@@ -27,6 +27,8 @@ import {
   DEFAULT_SIDEBAR_WIDTH,
   abortSend,
   activeTab,
+  closeAllTabs,
+  closeOtherTabs,
   closeTab,
   copyText,
   createCollection,
@@ -84,7 +86,6 @@ function buildShell(): void {
   });
   curlBtn.append(icon("terminal"), el("span", { text: "导入 cURL" }));
 
-  const envBtn = iconButton("globe", "环境变量（Ctrl+E）", () => toggleUI("envOpen", true));
   const paletteBtn = iconButton("command", "命令面板（Ctrl+K）", () =>
     toggleUI("commandOpen", true),
   );
@@ -102,7 +103,8 @@ function buildShell(): void {
   const settingsBtn = iconButton("settings", "设置", () => toggleUI("settingsOpen", true));
   const sidebarBtn = iconButton("sidebar", "收起 / 展开侧边栏（Ctrl+B）", () => toggleSidebar());
 
-  actions.append(curlBtn, envBtn, paletteBtn, themeBtn, settingsBtn, sidebarBtn);
+  // 环境切换由左上角的环境胶囊负责，这里不再放重复入口。
+  actions.append(curlBtn, paletteBtn, themeBtn, settingsBtn, sidebarBtn);
 
   const topbar = el("header", { class: "topbar" });
   topbar.append(brand, envHost, el("span", { class: "spacer" }), actions);
@@ -484,6 +486,10 @@ function tabItem(tab: Tab): HTMLElement {
       auxclick: (ev) => {
         if (ev.button === 1) closeTab(tab.id);
       },
+      contextmenu: (ev) => {
+        ev.preventDefault();
+        openTabContextMenu(ev, tab);
+      },
     },
   });
   item.append(
@@ -511,6 +517,50 @@ function tabItem(tab: Tab): HTMLElement {
   close.append(icon("close"));
   item.append(close);
   return item;
+}
+
+let tabMenu: HTMLElement | null = null;
+
+function closeTabMenu(): void {
+  tabMenu?.remove();
+  tabMenu = null;
+}
+
+/** 标签页右键菜单：刷新（重发当前请求）、关闭、关闭其他、关闭全部。 */
+function openTabContextMenu(ev: MouseEvent, tab: Tab): void {
+  closeTabMenu();
+  closeEnvMenu();
+  setActiveTab(tab.id);
+
+  const menu = el("div", { class: "env-menu ctx-menu", attr: { role: "menu" } });
+  const item = (label: string, hint: string, run: () => void, danger = false): HTMLElement => {
+    const btn = el("button", {
+      class: `env-menu-item${danger ? " danger" : ""}`,
+      attr: { type: "button", role: "menuitem" },
+      on: {
+        click: () => {
+          closeTabMenu();
+          run();
+        },
+      },
+    });
+    btn.append(el("span", { class: "env-menu-name", text: label }));
+    if (hint) btn.append(el("span", { class: "env-menu-key", text: hint }));
+    return btn;
+  };
+
+  menu.append(
+    item("刷新", "Ctrl+Enter", () => void send()),
+    item("关闭", "Ctrl+W", () => closeTab(tab.id)),
+    item("关闭其他", "", () => closeOtherTabs(tab.id)),
+    item("关闭全部", "", () => closeAllTabs(), true),
+  );
+
+  document.body.append(menu);
+  const box = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, Math.min(ev.clientX, window.innerWidth - box.width - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(ev.clientY, window.innerHeight - box.height - 8))}px`;
+  tabMenu = menu;
 }
 
 function renderRequest(): void {
@@ -820,13 +870,16 @@ function bindEvents(): void {
 
   window.addEventListener("keydown", onKeydown);
 
-  // 环境下拉点外面就收起来（和系统菜单一致的手感）。
+  // 环境下拉与标签页右键菜单点外面就收起来（和系统菜单一致的手感）。
   document.addEventListener("click", (ev) => {
-    if (!envMenuOpen) return;
     const target = ev.target as Element | null;
+    if (tabMenu && !target?.closest(".ctx-menu")) closeTabMenu();
+    if (!envMenuOpen) return;
     if (target?.closest(".env-pill")) return;
     closeEnvMenu();
   });
+  document.addEventListener("scroll", () => closeTabMenu(), true);
+  window.addEventListener("resize", () => closeTabMenu());
 }
 
 function onKeydown(ev: KeyboardEvent): void {
@@ -845,6 +898,10 @@ function onKeydown(ev: KeyboardEvent): void {
   }
   if (!mod) {
     if (ev.key === "Escape") {
+      if (tabMenu) {
+        closeTabMenu();
+        return;
+      }
       if (envMenuOpen) {
         closeEnvMenu();
         return;
