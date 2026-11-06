@@ -229,27 +229,39 @@ function autoGrow(area: HTMLTextAreaElement): void {
   area.style.height = `${Math.min(160, area.scrollHeight)}px`;
 }
 
-/** 批量粘贴：按行拆分，支持「k: v」「k=v」「k\tv」三种分隔。 */
+/** 把表格里的行拍成批量粘贴的文本，禁用行加 `# ` 前缀。 */
+export function rowsToText(rows: KVRow[]): string {
+  return rows
+    .filter((row) => row.key.trim() !== "" || row.value.trim() !== "")
+    .map((row) => `${row.enabled ? "" : "# "}${row.key}: ${row.value}`)
+    .join("\n")
+    .trim();
+}
+
+/** 批量粘贴：按行拆分，支持「k: v」「k=v」「k	v」三种分隔；行首 `#` 表示禁用。 */
 async function pasteInto<T extends KVRow>(
   rows: T[],
   opts: KVTableOptions<T>,
   repaint: () => void,
 ): Promise<void> {
-  // 剪贴板里有内容就预填进对话框，让人先看清、能改、能取消，而不是静默直接覆盖表格。
+  // 预填表格里已有的行，让人整体改一遍再覆盖，而不是每次粘贴都从零开始。
+  const current = rowsToText(rows);
   const clip = (await pasteText()).trim();
   const text =
     (await askText({
       title: "批量粘贴",
-      label: "每行一对，支持 name: value 或 name=value",
-      value: clip,
+      label: "每行一对，支持 name: value 或 name=value；行首加 # 表示禁用该行",
+      value: current,
       placeholder: "Content-Type: application/json\nAuthorization: Bearer {{token}}",
       multiline: true,
       rows: 8,
-      hint: clip
-        ? "已从剪贴板预填，可直接修改。Enter 换行，Ctrl+Enter 确定。"
+      hint: current
+        ? `已填入当前 ${rows.length} 行，确定后整体替换；空行会被忽略。`
         : "Enter 换行，Ctrl+Enter 确定；空行会被忽略。",
+      replaceAction:
+        clip && clip !== current ? { label: "用剪贴板内容替换", text: clip } : undefined,
     })) ?? "";
-  if (!text.trim()) return;
+  if (text.trim() === current.trim()) return;
   const parsed = parsePairs(text);
   if (parsed.length === 0) {
     await askAlert({
@@ -261,31 +273,37 @@ async function pasteInto<T extends KVRow>(
   }
   rows.length = 0;
   for (const p of parsed) {
-    const row = { id: newId(), key: p.key, value: p.value, enabled: true } as unknown as T;
+    const row = { id: newId(), key: p.key, value: p.value, enabled: !p.disabled } as unknown as T;
     rows.push(row);
   }
   repaint();
   toast(`已粘贴 ${parsed.length} 项`);
 }
 
-/** 从文本里解析键值对，供批量粘贴复用。 */
-export function parsePairs(text: string): { key: string; value: string }[] {
-  const out: { key: string; value: string }[] = [];
+/** 从文本里解析键值对，供批量粘贴复用；行首 `#` 表示这一行禁用。 */
+export function parsePairs(text: string): { key: string; value: string; disabled?: boolean }[] {
+  const out: { key: string; value: string; disabled?: boolean }[] = [];
   for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.trim();
+    let line = rawLine.trim();
     if (!line) continue;
+    let disabled = false;
+    if (line.startsWith("#")) {
+      disabled = true;
+      line = line.slice(1).trim();
+      if (!line) continue;
+    }
     let m = /^([^:=]+?):\s*(.*)$/.exec(line);
     if (!m) m = /^([^=]+?)=(.*)$/.exec(line);
     if (!m) {
-      const tab = line.indexOf("\t");
+      const tab = line.indexOf("	");
       if (tab > 0) {
-        out.push({ key: line.slice(0, tab).trim(), value: line.slice(tab + 1).trim() });
+        out.push({ key: line.slice(0, tab).trim(), value: line.slice(tab + 1).trim(), disabled });
         continue;
       }
-      out.push({ key: line, value: "" });
+      out.push({ key: line, value: "", disabled });
       continue;
     }
-    out.push({ key: m[1]!.trim(), value: m[2]!.trim() });
+    out.push({ key: m[1]!.trim(), value: m[2]!.trim(), disabled });
   }
   return out;
 }

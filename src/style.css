@@ -3124,6 +3124,12 @@ mark,
   overflow: auto;
 }
 
+.prompt-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .confirm-box {
   display: flex;
   gap: 11px;

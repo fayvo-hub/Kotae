@@ -13,6 +13,8 @@ interface TextOptions {
   multiline?: boolean;
   rows?: number;
   hint?: string;
+  /** 正文底部的一个次要动作，例如「用剪贴板内容替换」：把输入框内容整段换掉。 */
+  replaceAction?: { label: string; text: string };
 }
 
 interface ConfirmOptions {
@@ -104,6 +106,26 @@ export function askText(options: TextOptions): Promise<string | null> {
     field.append(input);
     if (options.hint) field.append(el("span", { class: "field-hint", text: options.hint }));
     body.append(field);
+
+    if (options.replaceAction) {
+      const action = options.replaceAction;
+      const actions = el("div", { class: "prompt-actions" });
+      actions.append(
+        el("button", {
+          class: "link-btn",
+          attr: { type: "button" },
+          text: action.label,
+          on: {
+            click: () => {
+              input.value = action.text;
+              input.focus();
+              input.setSelectionRange(action.text.length, action.text.length);
+            },
+          },
+        }),
+      );
+      body.append(actions);
+    }
 
     const foot = el("div", { class: "dialog-foot" });
     const cancel = el("button", {
