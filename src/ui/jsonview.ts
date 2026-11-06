@@ -6,8 +6,8 @@ import { esc } from "../util";
 /** 单行最多渲染的子节点数；超出时折叠为「还有 N 项」按钮。 */
 const PAGE = 200;
 
-/** 默认展开的层数（根对象算第 0 层）。 */
-const DEFAULT_DEPTH = 3;
+/** 默认展开的层数：全部展开，大响应用「收起全部」按需收拢。 */
+const DEFAULT_DEPTH = Number.POSITIVE_INFINITY;
 
 interface NodeContext {
   /** 搜索词，命中节点会高亮并自动展开。 */
@@ -41,7 +41,7 @@ function renderValue(
     : Object.entries(value as Record<string, unknown>);
 
   const childHit = ctx.search ? subtreeMatches(value, ctx.search) : false;
-  // 默认展开前几层：大多数接口就是「包一层 data」的深度，再往里点太累。
+  // 默认全部展开：折叠态看接口结构太费劲，需要收拢时用「收起全部」。
   const open = ctx.search !== "" ? childHit : depth < DEFAULT_DEPTH;
 
   const box = el("div", { class: "json-node" });

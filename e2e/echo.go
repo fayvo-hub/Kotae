@@ -27,6 +27,19 @@ func StartEcho() *Echo {
 			"items":  []any{map[string]any{"id": 1, "name": "示例"}, map[string]any{"id": 2, "name": "第二条"}},
 		})
 	})
+	// /deep 用来验证响应体结构化视图的展开层级：五层嵌套，默认应当全部展开。
+	mux.HandleFunc("/deep", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"l1": map[string]any{
+				"l2": map[string]any{
+					"l3": map[string]any{
+						"l4":  map[string]any{"leaf": "深", "count": 4},
+						"arr": []any{map[string]any{"deep": true}},
+					},
+				},
+			},
+		})
+	})
 	mux.HandleFunc("/echo", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		headers := map[string]string{}
