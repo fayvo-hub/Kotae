@@ -16,6 +16,7 @@ import {
   openNode,
   openTab,
   pasteText,
+  persist,
   renameCollection,
   renameNode,
   setPendingCurl,
@@ -47,6 +48,8 @@ export function sidebar(): HTMLElement {
       on: {
         click: () => {
           state.sidebarTab = t.key;
+          // 页签选择会落库（settings.sidebarTab），否则重启后回到「集合」。
+          persist();
           window.dispatchEvent(new CustomEvent("mygo:rerender-sidebar"));
         },
       },
