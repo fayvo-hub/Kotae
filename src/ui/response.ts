@@ -1,7 +1,7 @@
 // 响应查看区：状态横幅、响应体（JSON 树 / 原始 / 美化）、响应头、保存、复制、搜索。
 
 import { el, fill, icon, iconButton } from "./dom";
-import { highlightMarkup, highlightText, jsonTree, looksJson } from "./jsonview";
+import { highlightMarkup, highlightText, jsonTree, looksJson, setTreeExpanded } from "./jsonview";
 import { System } from "../mygo";
 import type { ResponseRecord, Tab } from "../types";
 import { copyText, toast } from "../store";
@@ -191,6 +191,28 @@ function bodyTools(tab: Tab, res: ResponseRecord): HTMLElement {
       );
     }
     tools.append(seg);
+    // 默认只展开前几层，剩下的一键搞定（原始视图下没有树，不显示）。
+    if (tab.bodyView === "pretty") {
+      const treeHost = (): HTMLElement | null => document.querySelector<HTMLElement>(".json-host");
+      for (const [label, open] of [
+        ["展开全部", true],
+        ["收起全部", false],
+      ] as [string, boolean][]) {
+        tools.append(
+          el("button", {
+            class: "link-btn",
+            attr: { type: "button" },
+            text: label,
+            on: {
+              click: () => {
+                const host = treeHost();
+                if (host) setTreeExpanded(host, open);
+              },
+            },
+          }),
+        );
+      }
+    }
   } else if (/html|xml|svg/i.test(res.contentType)) {
     for (const v of [
       { key: "pretty" as const, label: "高亮" },

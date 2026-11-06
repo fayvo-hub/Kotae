@@ -40,8 +40,22 @@ const COMMON_HEADERS = [
 /** 渲染整块请求编辑区。 */
 export function requestPanel(tab: Tab): HTMLElement {
   const wrap = el("section", { class: "request-panel" });
-  fill(wrap, urlBar(tab), tabStrip(tab), tabBody(tab));
+  const row = el("div", { class: "request-tabs-row" });
+  row.append(tabStrip(tab), envChip());
+  fill(wrap, urlBar(tab), row, tabBody(tab));
   return wrap;
+}
+
+/** 当前环境胶囊：只显示不切换，点开环境管理。 */
+function envChip(): HTMLElement {
+  const name = document.documentElement.dataset.envName ?? "无环境";
+  const chip = el("button", {
+    class: "env-chip-btn",
+    attr: { type: "button", title: "管理环境变量（Ctrl+E）" },
+    on: { click: () => toggleUI("envOpen", true) },
+  });
+  chip.append(icon("globe"), el("span", { text: name }));
+  return chip;
 }
 
 function urlBar(tab: Tab): HTMLElement {
@@ -166,9 +180,6 @@ function unresolvedBadge(tab: Tab): HTMLElement {
     badge.append(
       el("span", { text: `未定义变量：${missing.map((m) => `{{${m}}}`).join(" ")}` }),
     );
-  } else {
-    const env = document.documentElement.dataset.envName ?? "";
-    if (env) badge.append(el("span", { class: "env-chip", text: env }));
   }
   return badge;
 }

@@ -17,6 +17,7 @@ import {
   renameEnv,
   saveRequestTo,
   saveTab,
+  persist,
   saveTabAs,
   scope,
   setEnv,
@@ -490,6 +491,17 @@ export function envDialog(): HTMLElement {
     list.append(add);
   };
 
+  // 只改左侧计数：环境变量每输入一个字就走一遍列表重绘，对话框本身不动。
+  const syncCounts = (): void => {
+    const rows = list.querySelectorAll<HTMLElement>(".env-item");
+    state.envs.forEach((env, i) => {
+      const count = rows[i]?.querySelector<HTMLElement>(".env-count");
+      if (count) {
+        count.textContent = String(env.vars.filter((v) => v.enabled && v.key).length);
+      }
+    });
+  };
+
   const renderDetail = (envId: string): void => {
     const env = state.envs.find((e) => e.id === envId);
     if (!env) {
@@ -533,8 +545,12 @@ export function envDialog(): HTMLElement {
       rows: env.vars,
       keyPlaceholder: "变量名（如 baseUrl）",
       valuePlaceholder: "变量值",
+      // 逐字输入就重建整个对话框会重新播一次弹入动画，看着一直在闪；
+      // 这里只写库并就地刷新左侧计数与顶栏胶囊。
       onChange: () => {
-        window.dispatchEvent(new CustomEvent("mygo:rerender-env"));
+        persist();
+        syncCounts();
+        window.dispatchEvent(new CustomEvent("mygo:env-pill"));
       },
       emptyHint: "还没有变量，点击下面的按钮添加",
     });
@@ -571,8 +587,10 @@ export function globalsSection(): HTMLElement {
     rows: state.globals,
     keyPlaceholder: "变量名",
     valuePlaceholder: "变量值",
+    // 同样不重建设置对话框：全局变量只影响发送时的插值。
     onChange: () => {
-      window.dispatchEvent(new CustomEvent("mygo:rerender-settings"));
+      persist();
+      window.dispatchEvent(new CustomEvent("mygo:env-pill"));
     },
     emptyHint: "还没有全局变量（全局变量不随环境切换）",
   });

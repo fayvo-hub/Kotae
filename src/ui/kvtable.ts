@@ -48,23 +48,36 @@ export function kvTable<T extends KVRow>(opts: KVTableOptions<T>): HTMLElement {
     const row = { id: "", key: "", value: "", enabled: true } as unknown as T;
     (row as KVRow).id = newId();
     rows.push(row);
-    opts.onChange();
+    refresh();
     if (focus) {
       const inputs = body.querySelectorAll<HTMLInputElement>(".kv-key");
       inputs[inputs.length - 1]?.focus();
     }
   };
 
-  if (rows.length === 0) {
-    body.append(
-      el("div", {
-        class: "kv-empty",
-        text: opts.emptyHint ?? "还没有内容，点击下方按钮添加一行",
-      }),
-    );
-  }
+  // 行数变化时自己重绘（增/删/粘贴），调用方不必重建整块界面：
+  // 重建会重播浮层动画、丢失输入焦点，环境与全局变量编辑器就靠这个避免闪烁。
+  const paint = (): void => {
+    body.replaceChildren();
+    if (rows.length === 0) {
+      body.append(
+        el("div", {
+          class: "kv-empty",
+          text: opts.emptyHint ?? "还没有内容，点击下方按钮添加一行",
+        }),
+      );
+      return;
+    }
+    rows.forEach(paintRow);
+  };
 
-  rows.forEach((row, index) => {
+  /** 结构变化：先重绘再交给调用方持久化。 */
+  const refresh = (): void => {
+    paint();
+    opts.onChange();
+  };
+
+  function paintRow(row: T, index: number): void {
     const line = el("div", { class: "kv-row" });
     if (opts.toggle !== false) {
       const check = el("input", {
@@ -150,14 +163,14 @@ export function kvTable<T extends KVRow>(opts: KVTableOptions<T>): HTMLElement {
         () => {
           const i = rows.indexOf(row);
           if (i >= 0) rows.splice(i, 1);
-          opts.onChange();
+          refresh();
         },
         "kv-del",
       ),
     );
 
     body.append(line);
-  });
+  }
 
   // Enter 跳到下一行，末尾自动新增。
   const onRowKeydown = (ev: KeyboardEvent, row: T, which: "key" | "value"): void => {
@@ -176,7 +189,7 @@ export function kvTable<T extends KVRow>(opts: KVTableOptions<T>): HTMLElement {
         if (i >= 0) {
           ev.preventDefault();
           rows.splice(i, 1);
-          opts.onChange();
+          refresh();
         }
       }
     }
@@ -195,7 +208,7 @@ export function kvTable<T extends KVRow>(opts: KVTableOptions<T>): HTMLElement {
     attr: { type: "button", title: "每行一对「名称: 值」，或粘贴原始请求头文本" },
     on: {
       click: () => {
-        void pasteInto(rows, opts, addRow);
+        void pasteInto(rows, opts, refresh);
       },
     },
   });
@@ -203,6 +216,7 @@ export function kvTable<T extends KVRow>(opts: KVTableOptions<T>): HTMLElement {
 
   fill(foot, addBtn, pasteBtn);
   fill(wrap, body, foot);
+  paint();
   return wrap;
 }
 
@@ -219,7 +233,7 @@ function autoGrow(area: HTMLTextAreaElement): void {
 async function pasteInto<T extends KVRow>(
   rows: T[],
   opts: KVTableOptions<T>,
-  addRow: (focus?: boolean) => void,
+  repaint: () => void,
 ): Promise<void> {
   let text = await pasteText();
   if (!text.trim()) {
@@ -245,8 +259,7 @@ async function pasteInto<T extends KVRow>(
     const row = { id: newId(), key: p.key, value: p.value, enabled: true } as unknown as T;
     rows.push(row);
   }
-  void addRow;
-  opts.onChange();
+  repaint();
   toast(`已粘贴 ${parsed.length} 项`);
 }
 

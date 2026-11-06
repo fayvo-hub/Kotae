@@ -676,6 +676,8 @@ function bindEvents(): void {
   });
   window.addEventListener("mygo:rerender-settings", rebuildOverlays);
   window.addEventListener("mygo:rerender-env", rebuildOverlays);
+  // 环境/全局变量逐字编辑时只刷新顶栏胶囊，不动整块浮层（重建会重播弹入动画）。
+  window.addEventListener("mygo:env-pill", renderEnv);
 
   window.addEventListener("mygo:open-save", () => {
     saveOpen = true;

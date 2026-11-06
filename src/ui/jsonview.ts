@@ -6,6 +6,9 @@ import { esc } from "../util";
 /** 单行最多渲染的子节点数；超出时折叠为「还有 N 项」按钮。 */
 const PAGE = 200;
 
+/** 默认展开的层数（根对象算第 0 层）。 */
+const DEFAULT_DEPTH = 3;
+
 interface NodeContext {
   /** 搜索词，命中节点会高亮并自动展开。 */
   search: string;
@@ -38,7 +41,8 @@ function renderValue(
     : Object.entries(value as Record<string, unknown>);
 
   const childHit = ctx.search ? subtreeMatches(value, ctx.search) : false;
-  const open = depth < 2 || ctx.search !== "" ? (ctx.search ? childHit : depth < 2) : false;
+  // 默认展开前几层：大多数接口就是「包一层 data」的深度，再往里点太累。
+  const open = ctx.search !== "" ? childHit : depth < DEFAULT_DEPTH;
 
   const box = el("div", { class: "json-node" });
   const line = el("div", { class: "json-line" });
@@ -98,6 +102,17 @@ function renderValue(
 
   box.append(line, children);
   return box;
+}
+
+/** 一次性展开或收起整棵树（不重新渲染，只改 class 与箭头）。 */
+export function setTreeExpanded(root: HTMLElement, open: boolean): void {
+  for (const node of root.querySelectorAll<HTMLElement>(".json-node")) {
+    node.classList.toggle("open", open);
+    const toggle = node.querySelector<HTMLElement>(":scope > .json-line > .json-toggle");
+    if (!toggle) continue;
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    toggle.textContent = open ? "▾" : "▸";
+  }
 }
 
 function renderPrimitive(value: unknown, ctx: NodeContext, key: string | undefined): HTMLElement {

@@ -1480,15 +1480,6 @@ body.resizing-row * {
   height: 12px;
 }
 
-.env-chip {
-  font-size: 10.5px;
-  color: var(--text-3);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0 6px;
-  line-height: 15px;
-}
-
 .url-actions {
   display: flex;
   align-items: center;
@@ -1512,14 +1503,51 @@ body.resizing-row * {
 
 /* ---- 子页签 ---- */
 
+/* 子页签行：左侧页签 + 右侧当前环境胶囊，两者同一基线。 */
+.request-tabs-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-right: 12px;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border);
+}
+
 .subtabs {
   display: flex;
   align-items: center;
   gap: 2px;
   padding: 0 12px;
-  flex: 0 0 auto;
-  border-bottom: 1px solid var(--border);
+  flex: 1 1 auto;
+  min-width: 0;
   min-height: 33px;
+}
+
+.env-chip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 11px;
+  white-space: nowrap;
+  transition: border-color var(--speed), color var(--speed), background var(--speed);
+}
+
+.env-chip-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--surface);
+}
+
+.env-chip-btn .ic {
+  width: 12px;
+  height: 12px;
+  color: var(--text-3);
 }
 
 .subtab {
