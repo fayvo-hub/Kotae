@@ -1,0 +1,1113 @@
+// 应用状态与所有写操作。界面只读 state、调用 action，然后由 subscribe 触发重绘。
+
+import { System } from "./mygo";
+import type {
+  ApiRequest,
+  Collection,
+  Env,
+  FolderNode,
+  HistoryEntry,
+  KV,
+  PersistedWorkspace,
+  RequestNode,
+  ResponseRecord,
+  Tab,
+  ThemeMode,
+  TreeNode,
+} from "./types";
+import { buildURL, cloneRequest, emptyRequest, toCurl } from "./curl";
+import { guessName, interpolate, splitURL, uid, type VarScope } from "./util";
+
+export interface Toast {
+  id: string;
+  text: string;
+  kind: "info" | "success" | "error";
+}
+
+export interface State {
+  ready: boolean;
+  collections: Collection[];
+  history: HistoryEntry[];
+  envs: Env[];
+  activeEnvId: string;
+  globals: KV[];
+  tabs: Tab[];
+  activeTabId: string | null;
+  theme: ThemeMode;
+  sidebarWidth: number;
+  responseHeight: number;
+  sidebarTab: "collections" | "history";
+  onboardingDone: boolean;
+  /** 侧边栏是否收起。 */
+  sidebarCollapsed: boolean;
+  /** 界面浮层状态，不持久化。 */
+  commandOpen: boolean;
+  settingsOpen: boolean;
+  envOpen: boolean;
+  curlOpen: boolean;
+  /** cURL 解析结果，等待用户确认后填充。 */
+  pendingCurl: { request: ApiRequest; warnings: string[]; source: string } | null;
+  toasts: Toast[];
+  /** 集合树里被展开的节点 id 集合（文件夹的 open 字段已持久化，这里只为搜索时临时展开）。 */
+  treeFilter: string;
+  historyFilter: string;
+}
+
+const STORAGE_VERSION = 1;
+
+function blankState(): State {
+  return {
+    ready: false,
+    collections: [],
+    history: [],
+    envs: [],
+    activeEnvId: "",
+    globals: [],
+    tabs: [],
+    activeTabId: null,
+    theme: "auto",
+    sidebarWidth: 288,
+    responseHeight: 340,
+    sidebarTab: "collections",
+    onboardingDone: false,
+    sidebarCollapsed: false,
+    commandOpen: false,
+    settingsOpen: false,
+    envOpen: false,
+    curlOpen: false,
+    pendingCurl: null,
+    toasts: [],
+    treeFilter: "",
+    historyFilter: "",
+  };
+}
+
+export const state: State = blankState();
+
+const listeners = new Set<() => void>();
+
+/** 订阅状态变化；返回取消订阅函数。 */
+export function subscribe(fn: () => void): () => void {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
+
+/**
+ * 通知界面重绘。
+ */
+export function emit(): void {
+  for (const fn of listeners) fn();
+}
+
+// ---- 持久化 ----
+
+let saveTimer: number | undefined;
+let saveWarned = false;
+
+/** 序列化当前工作区（剔除运行时字段）并写入 userData 目录。 */
+export function persist(): void {
+  if (!state.ready) return;
+  window.clearTimeout(saveTimer);
+  saveTimer = window.setTimeout(() => {
+    const data: PersistedWorkspace = {
+      version: STORAGE_VERSION,
+      collections: state.collections,
+      history: state.history.slice(0, 200),
+      envs: state.envs,
+      activeEnvId: state.activeEnvId,
+      globals: state.globals,
+      tabs: state.tabs.map((t) => ({
+        id: t.id,
+        name: t.name,
+        request: t.request,
+        dirty: t.dirty,
+        origin: t.origin,
+      })),
+      activeTabId: state.activeTabId,
+      theme: state.theme,
+      sidebarWidth: state.sidebarWidth,
+      responseHeight: state.responseHeight,
+      sidebarTab: state.sidebarTab,
+      onboardingDone: state.onboardingDone,
+    };
+    void System.saveState(JSON.stringify(data)).catch((err: unknown) => {
+      // 持久化失败只提示一次，避免连续编辑时反复弹出同一条错误。
+      if (saveWarned) return;
+      saveWarned = true;
+      toast(`本地保存失败：${errText(err)}`, "error");
+    });
+  }, 220);
+}
+
+/** 启动时读回工作区；文件损坏时保留一份备份并从头开始。 */
+export async function load(): Promise<void> {
+  let raw: string;
+  try {
+    raw = await System.loadState();
+  } catch {
+    raw = "";
+  }
+  if (raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw) as Partial<PersistedWorkspace>;
+      applyPersisted(parsed);
+    } catch {
+      toast("本地数据损坏，已忽略并重新开始（原文件仍然保留）", "error");
+    }
+  }
+  if (state.envs.length === 0) {
+    state.envs = [defaultEnv()];
+    state.activeEnvId = state.envs[0]!.id;
+  } else if (!state.envs.some((e) => e.id === state.activeEnvId)) {
+    state.activeEnvId = state.envs[0]!.id;
+  }
+  if (state.tabs.length === 0) {
+    openTab(emptyRequest(), "未命名请求");
+  } else if (!state.tabs.some((t) => t.id === state.activeTabId)) {
+    state.activeTabId = state.tabs[0]!.id;
+  }
+  state.ready = true;
+  applyTheme();
+  emit();
+}
+
+function applyPersisted(p: Partial<PersistedWorkspace>): void {
+  state.collections = Array.isArray(p.collections) ? p.collections : [];
+  state.history = Array.isArray(p.history) ? p.history : [];
+  state.envs = Array.isArray(p.envs) ? p.envs : [];
+  state.globals = Array.isArray(p.globals) ? p.globals : [];
+  state.activeEnvId = typeof p.activeEnvId === "string" ? p.activeEnvId : "";
+  state.theme = p.theme === "dark" || p.theme === "light" ? p.theme : "auto";
+  state.sidebarWidth = clamp(p.sidebarWidth ?? 288, 208, 460);
+  state.responseHeight = clamp(p.responseHeight ?? 340, 160, 900);
+  state.sidebarTab = p.sidebarTab === "history" ? "history" : "collections";
+  state.onboardingDone = p.onboardingDone === true;
+  state.tabs = Array.isArray(p.tabs)
+    ? p.tabs.map((t) => ({
+        ...t,
+        request: normalizeRequest(t.request),
+        sending: false,
+        responseTab: "body",
+        bodyView: "pretty",
+        search: "",
+        requestTab: "params",
+      }))
+    : [];
+  state.activeTabId = typeof p.activeTabId === "string" ? p.activeTabId : null;
+}
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, Number.isFinite(n) ? n : min));
+}
+
+/** 兼容旧数据/缺字段的手工导入文件。 */
+function normalizeRequest(r: Partial<ApiRequest> | undefined): ApiRequest {
+  const base = emptyRequest();
+  if (!r) return base;
+  return {
+    method: r.method ?? base.method,
+    url: r.url ?? base.url,
+    params: r.params ?? [],
+    headers: r.headers ?? [],
+    bodyMode: r.bodyMode ?? "none",
+    body: r.body ?? "",
+    form: r.form ?? [],
+    auth: { ...base.auth, ...(r.auth ?? {}) },
+    options: { ...base.options, ...(r.options ?? {}) },
+  };
+}
+
+function defaultEnv(): Env {
+  return {
+    id: uid("env"),
+    name: "默认环境",
+    vars: [
+      { id: uid("kv"), key: "baseUrl", value: "https://httpbin.org", enabled: true },
+      { id: uid("kv"), key: "token", value: "", enabled: true },
+    ],
+  };
+}
+
+/** 当前环境下发给请求的变量作用域。 */
+export function scope(): VarScope {
+  const env = state.envs.find((e) => e.id === state.activeEnvId);
+  return { env: env?.vars ?? [], globals: state.globals };
+}
+
+/** 把 {{变量}} 替换成实际值（生成 URL、头、体时用）。 */
+export function resolveText(text: string): string {
+  return interpolate(text, scope()).text;
+}
+
+// ---- 主题 ----
+
+export function applyTheme(): void {
+  const root = document.documentElement;
+  root.dataset.theme = state.theme;
+}
+
+export function setTheme(mode: ThemeMode): void {
+  state.theme = mode;
+  applyTheme();
+  persist();
+  emit();
+}
+
+// ---- 提示条 ----
+
+export function toast(text: string, kind: Toast["kind"] = "info"): void {
+  const item: Toast = { id: uid("toast"), text, kind };
+  state.toasts.push(item);
+  emit();
+  window.setTimeout(() => {
+    const i = state.toasts.findIndex((t) => t.id === item.id);
+    if (i >= 0) {
+      state.toasts.splice(i, 1);
+      emit();
+    }
+  }, kind === "error" ? 6000 : 3200);
+}
+
+export function errText(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  return String(err);
+}
+
+// ---- 标签页 ----
+
+export function activeTab(): Tab | undefined {
+  return state.tabs.find((t) => t.id === state.activeTabId);
+}
+
+export function openTab(request: ApiRequest, name: string, origin?: Tab["origin"]): Tab {
+  const tab: Tab = {
+    id: uid("tab"),
+    name,
+    request,
+    dirty: false,
+    origin,
+    sending: false,
+    responseTab: "body",
+    bodyView: "pretty",
+    search: "",
+    requestTab: "params",
+  };
+  state.tabs.push(tab);
+  state.activeTabId = tab.id;
+  persist();
+  emit();
+  return tab;
+}
+
+export function closeTab(id: string): void {
+  const i = state.tabs.findIndex((t) => t.id === id);
+  if (i < 0) return;
+  state.tabs.splice(i, 1);
+  if (state.activeTabId === id) {
+    const next = state.tabs[Math.min(i, state.tabs.length - 1)];
+    state.activeTabId = next ? next.id : null;
+  }
+  if (state.tabs.length === 0) {
+    openTab(emptyRequest(), "未命名请求");
+    return;
+  }
+  persist();
+  emit();
+}
+
+export function setActiveTab(id: string): void {
+  if (state.activeTabId === id) return;
+  state.activeTabId = id;
+  persist();
+  emit();
+}
+
+/** 修改当前标签的请求；mutator 直接改对象，随后标记为未保存。 */
+export function mutate(mutator: (r: ApiRequest, t: Tab) => void): void {
+  const tab = activeTab();
+  if (!tab) return;
+  mutator(tab.request, tab);
+  tab.dirty = true;
+  tab.name = tab.name === "新请求" ? guessName(tab.request.url, tab.request.method) : tab.name;
+  persist();
+  emit();
+}
+
+/** 把粘贴进来的 URL 拆成基础地址与查询参数。 */
+export function applyURL(raw: string): void {
+  const tab = activeTab();
+  if (!tab) return;
+  const { base, params } = splitURL(raw.trim());
+  tab.request.url = base;
+  if (params.length > 0) {
+    tab.request.params = [
+      ...tab.request.params.filter((p) => p.key.trim() !== "" || p.value.trim() !== ""),
+      ...params.map((p) => ({ id: uid("kv"), key: p.key, value: p.value, enabled: true })),
+    ];
+  }
+  tab.dirty = true;
+  persist();
+  emit();
+}
+
+// ---- 发送 ----
+
+/** 每个标签页当前请求的 AbortController，用于取消。 */
+const controllers = new Map<string, AbortController>();
+
+/** 取消某个标签页正在进行的请求（abort 会在 Go 侧中止连接）。 */
+export function abortSend(tabId: string): void {
+  const c = controllers.get(tabId);
+  if (!c) return;
+  c.abort(new DOMException("用户取消了请求", "AbortError"));
+}
+
+export async function send(): Promise<void> {
+  const tab = activeTab();
+  if (!tab || tab.sending) return;
+
+  let url = buildURL(tab.request, resolveText);
+  if (!url.trim()) {
+    toast("请先填写请求地址", "error");
+    return;
+  }
+  const missing = interpolate(
+    [
+      tab.request.url,
+      ...tab.request.params.map((p) => `${p.key}${p.value}`),
+      ...tab.request.headers.map((h) => `${h.key}${h.value}`),
+      tab.request.body,
+    ].join("\n"),
+    scope(),
+  ).missing;
+  if (missing.length > 0) {
+    toast(`未定义的变量：${missing.map((m) => `{{${m}}}`).join("、")}`, "error");
+    return;
+  }
+
+  const headers = new Headers();
+  for (const h of tab.request.headers) {
+    if (!h.enabled || !h.key.trim()) continue;
+    try {
+      headers.set(resolveText(h.key), resolveText(h.value));
+    } catch {
+      toast(`请求头「${h.key}」不是合法的头名`, "error");
+      return;
+    }
+  }
+
+  const auth = tab.request.auth;
+  if (auth.type === "bearer" && auth.token) {
+    headers.set("Authorization", `Bearer ${resolveText(auth.token)}`);
+  } else if (auth.type === "basic") {
+    headers.set(
+      "Authorization",
+      `Basic ${btoa(`${resolveText(auth.username)}:${resolveText(auth.password)}`)}`,
+    );
+  } else if (auth.type === "apikey" && auth.key) {
+    if (auth.in === "header") headers.set(resolveText(auth.key), resolveText(auth.value));
+  }
+
+  let body: BodyInit | undefined;
+  const methodUpper = tab.request.method.toUpperCase();
+  if (methodUpper !== "GET" && methodUpper !== "HEAD" && tab.request.bodyMode !== "none") {
+    if (tab.request.bodyMode === "form") {
+      const fd = new FormData();
+      for (const f of tab.request.form) {
+        if (!f.enabled || !f.key.trim()) continue;
+        if (f.kind === "file") {
+          if (!f.fileData) continue;
+          const bytes = base64ToBytes(f.fileData);
+          fd.append(
+            resolveText(f.key),
+            new Blob([bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer], {
+              type: "application/octet-stream",
+            }),
+            f.fileName ?? "file",
+          );
+        } else {
+          fd.append(resolveText(f.key), resolveText(f.value));
+        }
+      }
+      body = fd;
+    } else if (tab.request.bodyMode === "urlencoded") {
+      const usp = new URLSearchParams();
+      for (const f of tab.request.form) {
+        if (!f.enabled || !f.key.trim()) continue;
+        usp.append(resolveText(f.key), resolveText(f.value));
+      }
+      body = usp;
+    } else {
+      body = resolveText(tab.request.body);
+      if (tab.request.bodyMode === "json" && !headers.has("content-type")) {
+        headers.set("Content-Type", "application/json");
+      }
+      if (tab.request.bodyMode === "text" && !headers.has("content-type")) {
+        headers.set("Content-Type", "text/plain; charset=utf-8");
+      }
+    }
+  }
+
+  if (auth.type === "apikey" && auth.in === "query" && auth.key.trim()) {
+    const u = new URL(url);
+    u.searchParams.set(resolveText(auth.key), resolveText(auth.value));
+    url = u.toString();
+  }
+
+  // Cookie 开关：关掉时通知 Go 侧停止携带与记录。
+  void System.setCookies(tab.request.options.keepCookies).catch(() => {});
+
+  const controller = new AbortController();
+  controllers.set(tab.id, controller);
+  const timeoutMs = tab.request.options.timeoutMs;
+  let timedOut = false;
+  const timer =
+    timeoutMs > 0
+      ? window.setTimeout(() => {
+          timedOut = true;
+          controller.abort(new DOMException("请求超时", "TimeoutError"));
+        }, timeoutMs)
+      : undefined;
+
+  tab.sending = true;
+  tab.response = undefined;
+  emit();
+
+  const started = performance.now();
+  try {
+    const res = await fetchFrom(url, {
+      method: tab.request.method,
+      headers,
+      body,
+      signal: controller.signal,
+      redirect: tab.request.options.redirect,
+    });
+    const record = await readResponse(res, started);
+    const current = state.tabs.find((t) => t.id === tab.id);
+    if (current) {
+      current.response = record;
+      current.sending = false;
+      current.responseTab = "body";
+      current.search = "";
+    }
+    addHistory(tab.request, record.status, record.durationMs);
+    notifyIfBackground(record);
+  } catch (err) {
+    const current = state.tabs.find((t) => t.id === tab.id);
+    const record = errorRecord(err, performance.now() - started, timedOut);
+    if (current) {
+      current.response = record;
+      current.sending = false;
+      current.responseTab = "body";
+    }
+    addHistory(tab.request, 0, record.durationMs);
+  } finally {
+    if (timer !== undefined) window.clearTimeout(timer);
+    controllers.delete(tab.id);
+    emit();
+  }
+}
+
+async function fetchFrom(input: string, init: RequestInit): Promise<Response> {
+  // 延迟 import，避免在没有 Go 侧插件时（纯浏览器预览）启动即失败。
+  const mod = await import("@mygo-plugins/fetch");
+  return mod.fetch(input, init);
+}
+
+function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+const PREVIEW_LIMIT = 2 * 1024 * 1024;
+
+async function readResponse(res: Response, started: number): Promise<ResponseRecord> {
+  const headers: [string, string][] = [];
+  res.headers.forEach((value, key) => headers.push([key, value]));
+  headers.sort((a, b) => a[0].localeCompare(b[0]));
+
+  const contentType = res.headers.get("content-type") ?? "";
+  const buffer = res.body ? new Uint8Array(await res.arrayBuffer()) : new Uint8Array(0);
+  const textual = isTextual(contentType, buffer);
+  const durationMs = performance.now() - started;
+
+  const truncated = buffer.byteLength > PREVIEW_LIMIT;
+  const slice = truncated ? buffer.subarray(0, PREVIEW_LIMIT) : buffer;
+
+  let body = "";
+  let base64: string | undefined;
+  if (textual) {
+    body = new TextDecoder("utf-8", { fatal: false }).decode(slice);
+  } else {
+    base64 = bytesToBase64(slice);
+  }
+
+  return {
+    ok: res.status >= 200 && res.status < 400,
+    status: res.status,
+    statusText: res.statusText,
+    url: res.url,
+    redirected: res.redirected,
+    headers,
+    body,
+    bytes: buffer.byteLength,
+    binary: !textual,
+    base64,
+    durationMs,
+    at: Date.now(),
+    contentType,
+    truncated,
+  };
+}
+
+function isTextual(contentType: string, buffer: Uint8Array): boolean {
+  const ct = contentType.toLowerCase();
+  if (ct) {
+    if (ct.startsWith("text/")) return true;
+    if (/[/+](json|xml|javascript|ecmascript|x-www-form-urlencoded|graphql|yaml|csv)/.test(ct)) {
+      return true;
+    }
+    if (ct.includes("html") || ct.includes("svg")) return true;
+    return false;
+  }
+  // 没有 Content-Type 时按字节猜：前 512 字节里出现 NUL 就当二进制。
+  const probe = buffer.subarray(0, Math.min(512, buffer.length));
+  for (const b of probe) if (b === 0) return false;
+  return true;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let s = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    s += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(s);
+}
+
+function errorRecord(err: unknown, durationMs: number, timedOut: boolean): ResponseRecord {
+  const raw = errText(err);
+  const kind = timedOut
+    ? "timeout"
+    : raw.toLowerCase().includes("abort")
+      ? "aborted"
+      : raw.toLowerCase().includes("fetch failed")
+        ? "network"
+        : "invalid";
+  const message = friendlyError(raw, kind);
+  return {
+    ok: false,
+    status: 0,
+    statusText: "",
+    url: "",
+    redirected: false,
+    headers: [],
+    body: "",
+    bytes: 0,
+    binary: false,
+    durationMs,
+    at: Date.now(),
+    contentType: "",
+    truncated: false,
+    error: message,
+    errorKind: kind,
+  };
+}
+
+/** 把 Go 侧的错误原文翻译成中文提示，原文仍保留在提示下方可展开。 */
+export function friendlyError(raw: string, kind: string): string {
+  const text = raw.replace(/^fetch failed:\s*/i, "");
+  if (kind === "timeout") return "请求超时：超过设定的时间仍未完成";
+  if (kind === "aborted") return "请求已取消";
+  const lower = text.toLowerCase();
+  if (lower.includes("no such host") || lower.includes("dns"))
+    return "域名解析失败：请检查地址拼写或网络连接";
+  if (lower.includes("connection refused"))
+    return "连接被拒绝：目标服务未启动，或端口不对";
+  if (lower.includes("connection reset")) return "连接被重置：可能是服务端主动断开或网络中断";
+  if (lower.includes("timeout") || lower.includes("i/o timeout")) return "连接超时：目标服务没有响应";
+  if (lower.includes("certificate") || lower.includes("tls"))
+    return "TLS 握手失败：服务端证书不被信任";
+  if (lower.includes("too many redirects")) return "重定向次数过多：请检查接口是否循环跳转";
+  if (lower.includes("unsupported protocol")) return "不支持的协议：地址需要以 http:// 或 https:// 开头";
+  if (lower.includes("missing protocol scheme") || lower.includes("invalid url"))
+    return "地址格式不正确：请补全 http:// 或 https://";
+  if (lower.includes("connection") || lower.includes("dial")) return "网络连接失败：请检查网络与目标地址";
+  return "请求失败，请查看下方原始错误信息";
+}
+
+function notifyIfBackground(record: ResponseRecord): void {
+  if (!document.hidden) return;
+  const tab = activeTab();
+  const title = record.ok ? "请求已完成" : "请求失败";
+  const body = `${tab?.request.method ?? ""} ${record.status || "—"} · ${Math.round(record.durationMs)} ms`;
+  void System.notify(title, body).catch(() => {});
+}
+
+// ---- 历史 ----
+
+export function addHistory(request: ApiRequest, status: number, durationMs: number): void {
+  const entry: HistoryEntry = {
+    id: uid("h"),
+    at: Date.now(),
+    method: request.method,
+    url: buildURL(request, resolveText),
+    status,
+    durationMs,
+    request: cloneRequest(request),
+  };
+  state.history.unshift(entry);
+  if (state.history.length > 200) state.history.length = 200;
+  persist();
+}
+
+export function deleteHistory(id: string): void {
+  const i = state.history.findIndex((h) => h.id === id);
+  if (i >= 0) {
+    state.history.splice(i, 1);
+    persist();
+    emit();
+  }
+}
+
+export function clearHistory(): void {
+  state.history = [];
+  persist();
+  emit();
+}
+
+export function openHistory(id: string): void {
+  const entry = state.history.find((h) => h.id === id);
+  if (!entry) return;
+  openTab(cloneRequest(entry.request), guessName(entry.url, entry.method));
+}
+
+// ---- 集合 ----
+
+export function createCollection(name: string): Collection {
+  const c: Collection = { id: uid("col"), name, items: [] };
+  state.collections.push(c);
+  persist();
+  emit();
+  return c;
+}
+
+export function renameCollection(id: string, name: string): void {
+  const c = state.collections.find((x) => x.id === id);
+  if (!c) return;
+  c.name = name.trim() || c.name;
+  persist();
+  emit();
+}
+
+export function deleteCollection(id: string): void {
+  const i = state.collections.findIndex((c) => c.id === id);
+  if (i < 0) return;
+  state.collections.splice(i, 1);
+  for (const t of state.tabs) {
+    if (t.origin?.collectionId === id) t.origin = undefined;
+  }
+  persist();
+  emit();
+}
+
+export function createFolder(collectionId: string, parentId?: string, name = "新建文件夹"): void {
+  const folder: FolderNode = { id: uid("folder"), type: "folder", name, open: true, items: [] };
+  const list = parentId ? findList(collectionId, parentId) : findList(collectionId);
+  if (!list) return;
+  list.push(folder);
+  persist();
+  emit();
+}
+
+/** 找到某节点（或集合根）下的 items 数组，用于插入。 */
+function findList(collectionId: string, parentId?: string): TreeNode[] | undefined {
+  const col = state.collections.find((c) => c.id === collectionId);
+  if (!col) return undefined;
+  if (!parentId) return col.items;
+  const stack: TreeNode[] = [...col.items];
+  while (stack.length > 0) {
+    const node = stack.pop()!;
+    if (node.type === "folder") {
+      if (node.id === parentId) return node.items;
+      stack.push(...node.items);
+    }
+  }
+  return undefined;
+}
+
+/** 找到节点本身，返回节点与其父列表。 */
+export function findNode(
+  collectionId: string,
+  nodeId: string,
+): { node: TreeNode; list: TreeNode[] } | undefined {
+  const col = state.collections.find((c) => c.id === collectionId);
+  if (!col) return undefined;
+  const walk = (nodes: TreeNode[]): { node: TreeNode; list: TreeNode[] } | undefined => {
+    for (const n of nodes) {
+      if (n.id === nodeId) return { node: n, list: nodes };
+      if (n.type === "folder") {
+        const hit = walk(n.items);
+        if (hit) return hit;
+      }
+    }
+    return undefined;
+  };
+  return walk(col.items);
+}
+
+export function toggleFolder(collectionId: string, nodeId: string): void {
+  const hit = findNode(collectionId, nodeId);
+  if (hit && hit.node.type === "folder") {
+    hit.node.open = !hit.node.open;
+    persist();
+    emit();
+  }
+}
+
+export function renameNode(collectionId: string, nodeId: string, name: string): void {
+  const hit = findNode(collectionId, nodeId);
+  if (!hit || !name.trim()) return;
+  hit.node.name = name.trim();
+  for (const t of state.tabs) {
+    if (t.origin?.nodeId === nodeId) t.name = name.trim();
+  }
+  persist();
+  emit();
+}
+
+export function deleteNode(collectionId: string, nodeId: string): void {
+  const hit = findNode(collectionId, nodeId);
+  if (!hit) return;
+  const i = hit.list.findIndex((n) => n.id === nodeId);
+  if (i >= 0) hit.list.splice(i, 1);
+  for (const t of state.tabs) {
+    if (t.origin?.nodeId === nodeId) t.origin = undefined;
+  }
+  persist();
+  emit();
+}
+
+export function duplicateNode(collectionId: string, nodeId: string): void {
+  const hit = findNode(collectionId, nodeId);
+  if (!hit) return;
+  const copy = JSON.parse(JSON.stringify(hit.node)) as TreeNode;
+  reassignIds(copy);
+  copy.name = `${hit.node.name} 副本`;
+  const i = hit.list.findIndex((n) => n.id === nodeId);
+  hit.list.splice(i + 1, 0, copy);
+  persist();
+  emit();
+}
+
+function reassignIds(node: TreeNode): void {
+  node.id = uid(node.type === "folder" ? "folder" : "req");
+  if (node.type === "folder") {
+    for (const child of node.items) reassignIds(child);
+  } else {
+    reassignRequestIds(node.request);
+  }
+}
+
+function reassignRequestIds(r: ApiRequest): void {
+  for (const p of r.params) p.id = uid("kv");
+  for (const h of r.headers) h.id = uid("kv");
+  for (const f of r.form) f.id = uid("ff");
+}
+
+export function openNode(collectionId: string, nodeId: string): void {
+  const hit = findNode(collectionId, nodeId);
+  if (!hit || hit.node.type !== "request") return;
+  const existing = state.tabs.find(
+    (t) => t.origin?.nodeId === nodeId && t.origin.collectionId === collectionId,
+  );
+  if (existing) {
+    setActiveTab(existing.id);
+    return;
+  }
+  openTab(cloneRequest(hit.node.request), hit.node.name, { collectionId, nodeId });
+}
+
+/** 保存当前标签：已归属集合则原地更新，否则新建到目标集合。 */
+export function saveTab(collectionId: string, folderId: string | undefined, name: string): void {
+  const tab = activeTab();
+  if (!tab) return;
+  const finalName = name.trim() || guessName(tab.request.url, tab.request.method);
+  if (tab.origin) {
+    const hit = findNode(tab.origin.collectionId, tab.origin.nodeId);
+    if (hit && hit.node.type === "request") {
+      hit.node.request = cloneRequest(tab.request);
+      hit.node.name = finalName;
+      tab.name = finalName;
+      tab.dirty = false;
+      persist();
+      emit();
+      return;
+    }
+    tab.origin = undefined;
+  }
+  const node: RequestNode = {
+    id: uid("req"),
+    type: "request",
+    name: finalName,
+    request: cloneRequest(tab.request),
+  };
+  const list = findList(collectionId, folderId);
+  if (!list) return;
+  list.push(node);
+  tab.origin = { collectionId, nodeId: node.id };
+  tab.name = finalName;
+  tab.dirty = false;
+  persist();
+  emit();
+}
+
+/** 把当前标签另存为新节点（不影响原节点）。 */
+export function saveTabAs(
+  collectionId: string,
+  folderId: string | undefined,
+  name: string,
+): void {
+  const tab = activeTab();
+  if (!tab) return;
+  const node: RequestNode = {
+    id: uid("req"),
+    type: "request",
+    name: name.trim() || guessName(tab.request.url, tab.request.method),
+    request: cloneRequest(tab.request),
+  };
+  const list = findList(collectionId, folderId);
+  if (!list) return;
+  list.push(node);
+  tab.origin = { collectionId, nodeId: node.id };
+  tab.name = node.name;
+  tab.dirty = false;
+  persist();
+  emit();
+}
+
+/** 把任意请求直接存进指定集合（用于「保存到集合」快捷键与命令面板）。 */
+export function saveRequestTo(collectionId: string, name: string, request: ApiRequest): void {
+  const node: RequestNode = {
+    id: uid("req"),
+    type: "request",
+    name,
+    request: cloneRequest(request),
+  };
+  const list = findList(collectionId);
+  if (!list) return;
+  list.push(node);
+  persist();
+  emit();
+}
+
+// ---- 环境变量 ----
+
+export function setEnv(id: string): void {
+  state.activeEnvId = id;
+  persist();
+  emit();
+}
+
+export function createEnv(name: string): Env {
+  const env: Env = { id: uid("env"), name, vars: [] };
+  state.envs.push(env);
+  state.activeEnvId = env.id;
+  persist();
+  emit();
+  return env;
+}
+
+export function deleteEnv(id: string): void {
+  if (state.envs.length <= 1) {
+    toast("至少要保留一个环境", "error");
+    return;
+  }
+  const i = state.envs.findIndex((e) => e.id === id);
+  if (i < 0) return;
+  state.envs.splice(i, 1);
+  if (state.activeEnvId === id) state.activeEnvId = state.envs[0]!.id;
+  persist();
+  emit();
+}
+
+export function renameEnv(id: string, name: string): void {
+  const env = state.envs.find((e) => e.id === id);
+  if (!env) return;
+  env.name = name.trim() || env.name;
+  persist();
+  emit();
+}
+
+export function mutateEnvVars(id: string, mutator: (vars: KV[]) => void): void {
+  const env = state.envs.find((e) => e.id === id);
+  if (!env) return;
+  mutator(env.vars);
+  persist();
+  emit();
+}
+
+export function mutateGlobals(mutator: (vars: KV[]) => void): void {
+  mutator(state.globals);
+  persist();
+  emit();
+}
+
+// ---- 导入导出 ----
+
+export interface WorkspaceBundle {
+  app: string;
+  version: number;
+  exportedAt: string;
+  collections: Collection[];
+  envs: Env[];
+  globals: KV[];
+}
+
+export function exportBundle(): string {
+  const bundle: WorkspaceBundle = {
+    app: "mygo-api",
+    version: STORAGE_VERSION,
+    exportedAt: new Date().toISOString(),
+    collections: state.collections,
+    envs: state.envs,
+    globals: state.globals,
+  };
+  return JSON.stringify(bundle, null, 2);
+}
+
+/** 导入备份：合并到现有数据（id 冲突时整体换新 id）。 */
+export function importBundle(raw: string): { collections: number; envs: number } {
+  const parsed = JSON.parse(raw) as Partial<WorkspaceBundle>;
+  const collections = Array.isArray(parsed.collections) ? parsed.collections : [];
+  const envs = Array.isArray(parsed.envs) ? parsed.envs : [];
+  for (const c of collections) {
+    reassignCollectionIds(c);
+    state.collections.push(c);
+  }
+  for (const e of envs) {
+    e.id = uid("env");
+    for (const v of e.vars) v.id = uid("kv");
+    state.envs.push(e);
+  }
+  if (Array.isArray(parsed.globals)) {
+    for (const g of parsed.globals) state.globals.push({ ...g, id: uid("kv") });
+  }
+  persist();
+  emit();
+  return { collections: collections.length, envs: envs.length };
+}
+
+function reassignCollectionIds(col: Collection): void {
+  col.id = uid("col");
+  const walk = (nodes: TreeNode[]): void => {
+    for (const n of nodes) {
+      if (n.type === "folder") {
+        n.id = uid("folder");
+        walk(n.items);
+      } else {
+        n.id = uid("req");
+        reassignRequestIds(n.request);
+      }
+    }
+  };
+  walk(col.items);
+}
+
+// ---- 复制为 cURL ----
+
+export function currentCurl(useVariables: boolean): string {
+  const tab = activeTab();
+  if (!tab) return "";
+  return toCurl(tab.request, { resolve: useVariables ? resolveText : (t) => t });
+}
+
+export async function copyText(text: string, label = "已复制"): Promise<void> {
+  try {
+    await System.copyText(text);
+    toast(label, "success");
+  } catch (err) {
+    // 兜底：用 webview 的剪贴板 API。
+    try {
+      await navigator.clipboard.writeText(text);
+      toast(label, "success");
+    } catch {
+      toast(`复制失败：${errText(err)}`, "error");
+    }
+  }
+}
+
+export async function pasteText(): Promise<string> {
+  try {
+    const text = await System.pasteText();
+    if (text) return text;
+  } catch {
+    // 继续尝试 webview 剪贴板
+  }
+  try {
+    return await navigator.clipboard.readText();
+  } catch {
+    return "";
+  }
+}
+
+// ---- 界面开关（不持久化） ----
+
+export function toggleUI(key: "commandOpen" | "settingsOpen" | "envOpen" | "curlOpen", open?: boolean): void {
+  const next = open === undefined ? !state[key] : open;
+  state.commandOpen = false;
+  state.settingsOpen = false;
+  state.envOpen = false;
+  state.curlOpen = false;
+  state[key] = next;
+  emit();
+}
+
+/** 设置 cURL 解析结果并打开导入确认面板。 */
+export function setPendingCurl(
+  payload: { request: ApiRequest; warnings: string[]; source?: string } | null,
+): void {
+  state.pendingCurl = payload
+    ? { request: payload.request, warnings: payload.warnings, source: payload.source ?? "" }
+    : null;
+  if (payload) toggleUI("curlOpen", true);
+  else emit();
+}
+
+/** 确认导入：把解析出的请求填进当前标签（或用新标签）。 */
+export function applyPendingCurl(target: "replace" | "newTab"): void {
+  const pending = state.pendingCurl;
+  if (!pending) return;
+  const req = pending.request;
+  if (target === "newTab") {
+    openTab(cloneRequest(req), guessName(req.url, req.method));
+  } else {
+    const tab = activeTab();
+    if (tab) {
+      tab.request = cloneRequest(req);
+      tab.dirty = true;
+      tab.response = undefined;
+      tab.name = guessName(req.url, req.method);
+    } else {
+      openTab(cloneRequest(req), guessName(req.url, req.method));
+    }
+  }
+  state.pendingCurl = null;
+  state.curlOpen = false;
+  persist();
+  emit();
+  toast("已导入 cURL 命令", "success");
+}
+
+export function toggleSidebar(): void {
+  state.sidebarCollapsed = !state.sidebarCollapsed;
+  emit();
+}
+
+export function finishOnboarding(): void {
+  state.onboardingDone = true;
+  persist();
+}

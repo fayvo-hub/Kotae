@@ -1,0 +1,97 @@
+# MyGo API
+
+纯本地的轻量级 Postman：请求构建、发包、响应查看、集合与历史管理全部在这台机器上完成，不连云端、不需要后端服务。界面文案全部中文。
+
+技术形态：Go 写桌面壳（[MyGo](https://mygo.egoist.dev/)）+ 系统 webview 里的 Vite/TypeScript 前端，HTTP 请求由 Go 侧发出（借 MyGo 的 fetch 插件），因此不受浏览器 CORS 限制，可以任意设置请求头与 Cookie。
+
+设计取舍与功能清单见 `docs/mygo-调研与功能清单.md`。
+
+## 功能
+
+- **请求构建**：GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS；查询参数与请求头表格（启用开关、批量粘贴、同名键全发送）；请求体支持 JSON / 纯文本 / 表单编码 / 含文件的 multipart 表单；认证支持 Bearer、Basic、API Key（头部或查询串）；逐请求超时、重定向策略（跟随/手动/报错）、Cookie 开关。
+- **发送与取消**：发送中可取消；窗口不在前台时用系统通知提示完成。
+- **cURL 互转**：粘贴整条 cURL 命令自动还原成请求（也支持粘贴到地址栏直接识别）；任意请求可一键复制成 cURL。
+- **响应查看**：状态码/耗时/大小/类型；JSON 结构化折叠树与原始文本双视图，HTML/XML 高亮；响应体关键词高亮查找；响应头筛选与逐条复制；响应体保存到本地文件。
+- **集合与历史**：集合/文件夹/请求三级树，重命名、复制、删除；标签页多开、脏标记、保存与另存；最近 200 条历史，可单条删除或清空。
+- **环境变量与插值**：多环境 + 全局变量，`{{name}}` 插值，内置动态变量（`{{$timestamp}}`、`{{$uuid}}`、`{{$randomInt}}` 等）；输入时的变量补全；未定义变量在发送前拦下提示。
+- **导入导出**：工作区备份导出为 JSON、导入时合并到现有数据。
+- **交互效率**：命令面板（Ctrl+K）、快捷键、可拖拽侧边栏与响应区分割、跟随系统/浅色/深色主题、首次启动引导页。
+
+## 开发
+
+```bash
+npm install                 # 安装前端依赖
+npm run generate            # 生成 src/mygo.ts（Go 方法 → TypeScript 客户端）
+npm run dev                 # mygo dev：起 Vite + 编译并启动应用窗口
+npm run typecheck           # TypeScript 类型检查
+npm run build               # 产出 build/<os>-<arch>/（Windows 含 NSIS 安装包）
+npx mygo-cli build -skip-installer   # 只出可执行文件，跳过安装包
+npx mygo-cli vet .          # go vet + 原生 UI 生命周期检查
+```
+
+修改 Go 侧公开方法后必须重跑 `npm run generate`，否则前端拿到的客户端类型是旧的。
+
+## 快捷键
+
+| 快捷键 | 作用 |
+| --- | --- |
+| Ctrl+Enter | 发送请求 |
+| Ctrl+N | 新建请求标签页 |
+| Ctrl+S | 保存请求到集合 |
+| Ctrl+Shift+N | 新建集合 |
+| Ctrl+I | 导入 cURL |
+| Ctrl+Shift+C | 复制当前请求为 cURL |
+| Ctrl+K | 命令面板 |
+| Ctrl+E | 环境变量 |
+| Ctrl+B | 收起/展开侧边栏 |
+| Ctrl+F | 在响应体中查找 |
+| Ctrl+W | 关闭当前标签页 |
+| Ctrl+, | 设置 |
+| Esc | 关闭浮层 / 取消发送中的请求 |
+
+## 数据存储
+
+工作区（集合、历史、环境、标签页、界面偏好）保存在 MyGo 的 userData 目录下的 `workspace.json`，写入走临时文件 + 重命名，避免写坏。路径可在「设置 → 关于」看到，并可用同行的「打开数据目录」直接打开。桌面外壳自己的偏好（是否关闭到托盘）放在同目录的 `desktop.json`，删掉它等于恢复默认。不要时可整目录删除，应用会从头开始。
+
+## 测试
+
+端到端测试在 `e2e/`，用真实二进制、真实窗口跑，不依赖浏览器自动化库：应用在 `-tags e2e` 构建下链接 MyGo 的 Automation 插件，测试通过本机 Unix socket 驱动页面（`eval` 执行脚本、`capture` 截图）、点系统菜单、再启动第二个实例模拟双击图标与深链。
+
+```bash
+npm run e2e                        # 跑全部用例：先构建前端，再编译 e2e 二进制并启动
+npm run e2e:verbose                # 带每个用例的输出与截图名称
+MYGO_E2E_SKIP_BUILD=1 npm run e2e  # 前端没改动时跳过 npm run build:web
+MYGO_E2E_KEEP=1 npm run e2e        # 保留临时目录（含应用日志）便于事后排查
+MYGO_E2E_PACKAGING=1 npm run e2e   # 追加验证打包产物：跑一次 mygo build，断言界面来自二进制
+```
+
+覆盖率（20 个用例）：首屏与固定数据加载、GET/POST 发送与保真（方法、头、查询串、认证）、重定向、错误状态码、超时中文提示、未定义变量拦截、纯文本与二进制响应、Cookie 罐、cURL 导入与导入后发送、保存对话框与新建集合、环境变量面板、命令面板、主题切换、历史记录、页面无未捕获错误，以及桌面层：深链导入、系统菜单新建请求、关闭到托盘后从第二个实例恢复窗口。
+
+固定测试数据在 `e2e/fixtures/workspace.json`，只在 e2e 里用：测试每次复制到临时目录作为 userData 再启动应用，占位符 `__BASE_URL__` 会替换成本地桩服务的随机端口，所以不会碰到你本机的工作区。桩服务在 `e2e/echo.go`（回显请求、慢响应、重定向、错误码、Cookie、二进制、文本）。截图写到 `e2e/artifacts/`（已 gitignore）。
+
+## 桌面集成
+
+- **菜单栏**：文件（新建请求 Ctrl+N、导入 cURL Ctrl+I、保存到集合 Ctrl+S、收起/展开侧边栏 Ctrl+B、关闭窗口、退出）、编辑（撤销/重做/剪切/复制/粘贴/删除/全选，用系统 Role 保留输入框语义）、视图（命令面板 Ctrl+K、管理环境 Ctrl+E、设置 Ctrl+,、切换深色/浅色、重新加载界面、开发者工具、缩放、全屏）、帮助（关于 MyGo API、打开数据目录）。菜单项把动作作为 `desktop:command` 事件发给页面，页面复用同一套 store 逻辑，快捷键与页面内的监听不会打架。
+- **托盘**：托盘菜单提供显示主窗口、新建请求、导入 cURL、关闭到托盘开关、退出。关闭窗口时按该开关隐藏窗口而不是退出（默认开启），偏好写在 userData 下的 `desktop.json`，与 `workspace.json` 分开。Linux 需要 `libayatana-appindicator3`，未安装时托盘创建失败会被记日志，应用其余部分照常工作。
+- **单实例与深链**：第二次启动不会开新窗口，参数转给已在运行的实例。支持 `mygo-api://new`、`mygo-api://settings`、`mygo-api://import?curl=<URL 编码的 cURL>`，最后一种会直接把命令送进导入浮层并自动解析。
+- **关于面板**：走系统标准面板（`ShowAboutPanel`），应用名与版本取自构建时的配置。
+
+## 打包与安装
+
+元数据都在 `mygo.config.ts`：`name`（用户看到的名字，安装包与快捷方式用它）、`slug`（安装包文件名、Debian 包名等纯 ASCII 场景）、`identifier`（系统登记用的反向域名）、`icon`、`windows.displayName` / `windows.installDirName`（Windows 显示名与 `%LOCALAPPDATA%\Programs\MyGoAPI` 目录名）、`linux.*`（Debian 包与 desktop 条目）、`urlSchemes`（深链）。
+
+```bash
+npm run build                         # build/windows-amd64/：MyGo API.exe + mygo-api-setup-0.1.0-amd64.exe
+npx mygo-cli build -skip-installer    # 只要可执行文件
+npx mygo-cli build -platform linux/amd64,darwin/universal   # 交叉编译（需要各平台的打包工具）
+```
+
+Windows 安装包是 NSIS 做的按用户安装：装到 `%LOCALAPPDATA%\Programs\MyGoAPI`，建开始菜单快捷方式，完成页可勾选桌面快捷方式，卸载项出现在「设置 → 应用」（显示名、版本、发布者取自上面的配置）。支持 `/S` 静默安装，卸载同样支持 `/S`；卸载会删掉程序目录、快捷方式与卸载注册项，**不会删** userData 里的工作区数据——那是用户资产，需要的话自己删。NSIS 未安装时 mygo 会自己下载一份。macOS 出 `.app` 与 `.dmg`，Linux 出可执行文件、`.deb`、`.tar.gz`（含 install.sh）与 PKGBUILD。
+
+签名与更新：
+
+- Windows 代码签名：在 `mygo.config.ts` 里配 `windows.certificate`（.pfx 路径）并设置环境变量 `MYGO_WINDOWS_CERTIFICATE_PASSWORD`，时间戳服务用 `windows.timestampUrl`；也可以改用 `windows.signCommand`（`%1` 是待签文件路径）。
+- macOS 签名与公证：`macos.signingIdentity` + `macos.notarize.keychainProfile`。
+- 自动更新：配好 `updates`（`publicKey` + `github`/`url`，`mygo keygen` 生成密钥）后，构建会额外产出签名更新包与 `update-<platform>.json`。当前版本没有配置更新通道，发布前再补。
+
+图标由 `scripts/make-icons.py` 生成（需要 Pillow）：`python scripts/make-icons.py` 会重写 `resources/icon.png`（1024×1024 应用图标）与 `resources/tray.png`（32×32 托盘图标），两者是同一套品牌渐变加 `>_` 字形，改配色只改脚本顶部的两个颜色常量。

@@ -1,0 +1,184 @@
+{
+  "version": 1,
+  "collections": [
+    {
+      "id": "col-fixture",
+      "name": "固定用例",
+      "items": [
+        {
+          "id": "req-json",
+          "type": "request",
+          "name": "GET 查询参数",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/echo",
+            "params": [{ "id": "p1", "key": "q", "value": "mygo", "enabled": true }],
+            "headers": [],
+            "bodyMode": "none",
+            "body": "",
+            "form": [],
+            "auth": { "type": "none", "token": "", "username": "", "password": "", "key": "", "value": "", "in": "header" },
+            "options": { "timeoutMs": 5000, "redirect": "follow", "keepCookies": false }
+          }
+        },
+        {
+          "id": "req-post-json",
+          "type": "request",
+          "name": "POST JSON 回显",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/echo",
+            "params": [],
+            "headers": [{ "id": "h1", "key": "X-Fixture", "value": "yes", "enabled": true }],
+            "bodyMode": "json",
+            "body": "{\n  \"name\": \"mygo\",\n  \"n\": 42\n}",
+            "form": [],
+            "auth": { "type": "bearer", "token": "{{token}}", "username": "", "password": "", "key": "", "value": "", "in": "header" },
+            "options": { "timeoutMs": 5000, "redirect": "follow", "keepCookies": false }
+          }
+        },
+        {
+          "id": "req-redirect",
+          "type": "request",
+          "name": "重定向跟随",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/redirect",
+            "params": [],
+            "headers": [],
+            "bodyMode": "none",
+            "body": "",
+            "form": [],
+            "auth": { "type": "none", "token": "", "username": "", "password": "", "key": "", "value": "", "in": "header" },
+            "options": { "timeoutMs": 5000, "redirect": "follow", "keepCookies": false }
+          }
+        },
+        {
+          "id": "req-timeout",
+          "type": "request",
+          "name": "超时 300ms",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/slow",
+            "params": [{ "id": "p2", "key": "ms", "value": "2000", "enabled": true }],
+            "headers": [],
+            "bodyMode": "none",
+            "body": "",
+            "form": [],
+            "auth": { "type": "none", "token": "", "username": "", "password": "", "key": "", "value": "", "in": "header" },
+            "options": { "timeoutMs": 300, "redirect": "follow", "keepCookies": false }
+          }
+        },
+        {
+          "id": "req-error-status",
+          "type": "request",
+          "name": "500 错误状态",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/status",
+            "params": [{ "id": "p3", "key": "code", "value": "500", "enabled": true }],
+            "headers": [],
+            "bodyMode": "none",
+            "body": "",
+            "form": [],
+            "auth": { "type": "none", "token": "", "username": "", "password": "", "key": "", "value": "", "in": "header" },
+            "options": { "timeoutMs": 5000, "redirect": "follow", "keepCookies": false }
+          }
+        },
+        {
+          "id": "req-missing-var",
+          "type": "request",
+          "name": "未定义变量",
+          "request": {
+            "method": "GET",
+            "url": "{{undefinedBase}}/json",
+            "params": [],
+            "headers": [],
+            "bodyMode": "none",
+            "body": "",
+            "form": [],
+            "auth": { "type": "none", "token": "", "username": "", "password": "", "key": "", "value": "", "in": "header" },
+            "options": { "timeoutMs": 5000, "redirect": "follow", "keepCookies": false }
+          }
+        },
+        {
+          "id": "folder-body",
+          "type": "folder",
+          "name": "响应类型",
+          "open": true,
+          "items": [
+            {
+              "id": "req-text",
+              "type": "request",
+              "name": "纯文本",
+              "request": {
+                "method": "GET",
+                "url": "{{baseUrl}}/text",
+                "params": [],
+                "headers": [],
+                "bodyMode": "none",
+                "body": "",
+                "form": [],
+                "auth": { "type": "none", "token": "", "username": "", "password": "", "key": "", "value": "", "in": "header" },
+                "options": { "timeoutMs": 5000, "redirect": "follow", "keepCookies": false }
+              }
+            },
+            {
+              "id": "req-binary",
+              "type": "request",
+              "name": "二进制响应",
+              "request": {
+                "method": "GET",
+                "url": "{{baseUrl}}/binary",
+                "params": [],
+                "headers": [],
+                "bodyMode": "none",
+                "body": "",
+                "form": [],
+                "auth": { "type": "none", "token": "", "username": "", "password": "", "key": "", "value": "", "in": "header" },
+                "options": { "timeoutMs": 5000, "redirect": "follow", "keepCookies": false }
+              }
+            },
+            {
+              "id": "req-cookie",
+              "type": "request",
+              "name": "Cookie 回显",
+              "request": {
+                "method": "GET",
+                "url": "{{baseUrl}}/cookie",
+                "params": [],
+                "headers": [],
+                "bodyMode": "none",
+                "body": "",
+                "form": [],
+                "auth": { "type": "none", "token": "", "username": "", "password": "", "key": "", "value": "", "in": "header" },
+                "options": { "timeoutMs": 5000, "redirect": "follow", "keepCookies": true }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "history": [],
+  "envs": [
+    {
+      "id": "env-fixture",
+      "name": "固定环境",
+      "vars": [
+        { "id": "v1", "key": "baseUrl", "value": "__BASE_URL__", "enabled": true },
+        { "id": "v2", "key": "token", "value": "__TOKEN__", "enabled": true },
+        { "id": "v3", "key": "disabledVar", "value": "never", "enabled": false }
+      ]
+    }
+  ],
+  "activeEnvId": "env-fixture",
+  "globals": [{ "id": "g1", "key": "globalTag", "value": "e2e", "enabled": true }],
+  "tabs": [],
+  "activeTabId": null,
+  "theme": "dark",
+  "sidebarWidth": 288,
+  "responseHeight": 380,
+  "sidebarTab": "collections",
+  "onboardingDone": true
+}
