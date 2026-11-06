@@ -61,12 +61,23 @@ function statusBar(tab: Tab, res: ResponseRecord): HTMLElement {
   if (res.statusText) code.append(el("span", { class: "status-text", text: res.statusText }));
 
   const meta = el("div", { class: "status-meta" });
-  meta.append(chip("耗时", formatDuration(res.durationMs)));
+  // 耗时拆成两段：慢在建立连接/等服务端，还是慢在传正文。
+  meta.append(
+    chip(
+      "耗时",
+      formatDuration(res.durationMs),
+      `等待响应 ${formatDuration(res.waitMs)} · 下载正文 ${formatDuration(res.downloadMs)}`,
+    ),
+  );
   if (!res.error) {
     meta.append(chip("大小", formatBytes(res.bytes)));
     meta.append(chip("类型", res.contentType || "未知"));
   }
-  if (res.redirected) meta.append(chip("提示", "跟随了重定向"));
+  if (res.redirected) {
+    meta.append(
+      chip("重定向", "已跟随", `请求被重定向过，最终地址：${res.url || "未知"}`),
+    );
+  }
 
   const actions = el("div", { class: "status-actions" });
   if (!res.error) {
@@ -93,8 +104,8 @@ function statusBar(tab: Tab, res: ResponseRecord): HTMLElement {
   return bar;
 }
 
-function chip(label: string, value: string): HTMLElement {
-  const c = el("span", { class: "chip" });
+function chip(label: string, value: string, title?: string): HTMLElement {
+  const c = el("span", { class: "chip", attr: title ? { title } : {} });
   if (label) c.append(el("span", { class: "chip-label", text: label }));
   c.append(el("span", { class: "chip-value", text: value }));
   return c;
@@ -317,10 +328,78 @@ function sentOptions(sent: SentRecord): HTMLElement {
   return box;
 }
 
+/** 二进制响应：图片直接渲染，其他类型给一段十六进制，省得只能盲存文件。 */
+function binaryBody(res: ResponseRecord): HTMLElement {
+  const host = el("div", { class: "binary-view" });
+  const mime = (res.contentType.split(";")[0] ?? "").trim().toLowerCase();
+  const isImage = mime.startsWith("image/") && mime !== "image/svg+xml" && Boolean(res.base64);
+
+  if (isImage && (res.base64?.length ?? 0) < 12_000_000) {
+    host.append(
+      el("div", { class: "binary-preview" }, el("img", {
+        class: "binary-image",
+        attr: { src: `data:${mime};base64,${res.base64}`, alt: "响应图片预览" },
+      })),
+    );
+    host.append(
+      el("p", {
+        class: "binary-meta",
+        text: `${formatBytes(res.bytes)} · ${res.contentType}${res.truncated ? " · 超过 2 MB，预览与保存都只含前半部分" : ""}`,
+      }),
+    );
+    return host;
+  }
+
+  host.append(
+    el("p", {
+      class: "binary-meta",
+      text: `${formatBytes(res.bytes)} · ${res.contentType || "未知类型"}`,
+    }),
+  );
+  host.append(
+    el("pre", { class: "hex-view", text: res.base64 ? hexDump(res.base64) : "（没有内容）" }),
+  );
+  host.append(
+    el("p", {
+      class: "binary-meta",
+      text: res.truncated
+        ? "响应体超过 2 MB，这里与保存都只含前 2 MB。"
+        : "这段是原始字节的十六进制与 ASCII 对照（最多前 512 字节）；要完整内容请点右上角下载。",
+    }),
+  );
+  return host;
+}
+
+/** 把 base64 前若干字节排成 hexdump，排查非文本响应时够用。 */
+function hexDump(base64: string, limit = 512): string {
+  const bin = atob(base64);
+  const end = Math.min(bin.length, limit);
+  const lines: string[] = [];
+  for (let i = 0; i < end; i += 16) {
+    const chunk = bin.slice(i, Math.min(i + 16, end));
+    const hex = [...chunk].map((c) => c.charCodeAt(0).toString(16).padStart(2, "0")).join(" ");
+    const ascii = [...chunk]
+      .map((c) => {
+        const code = c.charCodeAt(0);
+        return code >= 32 && code < 127 ? c : ".";
+      })
+      .join("");
+    lines.push(`${i.toString(16).padStart(8, "0")}  ${hex.padEnd(47, " ")}  ${ascii}`);
+  }
+  return lines.join(String.fromCharCode(10));
+}
+
 function bodyTools(tab: Tab, res: ResponseRecord): HTMLElement {
   const tools = el("div", { class: "tools-row" });
   if (res.binary) {
-    tools.append(el("span", { class: "muted small", text: "二进制响应，无法以文本预览，可保存后查看" }));
+    tools.append(
+      el("span", {
+        class: "muted small",
+        text: res.truncated
+          ? `二进制响应 · 超过 2 MB，只保留前 2 MB（共 ${formatBytes(res.bytes)}）`
+          : "二进制响应：图片直接预览，其他类型给十六进制片段",
+      }),
+    );
     return tools;
   }
 
@@ -425,16 +504,7 @@ function bodyTools(tab: Tab, res: ResponseRecord): HTMLElement {
 function bodyView(tab: Tab, res: ResponseRecord): HTMLElement {
   const host = el("div", { class: "body-view" });
   if (res.binary) {
-    fill(
-      host,
-      el(
-        "div",
-        { class: "response-empty" },
-        icon("download"),
-        el("p", { text: "二进制响应" }),
-        el("p", { class: "muted", text: `${formatBytes(res.bytes)} · ${res.contentType || "未知类型"}` }),
-      ),
-    );
+    fill(host, binaryBody(res));
     return host;
   }
   if (!res.body) {
@@ -527,7 +597,10 @@ async function saveBody(tab: Tab, res: ResponseRecord): Promise<void> {
       res.binary && res.base64
         ? await System.saveBase64(name, res.base64)
         : await System.saveText(name, res.body);
-    if (saved) toast(`已保存到 ${saved}`, "success");
+    if (saved) {
+      toast(`已保存到 ${saved}`, "success");
+      if (res.truncated) toast("响应体超过 2 MB，文件里只有前 2 MB", "info");
+    }
   } catch (err) {
     toast(`保存失败：${(err as Error).message}`, "error");
   }

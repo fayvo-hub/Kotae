@@ -14,9 +14,11 @@ import {
   commandPalette,
   curlDialog,
   envDialog,
+  importDialog,
   openSaveDialog,
   saveDialog,
   settingsDialog,
+  snippetsDialog,
 } from "./ui/overlays";
 import { emptyRequest, parseCurl } from "./curl";
 import { methodTone } from "./util";
@@ -43,8 +45,10 @@ import {
   send,
   setActiveTab,
   setEnv,
+  setImportDraft,
   setPendingCurl,
   setCloseToTray,
+  setGlobalShortcutFromShell,
   setTheme,
   state,
   subscribe,
@@ -583,8 +587,10 @@ function overlaySignature(): string {
     state.onboardingDone ? "on" : "off",
     state.commandOpen,
     state.curlOpen,
+    state.importOpen,
     state.envOpen,
     state.settingsOpen,
+    state.snippetsOpen,
     saveOpen,
   ].join("|");
 }
@@ -599,8 +605,12 @@ function renderOverlays(): void {
     overlayRoot.append(commandPalette());
   } else if (state.curlOpen) {
     overlayRoot.append(curlDialog());
+  } else if (state.importOpen) {
+    overlayRoot.append(importDialog());
   } else if (state.envOpen) {
     overlayRoot.append(envDialog());
+  } else if (state.snippetsOpen) {
+    overlayRoot.append(snippetsDialog());
   } else if (state.settingsOpen) {
     overlayRoot.append(settingsDialog());
   } else if (saveOpen) {
@@ -839,7 +849,17 @@ function onKeydown(ev: KeyboardEvent): void {
         closeEnvMenu();
         return;
       }
-      if (overlaySignature() !== "on|false|false|false|false|false") {
+      // 有任何浮层（含首次引导页）时，Esc 先关浮层。
+      if (
+        state.commandOpen ||
+        state.curlOpen ||
+        state.importOpen ||
+        state.envOpen ||
+        state.snippetsOpen ||
+        state.settingsOpen ||
+        saveOpen ||
+        !state.onboardingDone
+      ) {
         closeAll();
         // 首次引导页在 Esc 下也作为「关闭」处理。
         if (!state.onboardingDone) finishOnboarding();
@@ -864,6 +884,16 @@ function onKeydown(ev: KeyboardEvent): void {
     if (key === "n") {
       ev.preventDefault();
       promptNewCollection();
+      return;
+    }
+    if (key === "g") {
+      ev.preventDefault();
+      toggleUI("snippetsOpen", true);
+      return;
+    }
+    if (key === "i") {
+      ev.preventDefault();
+      toggleUI("importOpen", true);
       return;
     }
   }
@@ -979,6 +1009,20 @@ function bindDesktop(): void {
       case "open-env":
         toggleUI("envOpen", true);
         break;
+      case "snippets":
+        toggleUI("snippetsOpen", true);
+        break;
+      case "import-postman":
+        // 双击 .har 打开时 Text 里是文件内容，直接解析；从菜单进来则只是打开浮层。
+        if (cmd.text) setImportDraft(cmd.text);
+        else toggleUI("importOpen", true);
+        break;
+      case "import-file-too-big":
+        toast(`「${cmd.text}」超过 16 MB，请改用「导入 Postman / HAR」手动选文件`, "error");
+        break;
+      case "import-file-error":
+        toast(`打开「${cmd.text}」失败，文件可能已被移动或没有读取权限`, "error");
+        break;
       case "open-settings":
         toggleUI("settingsOpen", true);
         break;
@@ -991,8 +1035,11 @@ function bindDesktop(): void {
         break;
     }
   });
-  // 用户在托盘菜单里改过「关闭到托盘」后，Go 侧把新值发过来，由页面写库。
-  events.desktopPrefs.on((prefs) => setCloseToTray(prefs.closeToTray));
+  // 用户在托盘菜单里改过桌面偏好后，Go 侧把新值发过来，由页面写库。
+  events.desktopPrefs.on((prefs) => {
+    setCloseToTray(prefs.closeToTray);
+    setGlobalShortcutFromShell(prefs.globalShortcut);
+  });
   // 告诉 Go 侧页面已就绪：启动阶段积压的菜单 / 深链指令现在可以发了。
   void System.desktopReady().catch(() => {});
 }

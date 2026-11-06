@@ -26,6 +26,8 @@ export interface KV {
   key: string;
   value: string;
   enabled: boolean;
+  /** 敏感值：界面上默认遮住，只影响显示，发送与导出仍用真实值。 */
+  secret?: boolean;
 }
 
 /** 请求体形态。binary（二进制直传）属首版不做的范围。 */
@@ -118,6 +120,10 @@ export interface ResponseRecord {
   binary: boolean;
   base64?: string;
   durationMs: number;
+  /** 等到响应头的时间（首字节），和下载正文的时间分开记，慢在哪一段一眼能看出。 */
+  waitMs: number;
+  /** 读完响应体的时间。 */
+  downloadMs: number;
   /** 首次响应字节到达的时刻（毫秒时间戳）。 */
   at: number;
   contentType: string;
@@ -217,6 +223,8 @@ export interface PersistedWorkspace {
   onboardingDone: boolean;
   /** 关闭窗口时最小化到托盘。桌面外壳启动时读它，用户在托盘菜单里改它。 */
   closeToTray: boolean;
+  /** 是否注册系统级快捷键（CmdOrCtrl+Shift+M 唤起窗口）。 */
+  globalShortcut: boolean;
 }
 
 export type PersistedTab = Omit<

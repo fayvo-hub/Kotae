@@ -4,3 +4,6 @@ node_modules/
 /.mygo/
 mygo_windows_*.syso
 e2e/artifacts/
+
+# 本地临时产物（脚本草稿、截图等），不进版本控制。
+tmp/

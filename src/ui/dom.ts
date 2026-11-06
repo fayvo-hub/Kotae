@@ -95,6 +95,7 @@ export const icons = {
   download: svg('<path d="M12 4v11"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M4.5 19.5h15"/>'),
   upload: svg('<path d="M12 20V9"/><path d="m7.5 13.5 4.5-4.5 4.5 4.5"/><path d="M4.5 4.5h15"/>'),
   curl: svg('<path d="M4 8.5 7.5 12 4 15.5"/><path d="M11 16h6"/>'),
+  code: svg('<path d="m9 8-4 4 4 4"/><path d="m15 8 4 4-4 4"/>'),
   terminal: svg('<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="m7.5 10 2 2-2 2"/><path d="M12.5 14h4"/>'),
   table: svg('<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17"/><path d="M3.5 14.5h17"/><path d="M9.5 9.5v10"/>'),
   sliders: svg('<path d="M4 7h9"/><path d="M17 7h3"/><circle cx="15" cy="7" r="2"/><path d="M4 17h3"/><path d="M11 17h9"/><circle cx="9" cy="17" r="2"/>'),

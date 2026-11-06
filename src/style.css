@@ -51,6 +51,10 @@
   --ring: 0 0 0 3px var(--accent-soft);
   --ring-bad: 0 0 0 3px var(--bad-soft);
   --shadow-tab-underline: 0 -1px 0 var(--accent) inset;
+  /* 拖拽落点提示：一条贴边的强调线，或一圈 1px 描边（都只在拖拽时出现）。 */
+  --shadow-drop-before: inset 0 2px 0 var(--accent);
+  --shadow-drop-after: inset 0 -2px 0 var(--accent);
+  --shadow-drop-ring: inset 0 0 0 1px var(--accent);
   --shadow-2: 0 6px 18px -6px rgba(16, 22, 40, 0.16), 0 2px 6px rgba(16, 22, 40, 0.06);
   --shadow-3: 0 24px 64px -18px rgba(12, 17, 33, 0.3), 0 8px 22px rgba(12, 17, 33, 0.1);
 
@@ -1284,6 +1288,24 @@ body.resizing-row * {
   color: var(--accent);
 }
 
+/* 拖拽排序：落点提示只用一条线或一层浅底，不改变行高避免抖动。 */
+.tree-row.dragging {
+  opacity: 0.45;
+}
+
+.tree-row.drop-before {
+  box-shadow: var(--shadow-drop-before);
+}
+
+.tree-row.drop-after {
+  box-shadow: var(--shadow-drop-after);
+}
+
+.tree-row.drop-inside {
+  background: var(--accent-soft);
+  box-shadow: var(--shadow-drop-ring);
+}
+
 .tree-label {
   flex: 1 1 auto;
   min-width: 0;
@@ -1988,6 +2010,21 @@ body.resizing-row * {
   color: var(--text);
 }
 
+/* 桌面偏好：标题在上、说明在下，勾选框对齐标题首行。 */
+.desktop-toggle {
+  align-items: flex-start;
+}
+
+.desktop-toggle > input {
+  margin-top: 2px;
+}
+
+.desktop-toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
 .details {
   grid-column: 1 / -1;
   border-radius: var(--radius-sm);
@@ -2187,6 +2224,22 @@ textarea.kv-value {
   align-self: center;
 }
 
+/* 环境变量的「遮住值」开关：平时低调，已遮住时点亮，鼠标划过整行都看得见。 */
+.kv-row .icon-btn.kv-secret {
+  width: 24px;
+  height: 26px;
+  opacity: 0.5;
+}
+
+.kv-row:hover .icon-btn.kv-secret {
+  opacity: 1;
+}
+
+.kv-row .icon-btn.kv-secret.active {
+  color: var(--accent);
+  opacity: 1;
+}
+
 .kv-empty {
   padding: 16px 14px;
   color: var(--text-3);
@@ -2297,6 +2350,88 @@ textarea.kv-value {
   height: 24px;
   color: var(--text-3);
   margin-bottom: 2px;
+}
+
+/* 二进制响应：图片直接看，其他类型给十六进制片段。 */
+.binary-view {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+
+.binary-preview {
+  display: flex;
+  justify-content: center;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.binary-image {
+  max-width: 100%;
+  max-height: 60vh;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.binary-meta {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-md);
+}
+
+.hex-view {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  line-height: 1.55;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.import-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.import-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-md);
+}
+
+.import-line strong {
+  font-weight: 600;
+}
+
+/* 代码片段：与响应体代码视图同一套底色与字体，长片段在框内滚动。 */
+.snippet-code {
+  margin: 0;
+  padding: 12px 14px;
+  max-height: 46vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  line-height: 1.6;
+  white-space: pre;
+  tab-size: 2;
 }
 
 .response-empty p {

@@ -12,6 +12,7 @@ import {
   duplicateNode,
   exportBundle,
   importBundle,
+  moveTreeNode,
   openHistory,
   openNode,
   openTab,
@@ -23,6 +24,7 @@ import {
   toggleFolder,
   toggleSidebar,
   toggleUI,
+  type DropMode,
 } from "../store";
 import { emptyRequest } from "../curl";
 import { System } from "../mygo";
@@ -188,6 +190,28 @@ function collectionNode(col: Collection, filter: string): HTMLElement | null {
   const items = filter ? filterTree(col.items, filter) : col.items;
   for (const item of items) children.append(treeItem(col.id, item, 1, filter));
 
+  row.setAttribute("draggable", "true");
+  row.addEventListener("dragstart", (ev) => {
+    dragging = { collectionId: col.id, nodeId: "__collection__" };
+    if (ev.dataTransfer) ev.dataTransfer.effectAllowed = "move";
+  });
+  row.addEventListener("dragover", (ev) => {
+    if (dragging && dragging.collectionId === col.id) return;
+    if (!dragging) return;
+    ev.preventDefault();
+    clearDropMarks();
+    row.classList.add("drop-inside");
+  });
+  row.addEventListener("dragleave", () => row.classList.remove("drop-inside"));
+  row.addEventListener("drop", (ev) => {
+    if (!dragging || dragging.nodeId === "__collection__") return;
+    ev.preventDefault();
+    const src = dragging;
+    dragging = null;
+    clearDropMarks();
+    const last = col.items[col.items.length - 1];
+    if (last) moveTreeNode(src, { collectionId: col.id, nodeId: last.id, mode: "after" });
+  });
   row.addEventListener("click", () => {
     children.classList.toggle("collapsed");
     twisty.classList.toggle("collapsed");
@@ -228,6 +252,64 @@ function countRequests(items: TreeNode[]): number {
   return n;
 }
 
+// ---- 拖拽排序 ----
+// HTML5 拖放：行上半区插到前面、下半区插到后面、文件夹行中段拖进去。
+// 用模块级变量记住正在拖的节点，比从 dataTransfer 里反序列化更可靠。
+
+let dragging: { collectionId: string; nodeId: string } | null = null;
+
+function clearDropMarks(): void {
+  for (const el of document.querySelectorAll(".drop-before, .drop-after, .drop-inside")) {
+    el.classList.remove("drop-before", "drop-after", "drop-inside");
+  }
+}
+
+/** 落点判定：文件夹行中间 40% 算「放进去」，其余按上下半区算前后。 */
+function dropModeOf(row: HTMLElement, isFolder: boolean, ev: DragEvent): DropMode {
+  const rect = row.getBoundingClientRect();
+  const ratio = (ev.clientY - rect.top) / Math.max(rect.height, 1);
+  if (isFolder && ratio > 0.3 && ratio < 0.7) return "inside";
+  return ratio < 0.5 ? "before" : "after";
+}
+
+function attachDrag(row: HTMLElement, collectionId: string, node: TreeNode): void {
+  row.setAttribute("draggable", "true");
+  row.addEventListener("dragstart", (ev) => {
+    dragging = { collectionId, nodeId: node.id };
+    ev.dataTransfer?.setData("text/plain", node.id);
+    if (ev.dataTransfer) ev.dataTransfer.effectAllowed = "move";
+    row.classList.add("dragging");
+  });
+  row.addEventListener("dragend", () => {
+    dragging = null;
+    row.classList.remove("dragging");
+    clearDropMarks();
+  });
+  row.addEventListener("dragover", (ev) => {
+    if (!dragging) return;
+    // 不能拖到自己身上，也不能把文件夹拖进自己的子树（store 里还会再挡一次）。
+    if (dragging.collectionId === collectionId && dragging.nodeId === node.id) return;
+    ev.preventDefault();
+    if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
+    const mode = dropModeOf(row, node.type === "folder", ev);
+    clearDropMarks();
+    row.classList.add(`drop-${mode}`);
+  });
+  row.addEventListener("dragleave", () => {
+    row.classList.remove("drop-before", "drop-after", "drop-inside");
+  });
+  row.addEventListener("drop", (ev) => {
+    if (!dragging) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    const mode = dropModeOf(row, node.type === "folder", ev);
+    const src = dragging;
+    dragging = null;
+    clearDropMarks();
+    moveTreeNode(src, { collectionId, nodeId: node.id, mode });
+  });
+}
+
 function hoverActions(actions: { icon: keyof typeof icons; title: string; run: () => void }[]): HTMLElement[] {
   const wrap = el("span", { class: "tree-actions" });
   for (const a of actions) {
@@ -263,6 +345,7 @@ function treeItem(collectionId: string, node: TreeNode, depth: number, filter: s
     );
     const children = el("div", { class: `tree-children${folder.open ? "" : " collapsed"}` });
     for (const child of folder.items) children.append(treeItem(collectionId, child, depth + 1, filter));
+    attachDrag(row, collectionId, folder);
     row.addEventListener("click", () => toggleFolder(collectionId, folder.id));
     wrap.append(row, children);
     return wrap;
@@ -289,6 +372,7 @@ function treeItem(collectionId: string, node: TreeNode, depth: number, filter: s
       } },
     ]),
   );
+  attachDrag(row, collectionId, node);
   row.addEventListener("click", () => openNode(collectionId, node.id));
   row.addEventListener("dblclick", () => {
     void renameRequestPrompt(collectionId, node.id, node.name);

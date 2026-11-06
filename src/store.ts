@@ -22,6 +22,7 @@ import type {
 } from "./types";
 import { init as openStorage, load as readStorage, save as writeStorage } from "./db";
 import { buildURL, cloneRequest, emptyRequest, toCurl } from "./curl";
+import { snippetText, type SnippetLang } from "./snippets";
 import { ensureScheme, guessName, interpolate, splitURL, uid, type VarScope } from "./util";
 
 export interface Toast {
@@ -46,6 +47,8 @@ export interface State {
   onboardingDone: boolean;
   /** 关闭窗口时最小化到托盘。由桌面外壳启动时读取，用户在托盘菜单里修改。 */
   closeToTray: boolean;
+  /** 是否注册系统级快捷键。同上，托盘菜单与设置面板都能改。 */
+  globalShortcut: boolean;
   /** 侧边栏是否收起。 */
   sidebarCollapsed: boolean;
   /** 界面浮层状态，不持久化。 */
@@ -53,8 +56,16 @@ export interface State {
   settingsOpen: boolean;
   envOpen: boolean;
   curlOpen: boolean;
+  importOpen: boolean;
+  /** 双击 .har 打开时带进来的文本，浮层第一次打开会直接用它解析。 */
+  importDraft: string;
+  snippetsOpen: boolean;
+  /** 代码片段面板选中的语言，不持久化。 */
+  snippetLang: SnippetLang;
   /** cURL 解析结果，等待用户确认后填充。 */
   pendingCurl: { request: ApiRequest; warnings: string[]; source: string } | null;
+  /** Postman / HAR 解析结果，等待用户确认后并入工作区。 */
+  pendingImport: { collections: { collection: Collection; warnings: string[] }[]; source: string } | null;
   toasts: Toast[];
   /** 集合树里被展开的节点 id 集合（文件夹的 open 字段已持久化，这里只为搜索时临时展开）。 */
   treeFilter: string;
@@ -83,12 +94,18 @@ function blankState(): State {
     sidebarTab: "collections",
     onboardingDone: false,
     closeToTray: true,
+    globalShortcut: true,
     sidebarCollapsed: false,
     commandOpen: false,
     settingsOpen: false,
     envOpen: false,
     curlOpen: false,
+    importOpen: false,
+    importDraft: "",
+    snippetsOpen: false,
+    snippetLang: "fetch",
     pendingCurl: null,
+    pendingImport: null,
     toasts: [],
     treeFilter: "",
     historyFilter: "",
@@ -143,6 +160,7 @@ function snapshot(): PersistedWorkspace {
     sidebarCollapsed: state.sidebarCollapsed,
     onboardingDone: state.onboardingDone,
     closeToTray: state.closeToTray,
+    globalShortcut: state.globalShortcut,
   };
 }
 
@@ -190,7 +208,7 @@ export async function load(): Promise<void> {
   state.ready = true;
   applyTheme();
   // 把存在库里的桌面偏好交给 Go 侧的桌面外壳（托盘 menu 的勾选状态）。
-  void System.applyDesktopPrefs(state.closeToTray).catch(() => {});
+  void System.applyDesktopPrefs(state.closeToTray, state.globalShortcut).catch(() => {});
   emit();
 }
 
@@ -207,6 +225,9 @@ function applyPersisted(p: Partial<PersistedWorkspace>): void {
   state.sidebarTab = p.sidebarTab === "history" ? "history" : "collections";
   state.sidebarCollapsed = p.sidebarCollapsed === true;
   state.onboardingDone = p.onboardingDone === true;
+  // 桌面偏好默认开：只有明确存了 false 才关，缺字段（旧库）按默认处理。
+  state.closeToTray = p.closeToTray !== false;
+  state.globalShortcut = p.globalShortcut !== false;
   state.tabs = Array.isArray(p.tabs)
     ? p.tabs.map((t) => ({
         ...t,
@@ -519,7 +540,7 @@ export async function send(): Promise<void> {
       signal: controller.signal,
       redirect: tab.request.options.redirect,
     });
-    const record = await readResponse(res, started);
+    const record = await readResponse(res, started, performance.now() - started);
     const current = state.tabs.find((t) => t.id === tab.id);
     if (current) {
       current.response = record;
@@ -623,7 +644,7 @@ function base64ToBytes(b64: string): Uint8Array {
 
 const PREVIEW_LIMIT = 2 * 1024 * 1024;
 
-async function readResponse(res: Response, started: number): Promise<ResponseRecord> {
+async function readResponse(res: Response, started: number, waitMs: number): Promise<ResponseRecord> {
   const headers: [string, string][] = [];
   res.headers.forEach((value, key) => headers.push([key, value]));
   headers.sort((a, b) => a[0].localeCompare(b[0]));
@@ -656,6 +677,8 @@ async function readResponse(res: Response, started: number): Promise<ResponseRec
     binary: !textual,
     base64,
     durationMs,
+    waitMs,
+    downloadMs: Math.max(0, durationMs - waitMs),
     at: Date.now(),
     contentType,
     truncated,
@@ -708,6 +731,8 @@ function errorRecord(err: unknown, durationMs: number, timedOut: boolean): Respo
     bytes: 0,
     binary: false,
     durationMs,
+    waitMs: durationMs,
+    downloadMs: 0,
     at: Date.now(),
     contentType: "",
     truncated: false,
@@ -818,6 +843,84 @@ export function createFolder(collectionId: string, parentId?: string, name = "�
   const list = parentId ? findList(collectionId, parentId) : findList(collectionId);
   if (!list) return;
   list.push(folder);
+  persist();
+  emit();
+}
+
+// ---- 拖拽排序 ----
+
+export type DropMode = "before" | "after" | "inside";
+
+/** 从树里摘出一个节点（连同它的子树），找不到返回 null。 */
+function detachNode(items: TreeNode[], nodeId: string): TreeNode | null {
+  const idx = items.findIndex((n) => n.id === nodeId);
+  if (idx >= 0) return items.splice(idx, 1)[0] ?? null;
+  for (const node of items) {
+    if (node.type !== "folder") continue;
+    const found = detachNode(node.items, nodeId);
+    if (found) return found;
+  }
+  return null;
+}
+
+function findTreeNode(items: TreeNode[], nodeId: string): TreeNode | null {
+  for (const node of items) {
+    if (node.id === nodeId) return node;
+    if (node.type === "folder") {
+      const found = findTreeNode(node.items, nodeId);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+/** 把节点插到某个兄弟节点之前或之后；targetId 不存在时返回 false。 */
+function insertRelative(items: TreeNode[], targetId: string, node: TreeNode, mode: DropMode): boolean {
+  const idx = items.findIndex((n) => n.id === targetId);
+  if (idx >= 0) {
+    items.splice(mode === "before" ? idx : idx + 1, 0, node);
+    return true;
+  }
+  for (const item of items) {
+    if (item.type === "folder" && insertRelative(item.items, targetId, node, mode)) return true;
+  }
+  return false;
+}
+
+/** 判断 node 自己或它的子孙里有没有 targetId：禁止把文件夹拖进自己里面。 */
+function containsNode(node: TreeNode, targetId: string): boolean {
+  if (node.id === targetId) return true;
+  if (node.type !== "folder") return false;
+  return node.items.some((child) => containsNode(child, targetId));
+}
+
+/** 拖拽排序：支持同集合内移动、跨集合移动、拖进文件夹。 */
+export function moveTreeNode(
+  src: { collectionId: string; nodeId: string },
+  dst: { collectionId: string; nodeId: string; mode: DropMode },
+): void {
+  if (src.collectionId === dst.collectionId && src.nodeId === dst.nodeId) return;
+  const from = state.collections.find((c) => c.id === src.collectionId);
+  const to = state.collections.find((c) => c.id === dst.collectionId);
+  if (!from || !to) return;
+
+  // 先看落点合不合法再摘出来，免得白改一次还得回滚。
+  const target = findTreeNode(to.items, dst.nodeId);
+  if (!target && dst.mode === "inside") return;
+  const moving = findTreeNode(from.items, src.nodeId);
+  if (!moving) return;
+  if (target && containsNode(moving, target.id)) return;
+
+  const detached = detachNode(from.items, src.nodeId);
+  if (!detached) return;
+
+  if (dst.mode === "inside" && target && target.type === "folder") {
+    target.items.push(detached);
+    target.open = true;
+  } else if (!insertRelative(to.items, dst.nodeId, detached, dst.mode)) {
+    // 落点反悔了就把节点放回原处，避免数据丢失。
+    from.items.push(detached);
+  }
   persist();
   emit();
 }
@@ -1100,6 +1203,32 @@ export function importBundle(raw: string): { collections: number; envs: number }
   return { collections: collections.length, envs: envs.length };
 }
 
+/** 把解析好的 Postman / HAR 集合并入工作区（重分配 id，不会覆盖已有集合）。 */
+export function importCollections(
+  parsed: { collection: Collection }[],
+): { collections: number; requests: number } {
+  let requests = 0;
+  for (const item of parsed) {
+    reassignCollectionIds(item.collection);
+    requests += countRequests(item.collection.items);
+    state.collections.push(item.collection);
+  }
+  state.pendingImport = null;
+  state.importOpen = false;
+  persist();
+  emit();
+  return { collections: parsed.length, requests };
+}
+
+function countRequests(nodes: TreeNode[]): number {
+  let n = 0;
+  for (const node of nodes) {
+    if (node.type === "request") n += 1;
+    else n += countRequests(node.items);
+  }
+  return n;
+}
+
 function reassignCollectionIds(col: Collection): void {
   col.id = uid("col");
   const walk = (nodes: TreeNode[]): void => {
@@ -1122,6 +1251,13 @@ export function currentCurl(useVariables: boolean): string {
   const tab = activeTab();
   if (!tab) return "";
   return toCurl(tab.request, { resolve: useVariables ? resolveText : (t) => t });
+}
+
+/** 生成当前请求的代码片段文本（变量已替换成实际值，复制即可用）。 */
+export function currentSnippet(lang: SnippetLang): string {
+  const tab = activeTab();
+  if (!tab) return "";
+  return snippetText(tab.request, lang, { resolve: resolveText });
 }
 
 export async function copyText(text: string, label = "已复制"): Promise<void> {
@@ -1166,14 +1302,31 @@ export async function pasteText(): Promise<string> {
 
 // ---- 界面开关（不持久化） ----
 
-export function toggleUI(key: "commandOpen" | "settingsOpen" | "envOpen" | "curlOpen", open?: boolean): void {
+export function toggleUI(
+  key: "commandOpen" | "settingsOpen" | "envOpen" | "curlOpen" | "importOpen" | "snippetsOpen",
+  open?: boolean,
+): void {
   const next = open === undefined ? !state[key] : open;
   state.commandOpen = false;
   state.settingsOpen = false;
   state.envOpen = false;
   state.curlOpen = false;
+  state.importOpen = false;
+  state.snippetsOpen = false;
   state[key] = next;
   emit();
+}
+
+/** 切换代码片段语言，只重画面板，不关掉它。 */
+export function setSnippetLang(lang: SnippetLang): void {
+  state.snippetLang = lang;
+  emit();
+}
+
+/** 把双击打开的文件内容交给导入浮层，并把它打开。 */
+export function setImportDraft(text: string): void {
+  state.importDraft = text;
+  toggleUI("importOpen", true);
 }
 
 /** 设置 cURL 解析结果并打开导入确认面板。 */
@@ -1228,5 +1381,25 @@ export function setCloseToTray(on: boolean): void {
   if (state.closeToTray === on) return;
   state.closeToTray = on;
   persist();
+  emit();
+}
+
+/** 用户在托盘菜单里改了全局快捷键：同样只记录，注册由 Go 侧完成。 */
+export function setGlobalShortcutFromShell(on: boolean): void {
+  if (state.globalShortcut === on) return;
+  state.globalShortcut = on;
+  persist();
+  emit();
+}
+
+/** 设置面板改桌面偏好：先写库，再让 Go 侧立刻生效。 */
+export function setDesktopPrefs(next: { closeToTray?: boolean; globalShortcut?: boolean }): void {
+  const closeToTray = next.closeToTray ?? state.closeToTray;
+  const globalShortcut = next.globalShortcut ?? state.globalShortcut;
+  if (closeToTray === state.closeToTray && globalShortcut === state.globalShortcut) return;
+  state.closeToTray = closeToTray;
+  state.globalShortcut = globalShortcut;
+  persist();
+  void System.applyDesktopPrefs(closeToTray, globalShortcut).catch(() => {});
   emit();
 }

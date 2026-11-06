@@ -275,6 +275,7 @@ export async function load(): Promise<PersistedWorkspace> {
     sidebarCollapsed: settings.get("sidebarCollapsed") === "1",
     onboardingDone: settings.get("onboardingDone") === "1",
     closeToTray: settings.get("closeToTray") !== "0",
+    globalShortcut: settings.get("globalShortcut") !== "0",
   };
   // 刚读出来的内容就是库里的内容，先认账，第一次保存才不会把全部行重写一遍。
   written = new Map(rows(data).map((row) => [`${row.table}:${row.id}`, row.signature]));
@@ -392,6 +393,7 @@ function rows(data: PersistedWorkspace): Row[] {
     ["sidebarCollapsed", data.sidebarCollapsed ? "1" : "0"],
     ["onboardingDone", data.onboardingDone ? "1" : "0"],
     ["closeToTray", data.closeToTray ? "1" : "0"],
+    ["globalShortcut", data.globalShortcut ? "1" : "0"],
   ];
   for (const [key, value] of settings) {
     out.push({
@@ -554,5 +556,6 @@ function normalize(p: Partial<PersistedWorkspace>): PersistedWorkspace {
     sidebarCollapsed: p.sidebarCollapsed === true,
     onboardingDone: p.onboardingDone === true,
     closeToTray: p.closeToTray !== false,
+    globalShortcut: p.globalShortcut !== false,
   };
 }

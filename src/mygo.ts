@@ -8,7 +8,8 @@ import { call, event } from "mygo-runtime";
 export interface DesktopCommand {
   /**
    * Action 是页面要执行的动作：new-request、import-curl、save、close-tab、
-   * toggle-sidebar、command-palette、open-env、open-settings、toggle-theme。
+   * toggle-sidebar、command-palette、open-env、open-settings、snippets、
+   * import-postman、toggle-theme。
    */
   action: string;
   /** Text 是随动作带过去的内容，例如深链里的 cURL 命令。 */
@@ -21,6 +22,8 @@ export interface DesktopCommand {
  */
 export interface DesktopPrefs {
   closeToTray: boolean;
+  /** GlobalShortcut 控制是否注册系统级快捷键；关掉后快捷键完全不占用。 */
+  globalShortcut: boolean;
 }
 
 /** Info 描述应用本身与运行环境。 */
@@ -58,8 +61,8 @@ export const System = {
    * ApplyDesktopPrefs 由页面在启动时调用，把 SQLite 里存的偏好交给桌面外壳。
    * 不写库、也不再回发事件，避免启动时自激。
    */
-  applyDesktopPrefs(closeToTray: boolean): Promise<void> {
-    return call("System.ApplyDesktopPrefs", closeToTray);
+  applyDesktopPrefs(closeToTray: boolean, globalShortcut: boolean): Promise<void> {
+    return call("System.ApplyDesktopPrefs", closeToTray, globalShortcut);
   },
   /** ClearCookies 清空已记录的 Cookie。 */
   clearCookies(): Promise<void> {

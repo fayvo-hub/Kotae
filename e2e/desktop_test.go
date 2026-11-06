@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os/exec"
@@ -109,4 +110,50 @@ func TestCloseToTrayAndRestore(t *testing.T) {
 	}
 	h.wait(t, "恢复后页面仍然可用", `!!document.querySelector('.topbar')`)
 	h.shot(t, "17-restored")
+}
+
+// readDesktopToggles 读设置面板里两个桌面开关的勾选状态。
+func readDesktopToggles(t *testing.T, out *[]bool) {
+	t.Helper()
+	var raw string
+	h.eval(t, `JSON.stringify([...document.querySelectorAll('.desktop-toggle input')].map(i => i.checked))`, &raw)
+	if err := json.Unmarshal([]byte(raw), out); err != nil {
+		t.Fatalf("解析开关状态失败：%v（原始值 %s）", err, raw)
+	}
+}
+
+// 设置面板里的桌面开关要能改、能落库、重启后保持。
+func TestDesktopPrefsToggle(t *testing.T) {
+	h.clearOverlays(t)
+	h.pressKeys(t, ",", true, false)
+	h.wait(t, "设置面板打开", `document.querySelectorAll('.desktop-toggle').length === 2`)
+
+	var states []bool
+	readDesktopToggles(t, &states)
+	if len(states) != 2 || !states[0] || !states[1] {
+		t.Fatalf("两个桌面开关默认都该勾选，实际：%v", states)
+	}
+
+	// 关掉全局快捷键，等写库。
+	since := time.Now()
+	h.eval(t, `(() => { document.querySelectorAll('.desktop-toggle input')[1].click(); return true; })()`, new(bool))
+	readDesktopToggles(t, &states)
+	if len(states) != 2 || !states[0] || states[1] {
+		t.Fatalf("点击后开关没变化，实际：%v", states)
+	}
+	waitForCommit(t, h.userData+"/workspace.db", since)
+
+	h.restart(t)
+	h.pressKeys(t, ",", true, false)
+	h.wait(t, "重启后设置面板打开", `document.querySelectorAll('.desktop-toggle').length === 2`)
+	readDesktopToggles(t, &states)
+	if len(states) != 2 || !states[0] || states[1] {
+		t.Fatalf("重启后应该是「关闭到托盘=开、全局快捷键=关」，实际：%v", states)
+	}
+
+	// 改回来，避免影响后续用例。
+	since = time.Now()
+	h.eval(t, `(() => { document.querySelectorAll('.desktop-toggle input')[1].click(); return true; })()`, new(bool))
+	waitForCommit(t, h.userData+"/workspace.db", since)
+	h.clearOverlays(t)
 }

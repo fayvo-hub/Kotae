@@ -1,7 +1,7 @@
 // 请求编辑区：方法 + URL + 发送 + cURL 导入导出 + 参数/头/体/认证/选项 五个子页签。
 
 import { el, fill, icon, iconButton, icons } from "./dom";
-import { kvTable } from "./kvtable";
+import { assistOpen, enableVarAssist, kvTable } from "./kvtable";
 import {
   abortSend,
   activeTab,
@@ -124,6 +124,8 @@ function urlBar(tab: Tab): HTMLElement {
         }
       },
       keydown: (ev) => {
+        // 补全层开着时 Enter 归它选变量，不发送也不收起键盘焦点。
+        if (assistOpen()) return;
         if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey || !ev.shiftKey)) {
           ev.preventDefault();
           void send();
@@ -143,6 +145,7 @@ function urlBar(tab: Tab): HTMLElement {
   });
   urlInput.value = tab.request.url;
   paintHighlight();
+  enableVarAssist(urlInput);
 
   const sendBtn = el("button", {
     class: "btn primary send-btn",
@@ -171,6 +174,10 @@ function urlBar(tab: Tab): HTMLElement {
     void copyText(currentCurl(true), "已复制 cURL 命令");
   });
 
+  const snippetBtn = iconButton("code", "生成代码片段（Ctrl+Shift+G）", () => {
+    toggleUI("snippetsOpen", true);
+  });
+
   const saveBtn = iconButton("save", "保存到集合（Ctrl+S）", () => {
     window.dispatchEvent(new CustomEvent("mygo:save"));
   });
@@ -179,7 +186,7 @@ function urlBar(tab: Tab): HTMLElement {
     bar,
     el("div", { class: "url-method" }, methodSelect),
     el("div", { class: "url-field" }, el("div", { class: "url-input-wrap" }, mirror, urlInput), unresolvedBadge(tab)),
-    el("div", { class: "url-actions" }, saveBtn, copyCurlBtn, curlBtn, sendBtn),
+    el("div", { class: "url-actions" }, saveBtn, snippetBtn, copyCurlBtn, curlBtn, sendBtn),
   );
   return bar;
 }
@@ -525,6 +532,7 @@ function bodyPane(tab: Tab): HTMLElement {
         updateJsonStatus(value);
       },
       keydown: (ev) => {
+        if (assistOpen()) return;
         if (ev.key === "Tab") {
           ev.preventDefault();
           const start = area.selectionStart;
@@ -539,6 +547,7 @@ function bodyPane(tab: Tab): HTMLElement {
     },
   });
   area.value = tab.request.body;
+  enableVarAssist(area);
 
   const status = el("div", { class: "pane-status" });
   const updateJsonStatus = (value: string): void => {

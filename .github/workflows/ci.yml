@@ -1,0 +1,84 @@
+name: CI
+
+# 每次推送与 PR 跑静态检查与构建；端到端测试需要真实窗口和 WebView2，
+# 只在手动触发时在 Windows runner 上跑（见 e2e 这个 job）。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    name: 前端检查（类型 / 设计系统令牌 / 构建）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint:ui
+      - run: npm run build:web
+
+  windows:
+    name: Windows 构建（go vet / mygo vet / 打包）
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: go vet
+        run: go vet ./...
+      - name: mygo vet（原生 UI 生命周期与配置检查）
+        run: npx mygo-cli vet .
+      - name: 前端构建
+        run: npm run build:web
+      # 走完整打包链路（含嵌入式前端与图标），但不生成安装器：NSIS 在 CI 上要额外下载，
+      # 安装器只在发布时由 publish job 生成。
+      - name: 打包可执行文件
+        run: npx mygo-cli build -skip-installer
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mygo-api-windows
+          path: build/windows-amd64/MyGo API.exe
+          if-no-files-found: error
+
+  e2e:
+    name: 端到端测试（手动触发）
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: 运行 e2e（真实窗口 + 本机桩服务）
+        run: npm run e2e
+      - name: 失败时上传截图与日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: |
+            e2e/artifacts/
+          if-no-files-found: ignore

@@ -2,16 +2,18 @@
 
 import { databaseFile } from "../db";
 import { el, fill, icon, iconButton, icons } from "./dom";
-import { kvTable } from "./kvtable";
+import { enableVarAssist, kvTable } from "./kvtable";
 import {
   activeTab,
   applyPendingCurl,
   copyText,
   createCollection,
+  currentSnippet,
   createEnv,
   deleteEnv,
   exportBundle,
   importBundle,
+  importCollections,
   openTab,
   pasteText,
   renameEnv,
@@ -20,14 +22,18 @@ import {
   persist,
   saveTabAs,
   scope,
+  setSnippetLang,
   setEnv,
   setPendingCurl,
+  setDesktopPrefs,
   setTheme,
   state,
   toast,
   toggleUI,
 } from "../store";
 import { CurlError, emptyRequest, parseCurl } from "../curl";
+import { SNIPPET_LANGS } from "../snippets";
+import { parseImport, toPostmanCollection } from "../postman";
 import { DYNAMIC_VARS, methodTone, visibleVarNames } from "../util";
 import type { ApiRequest } from "../types";
 import { System } from "../mygo";
@@ -61,7 +67,10 @@ export function closeAll(): void {
   state.settingsOpen = false;
   state.envOpen = false;
   state.curlOpen = false;
+  state.snippetsOpen = false;
+  state.importOpen = false;
   state.pendingCurl = null;
+  state.pendingImport = null;
   window.dispatchEvent(new CustomEvent("mygo:rerender-overlay"));
 }
 
@@ -90,6 +99,7 @@ export function curlDialog(): HTMLElement {
     },
   });
   let autoTimer: number | undefined;
+  enableVarAssist(textarea);
 
   const pasteBtn = el("button", {
     class: "btn small",
@@ -553,6 +563,7 @@ export function envDialog(): HTMLElement {
         window.dispatchEvent(new CustomEvent("mygo:env-pill"));
       },
       emptyHint: "还没有变量，点击下面的按钮添加",
+      secretToggle: true,
     });
 
     fill(detail, head, table);
@@ -593,10 +604,47 @@ export function globalsSection(): HTMLElement {
       window.dispatchEvent(new CustomEvent("mygo:env-pill"));
     },
     emptyHint: "还没有全局变量（全局变量不随环境切换）",
+    secretToggle: true,
   });
 }
 
 // ---- 设置 ----
+
+// ---- 桌面偏好 ----
+
+/** 一行开关：勾选框 + 标题 + 说明，说明换行跟在标题下面。 */
+function toggleRow(o: { label: string; hint: string; checked: boolean; onChange: (on: boolean) => void }): HTMLElement {
+  const input = el("input", {
+    attr: { type: "checkbox" },
+    on: { change: () => o.onChange(input.checked) },
+  });
+  input.checked = o.checked;
+  return el(
+    "label",
+    { class: "field checkbox-field desktop-toggle" },
+    input,
+    el("span", { class: "desktop-toggle-text" }, el("span", { text: o.label }), el("span", { class: "field-hint", text: o.hint })),
+  );
+}
+
+function desktopSection(): HTMLElement {
+  return el(
+    "div",
+    { class: "stack" },
+    toggleRow({
+      label: "关闭窗口时最小化到托盘",
+      hint: "关掉后点关闭按钮会直接退出应用。",
+      checked: state.closeToTray,
+      onChange: (on) => setDesktopPrefs({ closeToTray: on }),
+    }),
+    toggleRow({
+      label: "全局快捷键 CmdOrCtrl+Shift+M",
+      hint: "在任何程序前按下都能呼出或收起窗口；被别的程序占用时会自动跳过注册。",
+      checked: state.globalShortcut,
+      onChange: (on) => setDesktopPrefs({ globalShortcut: on }),
+    }),
+  );
+}
 
 export function settingsDialog(): HTMLElement {
   const body = el("div", { class: "stack settings-body" });
@@ -634,6 +682,7 @@ export function settingsDialog(): HTMLElement {
 
   body.append(
     section("外观", themeRow),
+    section("桌面", desktopSection()),
     section("全局变量", globalsSection()),
     section("内置动态变量", varList),
     section("数据与备份", backupSection()),
@@ -741,12 +790,31 @@ function backupSection(): HTMLElement {
   });
   importBtn.append(icon("upload"), el("span", { text: "导入备份" }));
 
-  row.append(exportBtn, importBtn);
+  const postmanBtn = el("button", {
+    class: "btn small",
+    attr: { type: "button", title: "导出为 Postman Collection v2.1，可直接在 Postman 里导入" },
+    on: {
+      click: async () => {
+        try {
+          const saved = await System.saveText(
+            "mygo-api-postman.json",
+            toPostmanCollection(state.collections, state.envs),
+          );
+          if (saved) toast(`已导出到 ${saved}`, "success");
+        } catch (err) {
+          toast(`导出失败：${(err as Error).message}`, "error");
+        }
+      },
+    },
+  });
+  postmanBtn.append(icon("download"), el("span", { text: "导出为 Postman" }));
+
+  row.append(exportBtn, importBtn, postmanBtn);
   box.append(
     row,
     el("p", {
       class: "field-hint",
-      text: "导出内容包含全部集合、环境与全局变量；导入时合并到现有数据，不会覆盖同名集合。",
+      text: "导出内容包含全部集合、环境与全局变量；导入时合并到现有数据，不会覆盖同名集合。Postman 格式会把多个集合装成顶层文件夹。",
     }),
   );
   return box;
@@ -836,6 +904,20 @@ export function commandPalette(): HTMLElement {
       hint: "Ctrl+Shift+C",
       icon: "copy",
       run: () => window.dispatchEvent(new CustomEvent("mygo:copy-curl")),
+    },
+    {
+      id: "import",
+      title: "导入 Postman Collection / HAR",
+      hint: "Ctrl+Shift+I",
+      icon: "upload",
+      run: () => toggleUI("importOpen", true),
+    },
+    {
+      id: "snippets",
+      title: "生成代码片段（fetch / axios / Python）",
+      hint: "Ctrl+Shift+G",
+      icon: "code",
+      run: () => toggleUI("snippetsOpen", true),
     },
     {
       id: "save",
@@ -974,3 +1056,219 @@ function shortURL(url: string): string {
 }
 
 export { guessName } from "../util";
+
+// ---- 代码片段 ----
+
+/** 生成代码片段：把当前请求转成 fetch / axios / requests / cURL 四种写法。 */
+export function snippetsDialog(): HTMLElement {
+  const tab = activeTab();
+  if (!tab) {
+    return modal("生成代码片段", el("p", { class: "muted", text: "先新建一个请求标签页。" }), undefined, 640);
+  }
+
+  const body = el("div", { class: "stack" });
+  const seg = el("div", { class: "segmented" });
+  const code = el("pre", { class: "snippet-code", attr: { tabindex: "0" } });
+  const hint = el("p", { class: "field-hint" });
+
+  const paint = (): void => {
+    fill(seg);
+    for (const lang of SNIPPET_LANGS) {
+      seg.append(
+        el("button", {
+          class: `segmented-item${state.snippetLang === lang.key ? " active" : ""}`,
+          attr: { type: "button", title: lang.hint },
+          text: lang.label,
+          // 语言切换只重画本面板（不改浮层开关），避免整个对话框闪一下。
+          on: {
+            click: () => {
+              setSnippetLang(lang.key);
+              paint();
+            },
+          },
+        }),
+      );
+    }
+    code.textContent = currentSnippet(state.snippetLang);
+    const meta = SNIPPET_LANGS.find((l) => l.key === state.snippetLang);
+    hint.textContent = `变量已替换成「${state.activeEnvId ? "当前环境" : "未选环境"}」的实际值，复制即可运行。${meta ? `（${meta.hint}）` : ""}`;
+  };
+
+  paint();
+  body.append(seg, code, hint);
+
+  const copyBtn = el("button", {
+    class: "btn primary small",
+    attr: { type: "button" },
+    on: {
+      click: () => {
+        void copyText(currentSnippet(state.snippetLang), "已复制代码片段");
+      },
+    },
+  });
+  copyBtn.append(icon("copy"), el("span", { text: "复制代码" }));
+
+  const footer = el("div", { class: "dialog-foot" });
+  footer.append(
+    el("span", { class: "spacer" }),
+    el("button", {
+      class: "btn small",
+      attr: { type: "button" },
+      text: "关闭",
+      on: { click: closeAll },
+    }),
+    copyBtn,
+  );
+
+  return modal("生成代码片段", body, footer, 680);
+}
+
+// ---- 导入 Postman / HAR ----
+
+/** 导入外部集合：粘贴或选文件，解析后展示将要并进来多少集合与请求。 */
+export function importDialog(): HTMLElement {
+  const body = el("div", { class: "stack" });
+
+  const hint = el("p", {
+    class: "field-hint",
+    text: "支持 Postman Collection v2.0 / v2.1（.json）与浏览器导出的 HAR。脚本、测试、集合级变量不会导入。",
+  });
+
+  const textarea = el("textarea", {
+    class: "code-input curl-input",
+    attr: {
+      placeholder: "把 Collection 或 HAR 的 JSON 粘贴到这里，也可以直接选文件。",
+      spellcheck: "false",
+      rows: "8",
+    },
+    on: {
+      input: () => {
+        state.pendingImport = null;
+        fill(result);
+        renderFoot();
+      },
+    },
+  });
+
+  const result = el("div");
+
+  // 双击 .har 打开时，文本已经由桌面外壳读进来：直接填好并解析一次。
+  if (state.importDraft) {
+    const draft = state.importDraft;
+    state.importDraft = "";
+    textarea.value = draft;
+    queueMicrotask(() => preview(draft));
+  }
+
+  const fileBtn = el("button", {
+    class: "btn small",
+    attr: { type: "button" },
+    on: {
+      click: async () => {
+        try {
+          const file = await System.openText("选择 Postman Collection 或 HAR（JSON）");
+          if (!file.path) return;
+          textarea.value = file.content;
+          preview(file.content);
+        } catch (err) {
+          toast(`读取文件失败：${(err as Error).message}`, "error");
+        }
+      },
+    },
+  });
+  fileBtn.append(icon("upload"), el("span", { text: "从文件读取" }));
+
+  const parseBtn = el("button", {
+    class: "btn primary small",
+    attr: { type: "button" },
+    on: { click: () => preview(textarea.value) },
+  });
+  parseBtn.append(icon("check"), el("span", { text: "解析" }));
+
+  const tools = el("div", { class: "tools-row" });
+  tools.append(fileBtn, parseBtn);
+
+  function preview(text: string): void {
+    if (!text.trim()) {
+      toast("先粘贴内容或选择一个文件", "error");
+      return;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch (err) {
+      toast(`不是合法 JSON：${(err as Error).message}`, "error");
+      return;
+    }
+    try {
+      const one = parseImport(parsed);
+      state.pendingImport = { collections: [{ collection: one.collection, warnings: one.warnings }], source: text };
+      renderPreview([one]);
+    } catch (err) {
+      toast(`无法解析：${(err as Error).message}`, "error");
+    }
+  }
+
+  function renderPreview(items: { kind: string; collection: { name: string; items: unknown[] }; warnings: string[] }[]): void {
+    fill(result);
+    const box = el("div", { class: "import-preview" });
+    for (const item of items) {
+      const total = countTree(item.collection.items as never);
+      const line = el("div", { class: "import-line" });
+      line.append(
+        el("span", { class: `badge ${item.kind === "har" ? "tone-warn" : "tone-accent"}`, text: item.kind === "har" ? "HAR" : "Postman" }),
+        el("strong", { text: item.collection.name }),
+        el("span", { class: "muted", text: `${total} 条请求` }),
+      );
+      box.append(line);
+      for (const w of item.warnings.slice(0, 4)) {
+        box.append(el("p", { class: "field-hint", text: `· ${w}` }));
+      }
+    }
+    result.append(box);
+    renderFoot();
+  }
+
+  const footer = el("div", { class: "dialog-foot" });
+  function renderFoot(): void {
+    fill(footer);
+    const pending = state.pendingImport;
+    const importBtn = el("button", {
+      class: "btn primary small",
+      attr: { type: "button" },
+      text: "导入到工作区",
+      on: {
+        click: () => {
+          if (!state.pendingImport) return;
+          const res = importCollections(state.pendingImport.collections);
+          toast(`已导入 ${res.collections} 个集合，共 ${res.requests} 条请求`, "success");
+          closeAll();
+        },
+      },
+    });
+    importBtn.disabled = !pending;
+    footer.append(
+      el("span", { class: "spacer" }),
+      el("button", {
+        class: "btn small",
+        attr: { type: "button" },
+        text: "关闭",
+        on: { click: closeAll },
+      }),
+      importBtn,
+    );
+  }
+
+  renderFoot();
+  body.append(hint, textarea, tools, result);
+  return modal("导入 Postman / HAR", body, footer, 680);
+}
+
+function countTree(nodes: { type: string; items?: unknown[] }[]): number {
+  let n = 0;
+  for (const node of nodes) {
+    if (node.type === "request") n += 1;
+    else if (Array.isArray(node.items)) n += countTree(node.items as { type: string; items?: unknown[] }[]);
+  }
+  return n;
+}

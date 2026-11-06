@@ -12,6 +12,8 @@ export interface KVRow {
   key: string;
   value: string;
   enabled: boolean;
+  /** 标记为敏感：界面上默认遮住值，只影响显示，发送与导出仍用真实值。 */
+  secret?: boolean;
 }
 
 export interface KVTableOptions<T extends KVRow> {
@@ -35,6 +37,8 @@ export interface KVTableOptions<T extends KVRow> {
   keyList?: string[];
   /** 空状态提示。 */
   emptyHint?: string;
+  /** 是否显示「遮住值」开关（环境变量用）。 */
+  secretToggle?: boolean;
 }
 
 /** 构建一张键值表格。每次数据变更都通过 onChange 让外层重绘。 */
@@ -107,7 +111,7 @@ export function kvTable<T extends KVRow>(opts: KVTableOptions<T>): HTMLElement {
           opts.onChange();
         },
         keydown: (ev) => onRowKeydown(ev, row, "key"),
-        focus: () => attachAssist(keyInput, false),
+        focus: () => enableVarAssist(keyInput),
       },
     });
     keyInput.value = row.key;
@@ -130,7 +134,7 @@ export function kvTable<T extends KVRow>(opts: KVTableOptions<T>): HTMLElement {
               opts.onChange();
             },
             keydown: (ev) => onRowKeydown(ev, row, "value"),
-            focus: () => attachAssist(valueInput, true),
+            focus: () => enableVarAssist(valueInput),
           },
         })
       : el("input", {
@@ -139,6 +143,7 @@ export function kvTable<T extends KVRow>(opts: KVTableOptions<T>): HTMLElement {
             placeholder: opts.valuePlaceholder ?? "值",
             spellcheck: "false",
             autocomplete: "off",
+            type: row.secret ? "password" : "text",
           },
           on: {
             input: () => {
@@ -146,7 +151,7 @@ export function kvTable<T extends KVRow>(opts: KVTableOptions<T>): HTMLElement {
               opts.onChange();
             },
             keydown: (ev) => onRowKeydown(ev, row, "value"),
-            focus: () => attachAssist(valueInput, true),
+            focus: () => enableVarAssist(valueInput),
           },
         });
     valueInput.value = row.value;
@@ -155,6 +160,21 @@ export function kvTable<T extends KVRow>(opts: KVTableOptions<T>): HTMLElement {
     line.append(keyInput, valueInput);
 
     for (const extra of opts.extra?.(row, index) ?? []) line.append(extra);
+
+    if (opts.secretToggle) {
+      const toggle = iconButton(
+        "lock",
+        row.secret ? "值已遮住，点击显示" : "遮住这个值（只影响显示，发送仍用真实值）",
+        () => {
+          row.secret = !row.secret;
+          opts.onChange();
+          paint();
+        },
+        "kv-secret",
+      );
+      if (row.secret) toggle.classList.add("active");
+      line.append(toggle);
+    }
 
     line.append(
       iconButton(
@@ -333,10 +353,13 @@ export function mountAssist(): void {
 
 const assistBound = new WeakSet<HTMLElement>();
 
-function attachAssist(target: HTMLInputElement | HTMLTextAreaElement, isValue: boolean): void {
+/**
+ * 给任意输入框接上 {{变量}} 补全。表格的行内输入框、地址栏、请求体、cURL 导入框
+ * 都走这一份实现，行为保持一致。
+ */
+export function enableVarAssist(target: HTMLInputElement | HTMLTextAreaElement): void {
   if (assistBound.has(target)) return;
   assistBound.add(target);
-  void isValue;
   target.addEventListener("blur", () => window.setTimeout(hideAssist, 120));
   target.addEventListener("input", () => {
     assistTarget = target;
@@ -438,6 +461,11 @@ function applyAssist(name: string): void {
   target.dispatchEvent(new Event("input", { bubbles: true }));
   hideAssist();
   target.focus();
+}
+
+/** 补全层是否正开着：开着时 Enter/Tab 归补全用，不要触发发送或缩进。 */
+export function assistOpen(): boolean {
+  return assistHost.classList.contains("open");
 }
 
 function hideAssist(): void {
