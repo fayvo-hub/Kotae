@@ -2527,9 +2527,9 @@ textarea.kv-value {
 }
 
 .json-children {
-  padding-left: 15px;
+  padding-left: 10px;
   border-left: 1px solid var(--border);
-  margin-left: 11px;
+  margin-left: 4px;
 }
 
 .json-node:not(.open) > .json-children {
