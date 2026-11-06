@@ -26,7 +26,7 @@ AI 代理修改本仓库时的强制规则。与 `~/.pi/agent/AGENTS.md` 冲突�
 ## 动手之前
 
 1. `git status` 看清工作区；未提交的他人改动保留原样，不覆盖、不 stash、不清理
-2. 读 `README.md`（功能、快捷键、数据存储、测试、打包）、`docs/mygo-调研与功能清单.md`（首版范围边界）
+2. 读 `README.md`（功能、快捷键、数据存储、测试、打包）、`docs/设计系统.md`（改界面必读）、`docs/mygo-调研与功能清单.md`（首版范围边界）
 3. 读改动点周边的源码与 `e2e/` 里对应用例，确认现有不变量
 4. 动存储层、桌面外壳、打包配置前，先读该文件顶部的注释——它们记录了踩过的坑
 
@@ -35,6 +35,17 @@ AI 代理修改本仓库时的强制规则。与 `~/.pi/agent/AGENTS.md` 冲突�
 任务未明确要求时，不得：删功能、改快捷键、改用户可见文案语义、改数据格式、改 `mygo.config.ts` 的 `name` / `slug` / `identifier`（会改变安装目录、注册表键、单实例锁名与 userData 路径）、改 HTTP 语义（超时、重定向、Cookie 罐、认证头的注入方式）。
 
 确需破坏性变更时，先说清「破坏什么 / 为什么必须 / 影响面 / 迁移路径」，等用户确认。禁止把行为变更藏进 refactor。
+
+## UI 与设计系统
+
+界面的权威规范是 `docs/设计系统.md`（令牌表、布局骨架、组件原语、图标与文案规范、禁用清单、自查清单）。做任何界面改动的硬约束：
+
+1. **先查文档再动手**：新增界面从第 5 节的组件原语里选，找不到再扩展，扩展后同一次改动里把新原语登记进文档。
+2. **只用令牌**：颜色、字号、圆角、阴影、动效时长一律 `var(--…)`；不得写 `#hex`、`font-size: 12px`、`border-radius: 7px`、裸 `box-shadow`、字面量时长。新令牌必须同时补 `:root`、`html[data-theme="dark"]`、`html[data-theme="auto"]` 三处。
+3. **闸门必跑**：`npm run lint:ui` 见红不得提交；它是唯一能防住“越改越花”的机械手段。
+4. **两种主题都要看**：浅色与深色各截一张图（`e2e/artifacts/`），只验证一种就交属于未验证。
+5. **不引入第二条视觉线**：不加第二个强调色、不加组件库/图标库/Web 字体、不用 emoji 当图标、不做玻璃拟态与超过 180ms 的入场动画。
+6. **改既有原语**（高度、内边距、圆角、状态色）时，同步改 `docs/设计系统.md` 的对应表格，否则下次改动会按旧数字做。
 
 ## 存储层（最高危区）
 
@@ -98,7 +109,8 @@ AI 代理修改本仓库时的强制规则。与 `~/.pi/agent/AGENTS.md` 冲突�
 | 改 Go（`main.go` / `desktop.go` / 绑定） | `go vet ./...` + `npx mygo-cli vet .` + `npm run generate` + `npm run e2e` |
 | 改 `src/db.ts` 或表结构 | 上面全部，并确认 `e2e/storage_test.go` 的迁移与重启用例通过 |
 | 改 `mygo.config.ts` / 图标 / 依赖 | `npm run build`，必要时 `MYGO_E2E_PACKAGING=1 npm run e2e` |
-| 提交前 | `npm run typecheck && go vet ./... && npm run e2e` |
+| 改 `src/style.css` 或任何界面结构 | `npm run lint:ui` + `npm run build:web` + `npm run e2e`，并比对 `e2e/artifacts/` 的浅色/深色截图 |
+| 提交前 | `npm run typecheck && npm run lint:ui && go vet ./... && npm run e2e` |
 
 - `npm run e2e` 默认会先 `npm run build:web`；前端没改动时用 `MYGO_E2E_SKIP_BUILD=1 npm run e2e`
 - 排障用 `MYGO_E2E_KEEP=1 npm run e2e`（保留临时目录与应用日志），截图在 `e2e/artifacts/`

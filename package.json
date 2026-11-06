@@ -9,6 +9,7 @@
     "dev:web": "vite",
     "build:web": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
+    "lint:ui": "node scripts/check-ui-tokens.mjs",
     "e2e": "go test -tags e2e ./e2e/ -count=1",
     "e2e:verbose": "go test -tags e2e ./e2e/ -count=1 -v"
   },

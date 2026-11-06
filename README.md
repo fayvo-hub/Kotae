@@ -4,7 +4,7 @@
 
 技术形态：Go 写桌面壳（[MyGo](https://mygo.egoist.dev/)）+ 系统 webview 里的 Vite/TypeScript 前端，HTTP 请求由 Go 侧发出（借 MyGo 的 fetch 插件），因此不受浏览器 CORS 限制，可以任意设置请求头与 Cookie。
 
-设计取舍与功能清单见 `docs/mygo-调研与功能清单.md`。
+设计取舍与功能清单见 `docs/mygo-调研与功能清单.md`；**界面规范见 `docs/设计系统.md`**（改 UI 前的权威依据，`npm run lint:ui` 检查硬编码色值/字号/圆角/阴影）。
 
 ## 功能
 
