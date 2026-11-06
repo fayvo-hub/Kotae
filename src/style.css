@@ -36,6 +36,8 @@
   --bad-soft: rgba(204, 43, 61, 0.1);
   --redirect: #7a3fd4;
   --redirect-soft: rgba(122, 63, 212, 0.1);
+  /* 危险实心按钮上的前景色：亮色底配白字，暗色底（浅红）必须配深字 */
+  --on-bad: #ffffff;
 
   --m-get: #0f7a55;
   --m-post: #1b62c9;
@@ -44,16 +46,38 @@
   --m-other: #6b7280;
 
   --shadow-1: 0 1px 2px rgba(16, 22, 40, 0.05), 0 1px 1px rgba(16, 22, 40, 0.04);
+  --shadow-btn: 0 1px 2px rgba(16, 22, 40, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  /* 焦点环与激活下划线也是阴影层，统一收成令牌，便于暗色自动跟随 */
+  --ring: 0 0 0 3px var(--accent-soft);
+  --ring-bad: 0 0 0 3px var(--bad-soft);
+  --shadow-tab-underline: 0 -1px 0 var(--accent) inset;
   --shadow-2: 0 6px 18px -6px rgba(16, 22, 40, 0.16), 0 2px 6px rgba(16, 22, 40, 0.06);
   --shadow-3: 0 24px 64px -18px rgba(12, 17, 33, 0.3), 0 8px 22px rgba(12, 17, 33, 0.1);
 
+  /* 字号阶梯：正文 13px（body），小字三档，标题两档；新代码只允许用这几档 */
+  --fs-2xs: 10px;
+  --fs-xs: 11px;
+  --fs-sm: 11.5px;
+  --fs-md: 12px;
+  --fs-lg: 13px;
+  --fs-xl: 15px;
+  --fs-2xl: 20px;
+
+  /* 圆角：控件 xs/sm、容器 radius、浮层 lg、引导卡片 xl；胶囊用 999px，圆形用 50% */
+  --radius-xs: 4px;
   --radius-sm: 6px;
   --radius: 9px;
   --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-pill: 999px;
 
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Microsoft YaHei UI",
     "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif;
+
+  /* 浮层遮罩：普通对话框与引导页两级 */
+  --scrim: rgba(11, 14, 22, 0.42);
+  --scrim-strong: rgba(11, 14, 22, 0.58);
 
   --speed: 140ms;
 }
@@ -87,6 +111,7 @@ html[data-theme="dark"] {
   --bad-soft: rgba(255, 122, 134, 0.14);
   --redirect: #b492ff;
   --redirect-soft: rgba(180, 146, 255, 0.14);
+  --on-bad: #1b0c0f;
 
   --m-get: #4ddba0;
   --m-post: #6fb0ff;
@@ -95,6 +120,9 @@ html[data-theme="dark"] {
   --m-other: #98a1b3;
 
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-btn: 0 1px 2px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  --scrim: rgba(0, 0, 0, 0.55);
+  --scrim-strong: rgba(0, 0, 0, 0.68);
   --shadow-2: 0 8px 22px -8px rgba(0, 0, 0, 0.7), 0 2px 6px rgba(0, 0, 0, 0.35);
   --shadow-3: 0 28px 70px -20px rgba(0, 0, 0, 0.85), 0 10px 26px rgba(0, 0, 0, 0.5);
 }
@@ -129,6 +157,7 @@ html[data-theme="dark"] {
     --bad-soft: rgba(255, 122, 134, 0.14);
     --redirect: #b492ff;
     --redirect-soft: rgba(180, 146, 255, 0.14);
+    --on-bad: #1b0c0f;
 
     --m-get: #4ddba0;
     --m-post: #6fb0ff;
@@ -137,6 +166,9 @@ html[data-theme="dark"] {
     --m-other: #98a1b3;
 
     --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-btn: 0 1px 2px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    --scrim: rgba(0, 0, 0, 0.55);
+    --scrim-strong: rgba(0, 0, 0, 0.68);
     --shadow-2: 0 8px 22px -8px rgba(0, 0, 0, 0.7), 0 2px 6px rgba(0, 0, 0, 0.35);
     --shadow-3: 0 28px 70px -20px rgba(0, 0, 0, 0.85), 0 10px 26px rgba(0, 0, 0, 0.5);
   }
@@ -160,7 +192,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--sans);
-  font-size: 13px;
+  font-size: var(--fs-lg);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -213,7 +245,7 @@ code,
 kbd,
 pre {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-md);
 }
 
 :focus-visible {
@@ -228,7 +260,7 @@ pre {
 }
 
 .small {
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
 }
 
 .ok {
@@ -270,7 +302,7 @@ pre {
   border: 1px solid var(--border-strong);
   background: var(--surface);
   color: var(--text);
-  font-size: 12.5px;
+  font-size: var(--fs-md);
   font-weight: 500;
   white-space: nowrap;
   box-shadow: var(--shadow-1);
@@ -302,14 +334,14 @@ pre {
 .btn.small {
   height: 26px;
   padding: 0 9px;
-  font-size: 12px;
+  font-size: var(--fs-md);
 }
 
 .btn.primary {
   background: var(--accent);
   border-color: transparent;
   color: var(--on-accent);
-  box-shadow: 0 1px 2px rgba(16, 22, 40, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  box-shadow: var(--shadow-btn);
 }
 
 .btn.primary:hover {
@@ -319,7 +351,7 @@ pre {
 .btn.danger-solid {
   background: var(--bad);
   border-color: transparent;
-  color: #fff;
+  color: var(--on-bad);
 }
 
 .btn.danger-solid:hover {
@@ -360,7 +392,7 @@ pre {
 .icon-btn.mini {
   width: 22px;
   height: 22px;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
 }
 
 .icon-btn.mini .ic {
@@ -376,7 +408,7 @@ pre {
   margin-left: -6px;
   border-radius: var(--radius-sm);
   color: var(--text-2);
-  font-size: 12px;
+  font-size: var(--fs-md);
   white-space: nowrap;
   flex: 0 0 auto;
   transition: background var(--speed), color var(--speed);
@@ -402,7 +434,7 @@ pre {
   border: 1px solid var(--border-strong);
   background: var(--surface);
   color: var(--text);
-  font-size: 12.5px;
+  font-size: var(--fs-md);
   width: 100%;
   transition: border-color var(--speed), box-shadow var(--speed), background var(--speed);
 }
@@ -414,13 +446,13 @@ pre {
 .text-input:focus,
 .search-input:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--ring);
   outline: none;
 }
 
 .search-input.small {
   height: 26px;
-  font-size: 12px;
+  font-size: var(--fs-md);
 }
 
 select.text-input,
@@ -439,7 +471,7 @@ select.text-input,
   background: var(--surface-2);
   color: var(--text);
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: var(--fs-md);
   line-height: 1.65;
   resize: vertical;
   tab-size: 2;
@@ -449,7 +481,7 @@ select.text-input,
 .code-input:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--ring);
   background: var(--surface);
 }
 
@@ -457,7 +489,7 @@ input[type="checkbox"] {
   appearance: none;
   width: 14px;
   height: 14px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   border: 1.5px solid var(--border-strong);
   background: var(--surface);
   cursor: pointer;
@@ -485,7 +517,7 @@ input[type="checkbox"]:checked::after {
   display: inline-flex;
   padding: 2px;
   gap: 2px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--surface-3);
   border: 1px solid var(--border);
 }
@@ -493,8 +525,8 @@ input[type="checkbox"]:checked::after {
 .segmented-item {
   height: 24px;
   padding: 0 10px;
-  border-radius: 6px;
-  font-size: 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-md);
   color: var(--text-2);
   white-space: nowrap;
   transition: background var(--speed), color var(--speed), box-shadow var(--speed);
@@ -514,7 +546,7 @@ input[type="checkbox"]:checked::after {
 .segmented.small .segmented-item {
   height: 21px;
   padding: 0 8px;
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
 }
 
 /* ---- 徽标 / 方法标签 ---- */
@@ -526,9 +558,9 @@ input[type="checkbox"]:checked::after {
   min-width: 40px;
   height: 18px;
   padding: 0 5px;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   font-weight: 700;
   letter-spacing: 0.04em;
   background: color-mix(in srgb, currentColor 12%, transparent);
@@ -537,7 +569,7 @@ input[type="checkbox"]:checked::after {
 
 .method-tag.mini {
   min-width: 34px;
-  font-size: 9px;
+  font-size: var(--fs-2xs);
   height: 15px;
 }
 
@@ -581,9 +613,9 @@ input[type="checkbox"]:checked::after {
   gap: 5px;
   height: 20px;
   padding: 0 7px;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   background: var(--surface-3);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text);
   white-space: nowrap;
 }
@@ -594,7 +626,7 @@ input[type="checkbox"]:checked::after {
 
 .chip-value {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 kbd {
@@ -602,11 +634,11 @@ kbd {
   align-items: center;
   height: 18px;
   padding: 0 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   border: 1px solid var(--border-strong);
   border-bottom-width: 2px;
   background: var(--surface);
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   color: var(--text-2);
 }
 
@@ -683,16 +715,16 @@ kbd {
 }
 
 .brand-name {
-  font-size: 13.5px;
+  font-size: var(--fs-lg);
 }
 
 .brand-badge {
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   font-weight: 500;
   color: var(--text-2);
   border: 1px solid var(--border);
   background: var(--surface-3);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0 7px;
   line-height: 16px;
 }
@@ -709,7 +741,7 @@ kbd {
   display: flex;
   align-items: center;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--surface-2);
   transition: border-color var(--speed), background var(--speed);
@@ -728,7 +760,7 @@ kbd {
   height: 100%;
   padding: 0 6px 0 8px;
   border: 0;
-  border-radius: 8px 0 0 8px;
+  border-radius: var(--radius) 0 0 var(--radius);
   background: transparent;
   color: var(--text-2);
   cursor: pointer;
@@ -747,7 +779,7 @@ kbd {
 }
 
 .env-pill-name {
-  font-size: 12px;
+  font-size: var(--fs-md);
   font-weight: 500;
   color: var(--text);
   max-width: 130px;
@@ -780,7 +812,7 @@ kbd {
   width: 26px;
   height: 100%;
   border: 0;
-  border-radius: 0 8px 8px 0;
+  border-radius: 0 var(--radius) var(--radius) 0;
   background: transparent;
   color: var(--text-3);
   cursor: pointer;
@@ -804,7 +836,7 @@ kbd {
   z-index: 40;
   min-width: 240px;
   padding: 5px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   border: 1px solid var(--border-strong);
   background: var(--surface);
   box-shadow: var(--shadow-3);
@@ -813,7 +845,7 @@ kbd {
 
 .env-menu-label {
   padding: 4px 8px 6px;
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.04em;
   color: var(--text-3);
 }
@@ -825,10 +857,10 @@ kbd {
   width: 100%;
   padding: 6px 8px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text);
-  font-size: 12.5px;
+  font-size: var(--fs-md);
   text-align: left;
   cursor: pointer;
 }
@@ -870,7 +902,7 @@ kbd {
 
 .env-menu-count {
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   color: var(--text-3);
   flex: 0 0 auto;
 }
@@ -902,20 +934,20 @@ kbd {
 
 .env-menu-key {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   color: var(--text-3);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 0 4px;
   line-height: 15px;
 }
 
 .env-count-badge {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   color: var(--accent);
   background: var(--accent-soft);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0 5px;
   line-height: 15px;
 }
@@ -954,7 +986,7 @@ kbd {
   content: "";
   position: absolute;
   inset: 0 2px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   transition: background var(--speed);
 }
 
@@ -1007,7 +1039,7 @@ body.resizing-row * {
   border-top: 1px solid var(--border);
   background: var(--surface-2);
   color: var(--text-3);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .status-left {
@@ -1044,7 +1076,7 @@ body.resizing-row * {
 
 .hint kbd {
   height: 15px;
-  font-size: 9.5px;
+  font-size: var(--fs-2xs);
   border-bottom-width: 1px;
   background: var(--surface);
 }
@@ -1097,8 +1129,8 @@ body.resizing-row * {
   gap: 5px;
   height: 26px;
   padding: 0 9px;
-  border-radius: 7px;
-  font-size: 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-md);
   font-weight: 500;
   color: var(--text-2);
   transition: background var(--speed), color var(--speed);
@@ -1122,7 +1154,7 @@ body.resizing-row * {
 
 .sidebar-count {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   color: var(--text-3);
 }
 
@@ -1182,11 +1214,11 @@ body.resizing-row * {
 }
 
 .sidebar-empty p {
-  font-size: 12px;
+  font-size: var(--fs-md);
 }
 
 .sidebar-empty p.muted {
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
   color: var(--text-3);
   line-height: 1.6;
 }
@@ -1217,7 +1249,7 @@ body.resizing-row * {
   gap: 6px;
   height: 27px;
   padding-right: 4px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--text-2);
   cursor: pointer;
   position: relative;
@@ -1258,12 +1290,12 @@ body.resizing-row * {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12.5px;
+  font-size: var(--fs-md);
 }
 
 .tree-count {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   color: var(--text-3);
   padding-right: 2px;
 }
@@ -1335,7 +1367,7 @@ body.resizing-row * {
   flex-direction: column;
   gap: 2px;
   padding: 6px 8px;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background var(--speed);
 }
@@ -1358,13 +1390,13 @@ body.resizing-row * {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
   color: var(--text);
 }
 
 .history-status {
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   font-weight: 700;
   flex: 0 0 auto;
 }
@@ -1374,7 +1406,7 @@ body.resizing-row * {
   align-items: center;
   gap: 5px;
   padding-left: 2px;
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   color: var(--text-3);
 }
 
@@ -1421,7 +1453,7 @@ body.resizing-row * {
   max-width: 220px;
   min-width: 108px;
   padding: 0 6px 0 9px;
-  border-radius: 7px 7px 0 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   color: var(--text-2);
   cursor: pointer;
   position: relative;
@@ -1440,7 +1472,7 @@ body.resizing-row * {
   background: var(--surface);
   color: var(--text);
   border-color: var(--border);
-  box-shadow: 0 -1px 0 var(--accent) inset;
+  box-shadow: var(--shadow-tab-underline);
 }
 
 .tab.active::after {
@@ -1459,7 +1491,7 @@ body.resizing-row * {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12.5px;
+  font-size: var(--fs-md);
 }
 
 .tab-dirty {
@@ -1476,7 +1508,7 @@ body.resizing-row * {
   justify-content: center;
   width: 18px;
   height: 18px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   color: var(--text-3);
   opacity: 0;
   flex: 0 0 auto;
@@ -1505,7 +1537,7 @@ body.resizing-row * {
   width: 26px;
   height: 26px;
   margin: 1px 0 0 2px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--text-3);
   /* 标签多到横向滚动时，新建按钮跟着贴在右端，不会滚出视野。 */
   position: sticky;
@@ -1562,7 +1594,7 @@ body.resizing-row * {
     no-repeat right 6px center/9px 9px
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b93a5' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 8.5 7 7 7-7'/%3E%3C/svg%3E");
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
   font-weight: 700;
   letter-spacing: 0.03em;
   cursor: pointer;
@@ -1571,7 +1603,7 @@ body.resizing-row * {
 .method-select:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--ring);
 }
 
 .method-select.tone-get {
@@ -1616,13 +1648,13 @@ body.resizing-row * {
 
 .url-input-wrap:focus-within {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--ring);
   background: var(--surface);
 }
 
 .url-input-wrap:has(.url-input.invalid) {
   border-color: var(--bad);
-  box-shadow: 0 0 0 3px var(--bad-soft);
+  box-shadow: var(--ring-bad);
 }
 
 .url-input {
@@ -1633,7 +1665,7 @@ body.resizing-row * {
   border-radius: inherit;
   background: transparent;
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: var(--fs-md);
   /* 文字由高亮层绘制，这里只留光标与选区。 */
   color: transparent;
   caret-color: var(--text);
@@ -1661,7 +1693,7 @@ body.resizing-row * {
   overflow: hidden;
   padding: 0 10px;
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: var(--fs-md);
   white-space: pre;
   color: var(--text);
   pointer-events: none;
@@ -1674,7 +1706,7 @@ body.resizing-row * {
 .url-var {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   padding: 1px 0;
 }
 
@@ -1687,7 +1719,7 @@ body.resizing-row * {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-3);
   min-height: 0;
 }
@@ -1723,7 +1755,7 @@ body.resizing-row * {
 
 .send-btn.cancelling {
   background: var(--bad);
-  color: #fff;
+  color: var(--on-bad);
 }
 
 /* ---- 子页签 ---- */
@@ -1754,11 +1786,11 @@ body.resizing-row * {
   gap: 5px;
   height: 22px;
   padding: 0 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border);
   background: var(--surface-2);
   color: var(--text-2);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   white-space: nowrap;
   transition: border-color var(--speed), color var(--speed), background var(--speed);
 }
@@ -1782,7 +1814,7 @@ body.resizing-row * {
   height: 33px;
   padding: 0 9px;
   color: var(--text-2);
-  font-size: 12.5px;
+  font-size: var(--fs-md);
   border-bottom: 2px solid transparent;
   transition: color var(--speed), border-color var(--speed), background var(--speed);
   white-space: nowrap;
@@ -1816,10 +1848,10 @@ body.resizing-row * {
   min-width: 15px;
   height: 15px;
   padding: 0 4px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--surface-3);
   font-family: var(--mono);
-  font-size: 9.5px;
+  font-size: var(--fs-2xs);
   color: var(--text-2);
 }
 
@@ -1843,7 +1875,7 @@ body.resizing-row * {
 }
 
 .pane-hint {
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
   color: var(--text-3);
   line-height: 1.6;
 }
@@ -1871,7 +1903,7 @@ body.resizing-row * {
   border: 1px dashed var(--border-strong);
   background: var(--surface-2);
   color: var(--text-2);
-  font-size: 12px;
+  font-size: var(--fs-md);
 }
 
 .pane-empty .ic {
@@ -1888,7 +1920,7 @@ body.resizing-row * {
 
 .pane-status {
   min-height: 18px;
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
 }
 
 .pane-preview {
@@ -1899,7 +1931,7 @@ body.resizing-row * {
   border-radius: var(--radius-sm);
   background: var(--surface-2);
   border: 1px solid var(--border);
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
   overflow-x: auto;
 }
 
@@ -1910,7 +1942,7 @@ body.resizing-row * {
 
 .pane-preview code {
   color: var(--text-2);
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
   white-space: pre;
   user-select: text;
 }
@@ -1935,14 +1967,14 @@ body.resizing-row * {
 }
 
 .field-label {
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
   font-weight: 500;
   color: var(--text-2);
 }
 
 .field-hint {
   grid-column: 1 / -1;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-3);
   line-height: 1.55;
 }
@@ -1952,7 +1984,7 @@ body.resizing-row * {
   flex-direction: row;
   align-items: center;
   gap: 8px;
-  font-size: 12.5px;
+  font-size: var(--fs-md);
   color: var(--text);
 }
 
@@ -1967,8 +1999,8 @@ body.resizing-row * {
   width: fit-content;
   padding: 3px 4px;
   margin-left: -4px;
-  border-radius: 5px;
-  font-size: 12px;
+  border-radius: var(--radius-xs);
+  font-size: var(--fs-md);
   color: var(--text-2);
   transition: background var(--speed), color var(--speed);
 }
@@ -2071,12 +2103,12 @@ body.resizing-row * {
 .kv-value {
   height: 26px;
   padding: 0 8px;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   /* 未聚焦时给一道极浅的边，让人看得出这里可以编辑。 */
   border: 1px solid color-mix(in srgb, var(--border-strong) 45%, transparent);
   background: transparent;
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-md);
   color: var(--text);
   min-width: 0;
   transition: background var(--speed), border-color var(--speed), box-shadow var(--speed);
@@ -2117,7 +2149,7 @@ textarea.kv-value {
   outline: none;
   background: var(--surface);
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--ring);
 }
 
 .kv-row .icon-btn.kv-del {
@@ -2141,7 +2173,7 @@ textarea.kv-value {
 .kv-empty {
   padding: 16px 14px;
   color: var(--text-3);
-  font-size: 12px;
+  font-size: var(--fs-md);
   text-align: center;
   border-bottom: 1px solid var(--border);
 }
@@ -2157,7 +2189,7 @@ textarea.kv-value {
 
 .file-btn {
   align-self: center;
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
   max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2190,18 +2222,18 @@ textarea.kv-value {
   align-items: center;
   gap: 8px;
   padding: 5px 7px;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
 }
 
 .assist-item code {
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
   color: var(--accent);
 }
 
 .assist-desc {
   margin-left: auto;
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   color: var(--text-3);
   white-space: nowrap;
 }
@@ -2251,11 +2283,11 @@ textarea.kv-value {
 }
 
 .response-empty p {
-  font-size: 12.5px;
+  font-size: var(--fs-md);
 }
 
 .response-empty p.muted {
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
   color: var(--text-3);
   max-width: 420px;
   line-height: 1.6;
@@ -2280,13 +2312,13 @@ textarea.kv-value {
 
 .status-num {
   font-family: var(--mono);
-  font-size: 15px;
+  font-size: var(--fs-xl);
   font-weight: 700;
   letter-spacing: -0.01em;
 }
 
 .status-text {
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
   color: var(--text-3);
   max-width: 180px;
   overflow: hidden;
@@ -2324,7 +2356,7 @@ textarea.kv-value {
 
 .response-subtabs .subtab {
   height: 31px;
-  font-size: 12px;
+  font-size: var(--fs-md);
 }
 
 .response-tools {
@@ -2362,14 +2394,14 @@ textarea.kv-value {
 }
 
 .error-text strong {
-  font-size: 12.5px;
+  font-size: var(--fs-md);
   font-weight: 600;
   word-break: break-word;
   user-select: text;
 }
 
 .error-text p {
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
   color: var(--text-2);
 }
 
@@ -2387,18 +2419,18 @@ textarea.kv-value {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--fs-md);
   min-width: 0;
 }
 
 .info-key {
   flex: 0 0 78px;
   color: var(--text-3);
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
 }
 
 .info-row code {
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
   color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2414,7 +2446,7 @@ textarea.kv-value {
   border-radius: var(--radius-sm);
   background: var(--warn-soft);
   color: var(--warn);
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
 }
 
 .warn-box ul {
@@ -2435,7 +2467,7 @@ textarea.kv-value {
   min-height: 100%;
   padding: 10px 14px 24px;
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-md);
   line-height: 1.62;
   user-select: text;
   color: var(--text);
@@ -2470,7 +2502,7 @@ textarea.kv-value {
   align-items: flex-start;
   gap: 2px;
   padding: 1px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .json-line:hover {
@@ -2494,9 +2526,9 @@ textarea.kv-value {
   align-items: center;
   justify-content: center;
   color: var(--text-3);
-  font-size: 9px;
+  font-size: var(--fs-2xs);
   flex: 0 0 auto;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 
 .json-toggle:hover {
@@ -2521,7 +2553,7 @@ textarea.kv-value {
 
 .json-punct {
   color: var(--text-3);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .json-value.json-string {
@@ -2549,10 +2581,10 @@ textarea.kv-value {
   align-self: flex-start;
   margin: 3px 0 3px 15px;
   padding: 2px 8px;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   background: var(--surface-3);
   color: var(--text-2);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .json-more:hover {
@@ -2565,7 +2597,7 @@ mark,
 .json-line mark {
   background: var(--warn-soft);
   color: var(--warn);
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   padding: 0 1px;
 }
 
@@ -2614,7 +2646,7 @@ mark,
   padding: 5px 8px 5px 10px;
   border-bottom: 1px solid var(--border);
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
   transition: background var(--speed);
 }
 
@@ -2660,7 +2692,7 @@ mark,
   align-items: flex-start;
   justify-content: center;
   padding: 64px 20px 24px;
-  background: color-mix(in srgb, #0b0e16 42%, transparent);
+  background: var(--scrim);
   backdrop-filter: blur(2px);
   animation: fade-in 120ms ease-out;
   overflow-y: auto;
@@ -2675,7 +2707,7 @@ mark,
   border: 1px solid var(--border-strong);
   background: var(--surface);
   box-shadow: var(--shadow-3);
-  animation: pop-in 140ms cubic-bezier(0.2, 0.8, 0.3, 1);
+  animation: pop-in 180ms cubic-bezier(0.2, 0.8, 0.3, 1);
   overflow: hidden;
 }
 
@@ -2690,7 +2722,7 @@ mark,
 
 .dialog-head h2 {
   flex: 1 1 auto;
-  font-size: 13.5px;
+  font-size: var(--fs-lg);
   font-weight: 600;
   letter-spacing: -0.01em;
 }
@@ -2717,7 +2749,7 @@ mark,
 }
 
 .dialog-hint {
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
   color: var(--text-3);
   line-height: 1.6;
   margin-top: 10px;
@@ -2731,7 +2763,7 @@ mark,
   border: 1px solid var(--border-strong);
   background: var(--surface-2);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-md);
   line-height: 1.6;
   resize: vertical;
   /* 长命令按行折行，不再横向滚动：真实 cURL 经常一行两三百字符。 */
@@ -2743,7 +2775,7 @@ mark,
 .curl-input:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--ring);
   background: var(--surface);
 }
 
@@ -2770,7 +2802,7 @@ mark,
 
 .preview-url {
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2789,7 +2821,7 @@ mark,
   grid-template-columns: 74px 1fr;
   gap: 8px;
   align-items: baseline;
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
 }
 
 .preview-label {
@@ -2826,7 +2858,7 @@ mark,
   align-items: center;
   gap: 7px;
   padding: 6px 8px;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--text-2);
   transition: background var(--speed), color var(--speed);
@@ -2861,12 +2893,12 @@ mark,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12.5px;
+  font-size: var(--fs-md);
 }
 
 .env-count {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   color: var(--text-3);
 }
 
@@ -2904,7 +2936,7 @@ mark,
 }
 
 .settings-section h3 {
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -2928,7 +2960,7 @@ mark,
   padding: 5px 9px;
   border-bottom: 1px solid var(--border);
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
 }
 
 .var-row:last-child {
@@ -2937,14 +2969,14 @@ mark,
 
 .var-row code {
   color: var(--accent);
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
 }
 
 .var-row span:last-child {
   color: var(--text-3);
   margin-left: auto;
   font-family: var(--sans);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 /* ---- 命令面板 ---- */
@@ -2962,7 +2994,7 @@ mark,
   background: var(--surface);
   box-shadow: var(--shadow-3);
   overflow: hidden;
-  animation: pop-in 140ms cubic-bezier(0.2, 0.8, 0.3, 1);
+  animation: pop-in 180ms cubic-bezier(0.2, 0.8, 0.3, 1);
 }
 
 .palette-input {
@@ -2982,7 +3014,7 @@ mark,
 .palette-search {
   flex: 1 1 auto;
   height: 24px;
-  font-size: 13px;
+  font-size: var(--fs-lg);
 }
 
 .palette-search:focus {
@@ -3000,7 +3032,7 @@ mark,
   align-items: center;
   gap: 9px;
   padding: 7px 9px;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--text-2);
   transition: background var(--speed), color var(--speed);
@@ -3025,7 +3057,7 @@ mark,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12.5px;
+  font-size: var(--fs-md);
 }
 
 .palette-hint {
@@ -3035,7 +3067,7 @@ mark,
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   color: var(--text-3);
 }
 
@@ -3043,7 +3075,7 @@ mark,
   padding: 22px;
   text-align: center;
   color: var(--text-3);
-  font-size: 12px;
+  font-size: var(--fs-md);
 }
 
 /* ---- 应用内确认 / 输入对话框 ---- */
@@ -3070,7 +3102,7 @@ mark,
   justify-content: center;
   width: 30px;
   height: 30px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--accent-soft);
   color: var(--accent);
   flex: 0 0 auto;
@@ -3082,7 +3114,7 @@ mark,
 }
 
 .confirm-message {
-  font-size: 12.5px;
+  font-size: var(--fs-md);
   line-height: 1.6;
   color: var(--text);
   padding-top: 4px;
@@ -3094,7 +3126,7 @@ mark,
 .welcome-backdrop {
   align-items: center;
   padding-top: 24px;
-  background: color-mix(in srgb, #0b0e16 58%, transparent);
+  background: var(--scrim-strong);
 }
 
 .welcome {
@@ -3102,7 +3134,7 @@ mark,
   width: 100%;
   max-width: 620px;
   padding: 26px 26px 18px;
-  border-radius: 18px;
+  border-radius: var(--radius-xl);
   border: 1px solid var(--border-strong);
   background: var(--surface);
   box-shadow: var(--shadow-3);
@@ -3132,7 +3164,7 @@ mark,
   justify-content: center;
   width: 34px;
   height: 34px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--accent);
   color: var(--on-accent);
   box-shadow: var(--shadow-2);
@@ -3144,13 +3176,13 @@ mark,
 }
 
 .welcome-head h1 {
-  font-size: 20px;
+  font-size: var(--fs-2xl);
   font-weight: 650;
   letter-spacing: -0.02em;
 }
 
 .welcome-sub {
-  font-size: 12.5px;
+  font-size: var(--fs-md);
   color: var(--text-2);
   line-height: 1.65;
   max-width: 480px;
@@ -3190,12 +3222,12 @@ mark,
 }
 
 .welcome-action strong {
-  font-size: 12.5px;
+  font-size: var(--fs-md);
   font-weight: 600;
 }
 
 .welcome-action span {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   text-wrap: pretty;
   color: var(--text-3);
   line-height: 1.55;
@@ -3240,11 +3272,11 @@ mark,
   border: 1px solid var(--border-strong);
   background: var(--surface);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--fs-md);
   box-shadow: var(--shadow-2);
   opacity: 0;
   transform: translateY(8px) scale(0.98);
-  transition: opacity 160ms ease, transform 160ms ease;
+  transition: opacity var(--speed) ease, transform 160ms ease;
 }
 
 .toast.in {
@@ -3307,7 +3339,7 @@ mark,
   background: color-mix(in srgb, var(--text-3) 32%, transparent);
   border: 3px solid transparent;
   background-clip: content-box;
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 
 ::-webkit-scrollbar-thumb:hover {
