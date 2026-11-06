@@ -184,7 +184,10 @@ func buildAppMenu() *mygo.Menu {
 			mygo.Separator(),
 			{Label: "收起 / 展开侧边栏", Accelerator: "CmdOrCtrl+B", Click: cmdItem("toggle-sidebar", "")},
 			mygo.Separator(),
-			{Role: mygo.RoleClose, Label: "关闭窗口", Accelerator: "CmdOrCtrl+W"},
+			// Ctrl+W 留给「关标签页」：这是浏览器与各类编辑器里最牢固的肌肉记忆，
+			// 关窗口必须另找组合键，否则用户关标签总会把整个窗口收进托盘。
+			{Label: "关闭当前标签页", Accelerator: "CmdOrCtrl+W", Click: cmdItem("close-tab", "")},
+			{Role: mygo.RoleClose, Label: "关闭窗口", Accelerator: "CmdOrCtrl+Shift+W"},
 			{Label: "退出 MyGo API", Click: func(*mygo.MenuItem, *mygo.Window) { quitApp() }},
 		}})
 	}

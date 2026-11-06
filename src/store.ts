@@ -58,6 +58,10 @@ export interface State {
 
 const STORAGE_VERSION = 1;
 
+// 分栏默认尺寸：双击分隔条复位到这里，默认状态与读回兜底共用同一份数字。
+export const DEFAULT_SIDEBAR_WIDTH = 288;
+export const DEFAULT_RESPONSE_HEIGHT = 340;
+
 function blankState(): State {
   return {
     ready: false,
@@ -69,8 +73,8 @@ function blankState(): State {
     tabs: [],
     activeTabId: null,
     theme: "auto",
-    sidebarWidth: 288,
-    responseHeight: 340,
+    sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
+    responseHeight: DEFAULT_RESPONSE_HEIGHT,
     sidebarTab: "collections",
     onboardingDone: false,
     closeToTray: true,
@@ -191,8 +195,9 @@ function applyPersisted(p: Partial<PersistedWorkspace>): void {
   state.globals = Array.isArray(p.globals) ? p.globals : [];
   state.activeEnvId = typeof p.activeEnvId === "string" ? p.activeEnvId : "";
   state.theme = p.theme === "dark" || p.theme === "light" ? p.theme : "auto";
-  state.sidebarWidth = clamp(p.sidebarWidth ?? 288, 208, 460);
-  state.responseHeight = clamp(p.responseHeight ?? 340, 160, 900);
+  // 上下限与拖拽时一致：拖到边缘再重启，尺寸不该被悄悄改掉。
+  state.sidebarWidth = clamp(p.sidebarWidth ?? DEFAULT_SIDEBAR_WIDTH, 208, 520);
+  state.responseHeight = clamp(p.responseHeight ?? DEFAULT_RESPONSE_HEIGHT, 140, 900);
   state.sidebarTab = p.sidebarTab === "history" ? "history" : "collections";
   state.onboardingDone = p.onboardingDone === true;
   state.tabs = Array.isArray(p.tabs)

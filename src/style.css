@@ -750,7 +750,7 @@ kbd {
 .topbar-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
 }
 
 .workspace {
@@ -1334,6 +1334,12 @@ body.resizing-row * {
   margin: 1px 0 0 2px;
   border-radius: 6px;
   color: var(--text-3);
+  /* 标签多到横向滚动时，新建按钮跟着贴在右端，不会滚出视野。 */
+  position: sticky;
+  right: 0;
+  flex: 0 0 auto;
+  background: var(--surface-2);
+  z-index: 1;
   flex: 0 0 auto;
   transition: background var(--speed), color var(--speed);
 }
@@ -1670,6 +1676,11 @@ body.resizing-row * {
   min-width: 0;
 }
 
+/* 只有一个字段的表单（如 Bearer Token）让它独占整行。 */
+.form-grid.form-single > .field {
+  grid-column: 1 / -1;
+}
+
 .field-label {
   font-size: 11.5px;
   font-weight: 500;
@@ -1677,6 +1688,7 @@ body.resizing-row * {
 }
 
 .field-hint {
+  grid-column: 1 / -1;
   font-size: 11px;
   color: var(--text-3);
   line-height: 1.55;
@@ -1693,16 +1705,24 @@ body.resizing-row * {
 
 .details {
   grid-column: 1 / -1;
-  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 8px 10px;
-  background: var(--surface-2);
 }
 
+/* 折叠区做成链接样式：它是一句附加操作，不该长得像输入框。 */
 .details > summary {
   cursor: pointer;
+  width: fit-content;
+  padding: 3px 4px;
+  margin-left: -4px;
+  border-radius: 5px;
   font-size: 12px;
   color: var(--text-2);
+  transition: background var(--speed), color var(--speed);
+}
+
+.details > summary:hover {
+  background: var(--surface-3);
+  color: var(--accent);
 }
 
 .details[open] > summary {
@@ -1772,6 +1792,8 @@ body.resizing-row * {
   padding: 5px 6px;
   border-bottom: 1px solid var(--border);
   transition: background var(--speed);
+  /* 行尾删除按钮改成浮在右上角，值的边框才能贴到行右缘。 */
+  position: relative;
 }
 
 .kv-row:last-child {
@@ -1797,7 +1819,8 @@ body.resizing-row * {
   height: 26px;
   padding: 0 8px;
   border-radius: 5px;
-  border: 1px solid transparent;
+  /* 未聚焦时给一道极浅的边，让人看得出这里可以编辑。 */
+  border: 1px solid color-mix(in srgb, var(--border-strong) 45%, transparent);
   background: transparent;
   font-family: var(--mono);
   font-size: 12px;
@@ -1812,6 +1835,8 @@ body.resizing-row * {
 
 .kv-value {
   flex: 1 1 auto;
+  /* 给浮在行尾的删除按钮腾出位置，长文本也不会被按钮盖住。 */
+  padding-right: 30px;
 }
 
 textarea.kv-value {
@@ -1843,6 +1868,9 @@ textarea.kv-value {
 }
 
 .kv-row .icon-btn.kv-del {
+  position: absolute;
+  right: 6px;
+  top: 5px;
   width: 24px;
   height: 26px;
   opacity: 0;
@@ -2445,8 +2473,6 @@ mark,
 .curl-input {
   width: 100%;
   height: 132px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
   padding: 10px 12px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
@@ -2455,8 +2481,10 @@ mark,
   font-size: 12px;
   line-height: 1.6;
   resize: vertical;
-  white-space: pre;
-  overflow: auto;
+  /* 长命令按行折行，不再横向滚动：真实 cURL 经常一行两三百字符。 */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-x: hidden;
 }
 
 .curl-input:focus {
@@ -2599,7 +2627,7 @@ mark,
 .env-detail-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .env-detail-head .text-input {
@@ -2915,6 +2943,7 @@ mark,
 
 .welcome-action span {
   font-size: 11px;
+  text-wrap: pretty;
   color: var(--text-3);
   line-height: 1.55;
 }

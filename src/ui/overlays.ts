@@ -218,7 +218,7 @@ function previewCard(request: ApiRequest, warnings: string[]): HTMLElement {
   card.append(head);
 
   const rows = el("div", { class: "preview-rows" });
-  rows.append(previewRow("查询参数", request.params.filter((p) => p.enabled && p.key).length ? `${request.params.filter((p) => p.enabled && p.key).length} 个` : "无"));
+  rows.append(previewRow("查询参数", paramSummary(request)));
   rows.append(
     previewRow(
       "请求头",
@@ -252,6 +252,14 @@ function previewRow(label: string, value: string): HTMLElement {
     el("span", { class: "preview-label", text: label }),
     el("span", { class: "preview-value", text: value }),
   );
+}
+
+function paramSummary(request: ApiRequest): string {
+  const params = request.params.filter((p) => p.enabled && p.key);
+  if (params.length === 0) return "无";
+  // 与其只说「1 个」，不如把真的值列出来，一眼能核对。
+  const shown = params.slice(0, 2).map((p) => `${p.key}=${p.value}`);
+  return params.length > 2 ? `${shown.join("、")} 等 ${params.length} 个` : shown.join("、");
 }
 
 function bodySummary(r: ApiRequest): string {
@@ -498,7 +506,7 @@ export function envDialog(): HTMLElement {
     head.append(
       nameInput,
       el("button", {
-        class: "link-btn danger",
+        class: "btn small ghost danger",
         attr: { type: "button" },
         text: "删除环境",
         on: {
@@ -894,7 +902,7 @@ export function commandPalette(): HTMLElement {
   const paint = (): void => {
     fill(list);
     if (filtered.length === 0) {
-      list.append(el("div", { class: "palette-empty", text: "没有匹配项" }));
+      list.append(el("div", { class: "palette-empty", text: "没有匹配项，试试「设置」「环境」「新建请求」" }));
       return;
     }
     filtered.forEach((item, i) => {

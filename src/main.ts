@@ -21,6 +21,8 @@ import {
 import { emptyRequest, parseCurl } from "./curl";
 import { methodTone } from "./util";
 import {
+  DEFAULT_RESPONSE_HEIGHT,
+  DEFAULT_SIDEBAR_WIDTH,
   abortSend,
   activeTab,
   closeTab,
@@ -156,6 +158,13 @@ function bindSidebarSplit(handle: HTMLElement): void {
     handle.addEventListener("pointermove", move);
     handle.addEventListener("pointerup", up);
   });
+  // 双击分隔条复位到默认宽度：拖窄了找不回来时的退路。
+  handle.addEventListener("dblclick", () => {
+    state.sidebarWidth = DEFAULT_SIDEBAR_WIDTH;
+    const node = sidebarHost.querySelector<HTMLElement>(".sidebar");
+    if (node) node.style.width = `${state.sidebarWidth}px`;
+    persist();
+  });
 }
 
 function bindResponseSplit(handle: HTMLElement): void {
@@ -177,6 +186,12 @@ function bindResponseSplit(handle: HTMLElement): void {
     };
     handle.addEventListener("pointermove", move);
     handle.addEventListener("pointerup", up);
+  });
+  // 双击复位响应区高度：默认值在 store 里定义，两边不要各写一份。
+  handle.addEventListener("dblclick", () => {
+    state.responseHeight = DEFAULT_RESPONSE_HEIGHT;
+    responseHost.style.height = `${state.responseHeight}px`;
+    persist();
   });
 }
 
@@ -335,6 +350,20 @@ function renderTabs(): void {
   });
   add.append(icon("plus"));
   tabstrip.append(add);
+  revealActiveTab();
+}
+
+// 标签多到需要横向滚动时，把当前标签滚进视野（右侧给新建按钮留出位置）。
+function revealActiveTab(): void {
+  const active = tabstrip.querySelector<HTMLElement>(".tab.active");
+  if (!active) return;
+  const strip = tabstrip.getBoundingClientRect();
+  const box = active.getBoundingClientRect();
+  const rightInset = 32;
+  if (box.left < strip.left) tabstrip.scrollLeft -= strip.left - box.left + 6;
+  else if (box.right > strip.right - rightInset) {
+    tabstrip.scrollLeft += box.right - (strip.right - rightInset) + 6;
+  }
 }
 
 function tabItem(tab: Tab): HTMLElement {
@@ -531,7 +560,7 @@ function welcomeCard(): HTMLElement {
 
   const curlCard = el("button", { class: "welcome-action", attr: { type: "button" } });
   curlCard.append(icon("terminal"), el("strong", { text: "粘贴 cURL 开始" }));
-  curlCard.append(el("span", { text: "从浏览器或文档复制的 curl 命令，粘贴即可还原成请求。" }));
+  curlCard.append(el("span", { text: "浏览器里复制一条命令，粘上来就能还原成请求。" }));
   curlCard.addEventListener("click", () => {
     finishOnboarding();
     state.curlOpen = true;
@@ -554,7 +583,7 @@ function welcomeCard(): HTMLElement {
 
   const blankCard = el("button", { class: "welcome-action", attr: { type: "button" } });
   blankCard.append(icon("plus"), el("strong", { text: "新建空白请求" }));
-  blankCard.append(el("span", { text: "从零填地址、参数、请求头与请求体，按 Ctrl+Enter 发送。" }));
+  blankCard.append(el("span", { text: "从零填地址、参数与请求体，按 Ctrl+Enter 发送。" }));
   blankCard.addEventListener("click", () => {
     finishOnboarding();
     openTab(emptyRequest(), "未命名请求");
@@ -566,7 +595,7 @@ function welcomeCard(): HTMLElement {
 
   const exampleCard = el("button", { class: "welcome-action", attr: { type: "button" } });
   exampleCard.append(icon("collection"), el("strong", { text: "载入示例集合" }));
-  exampleCard.append(el("span", { text: "内置 4 条 httpbin / GitHub 示例，可直接改着用。" }));
+  exampleCard.append(el("span", { text: "内置 4 条示例，点开即可改用。" }));
   exampleCard.addEventListener("click", () => {
     finishOnboarding();
     loadExamples();
@@ -825,6 +854,11 @@ function bindDesktop(): void {
       case "save":
         openSaveDialog("save");
         break;
+      case "close-tab": {
+        const tab = activeTab();
+        if (tab) closeTab(tab.id);
+        break;
+      }
       case "toggle-sidebar":
         toggleSidebar();
         break;

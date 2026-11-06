@@ -561,6 +561,8 @@ function authPane(tab: Tab): HTMLElement {
     return host;
   }
   if (auth.type === "bearer") {
+    // 只有 Token 一个字段时让它独占整行，避免左半边输入框看着像没填完。
+    form.classList.add("form-single");
     form.append(
       field(
         "Token",
@@ -629,7 +631,7 @@ function optionsPane(tab: Tab): HTMLElement {
   const opt = tab.request.options;
 
   const timeout = el("input", {
-    class: "text-input narrow",
+    class: "text-input",
     attr: { type: "number", min: "0", step: "1", inputmode: "numeric" },
     on: {
       change: () => {
