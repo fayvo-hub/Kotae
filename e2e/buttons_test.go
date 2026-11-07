@@ -341,3 +341,29 @@ func TestHistoryClearButton(t *testing.T) {
 	h.clickText(t, ".dialog-foot .btn", "清空")
 	h.wait(t, "历史已清空", `document.querySelectorAll('.history-row').length === 0`)
 }
+
+// 环境面板里的新建环境、删除环境、添加变量行。
+// 「导出全部数据 / 导入备份」会弹系统文件对话框，自动化点不到，这里不覆盖。
+func TestEnvDialogButtons(t *testing.T) {
+	h.clearOverlays(t)
+	h.pressKeys(t, "e", true, false)
+	h.wait(t, "环境面板", `!!document.querySelector('.env-layout')`)
+
+	before := h.count(t, ".env-item")
+	clickIn(t, ".env-dialog, .env-layout", "新建环境")
+	h.wait(t, "新建环境输入框", `!!document.querySelector('.prompt-dialog .text-input')`)
+	h.clickText(t, ".prompt-dialog .btn", "创建")
+	h.wait(t, "新建环境生效", fmt.Sprintf(`document.querySelectorAll('.env-item').length > %d`, before))
+
+	// 新环境是空的，加一行变量并确认能落进表里。
+	rows := h.count(t, ".env-detail .kv-row")
+	clickIn(t, ".env-detail", "添加一行")
+	h.wait(t, "环境变量加了一行", fmt.Sprintf(`document.querySelectorAll('.env-detail .kv-row').length > %d`, rows))
+
+	// 再删掉刚建的环境，回到原来的数量。
+	h.click(t, ".env-detail .btn.danger, .env-detail .danger")
+	h.wait(t, "删除环境确认框", `!!document.querySelector('.confirm-box')`)
+	h.clickText(t, ".dialog-foot .btn", "删除")
+	h.wait(t, "环境已删除", fmt.Sprintf(`document.querySelectorAll('.env-item').length === %d`, before))
+	h.clearOverlays(t)
+}

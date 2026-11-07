@@ -210,7 +210,7 @@ func (hb *harness) restart(t *testing.T) {
 		hb.client = nil
 	}
 	if hb.cmd != nil && hb.cmd.Process != nil {
-		_ = hb.cmd.Process.Kill()
+		killTree(hb.cmd.Process)
 		_, _ = hb.cmd.Process.Wait()
 		hb.cmd = nil
 	}
