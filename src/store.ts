@@ -20,7 +20,11 @@ import type {
   RedirectMode,
   AuthType,
   ScriptRun,
+  StreamMessage,
+  StreamSession,
+  StreamState,
 } from "./types";
+import type { WebSocket as GoWebSocket } from "@mygo-plugins/websocket";
 import { init as openStorage, load as readStorage, save as writeStorage } from "./db";
 import { buildURL, cloneRequest, emptyRequest, scriptOf, toCurl } from "./curl";
 import { snippetText, type SnippetLang } from "./snippets";
@@ -368,6 +372,7 @@ export function openTab(request: ApiRequest, name: string, origin?: Tab["origin"
 export function closeTab(id: string): void {
   const i = state.tabs.findIndex((t) => t.id === id);
   if (i < 0) return;
+  closeStreamFor(id);
   state.tabs.splice(i, 1);
   if (state.activeTabId === id) {
     const next = state.tabs[Math.min(i, state.tabs.length - 1)];
@@ -385,6 +390,7 @@ export function closeTab(id: string): void {
 export function closeOtherTabs(id: string): void {
   const keep = state.tabs.find((t) => t.id === id);
   if (!keep) return;
+  for (const t of state.tabs) if (t.id !== id) closeStreamFor(t.id);
   state.tabs.splice(0, state.tabs.length, keep);
   state.activeTabId = keep.id;
   persist();
@@ -393,6 +399,7 @@ export function closeOtherTabs(id: string): void {
 
 /** 关闭全部标签页，只留下一个新的空白请求。 */
 export function closeAllTabs(): void {
+  for (const t of state.tabs) closeStreamFor(t.id);
   state.tabs.splice(0, state.tabs.length);
   state.activeTabId = null;
   openTab(emptyRequest(), "未命名请求");
@@ -451,9 +458,82 @@ export function abortSend(tabId: string): void {
   c.abort(new DOMException("用户取消了请求", "AbortError"));
 }
 
+/** 按界面上的请求头与认证设置拼出实际发送的头；头名非法时把那个头名当字符串返回。 */
+function requestHeaders(request: ApiRequest): Headers | string {
+  const headers = new Headers();
+  for (const h of request.headers) {
+    if (!h.enabled || !h.key.trim()) continue;
+    try {
+      headers.set(resolveText(h.key), resolveText(h.value));
+    } catch {
+      return h.key;
+    }
+  }
+
+  const auth = request.auth;
+  if (auth.type === "bearer" && auth.token) {
+    headers.set("Authorization", `Bearer ${resolveText(auth.token)}`);
+  } else if (auth.type === "basic") {
+    headers.set(
+      "Authorization",
+      `Basic ${btoa(`${resolveText(auth.username)}:${resolveText(auth.password)}`)}`,
+    );
+  } else if (auth.type === "apikey" && auth.key) {
+    if (auth.in === "header") headers.set(resolveText(auth.key), resolveText(auth.value));
+  }
+  return headers;
+}
+
+/** 按界面上的请求体设置构造要发送的 body，顺带补上对应的 Content-Type。 */
+function buildBody(request: ApiRequest, headers: Headers, method: string): BodyInit | undefined {
+  if (method === "GET" || method === "HEAD" || request.bodyMode === "none") return undefined;
+  if (request.bodyMode === "form") {
+    const fd = new FormData();
+    for (const f of request.form) {
+      if (!f.enabled || !f.key.trim()) continue;
+      if (f.kind === "file") {
+        if (!f.fileData) continue;
+        const bytes = base64ToBytes(f.fileData);
+        fd.append(
+          resolveText(f.key),
+          new Blob([bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer], {
+            type: "application/octet-stream",
+          }),
+          f.fileName ?? "file",
+        );
+      } else {
+        fd.append(resolveText(f.key), resolveText(f.value));
+      }
+    }
+    return fd;
+  }
+  if (request.bodyMode === "urlencoded") {
+    const usp = new URLSearchParams();
+    for (const f of request.form) {
+      if (!f.enabled || !f.key.trim()) continue;
+      usp.append(resolveText(f.key), resolveText(f.value));
+    }
+    return usp;
+  }
+  const body = resolveText(request.body);
+  if (request.bodyMode === "json" && !headers.has("content-type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (request.bodyMode === "text" && !headers.has("content-type")) {
+    headers.set("Content-Type", "text/plain; charset=utf-8");
+  }
+  return body;
+}
+
 export async function send(): Promise<void> {
   const tab = activeTab();
   if (!tab || tab.sending) return;
+  // SSE / WebSocket 走连接流程：同一个「发送」按钮和 Ctrl+Enter 都复用这里。
+  const protocol = tab.request.protocol ?? "http";
+  if (protocol === "sse" || protocol === "ws") {
+    await openStream();
+    return;
+  }
 
   let url = ensureScheme(buildURL(tab.request, resolveText));
   if (!url.trim()) {
@@ -474,69 +554,18 @@ export async function send(): Promise<void> {
     return;
   }
 
-  let headers = new Headers();
-  for (const h of tab.request.headers) {
-    if (!h.enabled || !h.key.trim()) continue;
-    try {
-      headers.set(resolveText(h.key), resolveText(h.value));
-    } catch {
-      toast(`请求头「${h.key}」不是合法的头名`, "error");
-      return;
-    }
+  let headers = requestHeaders(tab.request);
+  if (typeof headers === "string") {
+    toast(`请求头「${headers}」不是合法的头名`, "error");
+    return;
   }
+  // 脚本拿到的初始头：闭包里引用 let 会丢掉收窄，单独存一份。
+  const startHeaders = headers;
+
+  let body = buildBody(tab.request, headers, tab.request.method.toUpperCase());
+  let methodUpper = tab.request.method.toUpperCase();
 
   const auth = tab.request.auth;
-  if (auth.type === "bearer" && auth.token) {
-    headers.set("Authorization", `Bearer ${resolveText(auth.token)}`);
-  } else if (auth.type === "basic") {
-    headers.set(
-      "Authorization",
-      `Basic ${btoa(`${resolveText(auth.username)}:${resolveText(auth.password)}`)}`,
-    );
-  } else if (auth.type === "apikey" && auth.key) {
-    if (auth.in === "header") headers.set(resolveText(auth.key), resolveText(auth.value));
-  }
-
-  let body: BodyInit | undefined;
-  let methodUpper = tab.request.method.toUpperCase();
-  if (methodUpper !== "GET" && methodUpper !== "HEAD" && tab.request.bodyMode !== "none") {
-    if (tab.request.bodyMode === "form") {
-      const fd = new FormData();
-      for (const f of tab.request.form) {
-        if (!f.enabled || !f.key.trim()) continue;
-        if (f.kind === "file") {
-          if (!f.fileData) continue;
-          const bytes = base64ToBytes(f.fileData);
-          fd.append(
-            resolveText(f.key),
-            new Blob([bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer], {
-              type: "application/octet-stream",
-            }),
-            f.fileName ?? "file",
-          );
-        } else {
-          fd.append(resolveText(f.key), resolveText(f.value));
-        }
-      }
-      body = fd;
-    } else if (tab.request.bodyMode === "urlencoded") {
-      const usp = new URLSearchParams();
-      for (const f of tab.request.form) {
-        if (!f.enabled || !f.key.trim()) continue;
-        usp.append(resolveText(f.key), resolveText(f.value));
-      }
-      body = usp;
-    } else {
-      body = resolveText(tab.request.body);
-      if (tab.request.bodyMode === "json" && !headers.has("content-type")) {
-        headers.set("Content-Type", "application/json");
-      }
-      if (tab.request.bodyMode === "text" && !headers.has("content-type")) {
-        headers.set("Content-Type", "text/plain; charset=utf-8");
-      }
-    }
-  }
-
   if (auth.type === "apikey" && auth.in === "query" && auth.key.trim()) {
     const u = new URL(url);
     u.searchParams.set(resolveText(auth.key), resolveText(auth.value));
@@ -556,7 +585,7 @@ export async function send(): Promise<void> {
   const scriptRequestState = () => ({
     method: methodUpper,
     url,
-    headers: [...headers.entries()] as [string, string][],
+    headers: [...startHeaders.entries()] as [string, string][],
     body: typeof body === "string" ? body : null,
   });
   if (script.pre.trim()) {
@@ -619,7 +648,7 @@ export async function send(): Promise<void> {
     timeoutMs,
     redirect: tab.request.options.redirect,
     keepCookies: tab.request.options.keepCookies,
-    authType: auth.type,
+    authType: tab.request.auth.type,
   });
   emit();
 
@@ -884,6 +913,352 @@ function errorRecord(
     error: message,
     errorKind: kind,
   };
+}
+
+// ---- SSE / WebSocket ----
+
+interface LiveStream {
+  protocol: "sse" | "ws";
+  abort?: AbortController;
+  socket?: GoWebSocket;
+  startedAt: number;
+}
+
+const liveStreams = new Map<string, LiveStream>();
+
+/** 单个连接最多保留的消息条数与单条文本上限，避免长连接把内存吃满。 */
+const STREAM_MESSAGE_LIMIT = 500;
+const STREAM_TEXT_LIMIT = 256 * 1024;
+
+function streamOf(tab: Tab): StreamSession {
+  if (!tab.stream) tab.stream = { state: "idle", messages: [] };
+  return tab.stream;
+}
+
+/** 读某个标签页的连接状态；没连过就是 undefined。 */
+export function streamSession(tab: Tab | undefined): StreamSession | undefined {
+  return tab?.stream;
+}
+
+/** 正在连接的标签页不能再点发送：按钮会变成「断开」。 */
+export function isStreaming(tab: Tab | undefined): boolean {
+  const state = tab?.stream?.state;
+  return state === "connecting" || state === "open";
+}
+
+// 高频消息（SSE 每秒几十条）合并到一帧里渲染，避免每条都重排整个响应区。
+let streamEmitQueued = false;
+function queueStreamEmit(): void {
+  if (streamEmitQueued) return;
+  streamEmitQueued = true;
+  requestAnimationFrame(() => {
+    streamEmitQueued = false;
+    emit();
+  });
+}
+
+function appendStreamMessage(tab: Tab, dir: StreamMessage["dir"], kind: string, text: string): void {
+  const session = streamOf(tab);
+  const clipped =
+    text.length > STREAM_TEXT_LIMIT
+      ? `${text.slice(0, STREAM_TEXT_LIMIT)}\n…（已截断，原文 ${text.length} 字符）`
+      : text;
+  session.messages.push({ id: uid("m"), at: Date.now(), dir, kind, text: clipped });
+  if (session.messages.length > STREAM_MESSAGE_LIMIT) {
+    session.messages.splice(0, session.messages.length - STREAM_MESSAGE_LIMIT);
+  }
+  queueStreamEmit();
+}
+
+/** 清空消息列表但保留连接（记录「已清空」不算消息，界面上看得到）。 */
+export function clearStreamMessages(tabId?: string): void {
+  const tab = tabId ? state.tabs.find((t) => t.id === tabId) : activeTab();
+  if (!tab?.stream) return;
+  tab.stream.messages = [];
+  emit();
+}
+
+/** http(s):// 的地址改写成 ws(s)://，已经是 ws 的原样保留。 */
+function toWebSocketURL(url: string): string {
+  if (/^wss?:/i.test(url)) return url;
+  return url.replace(/^https:/i, "wss:").replace(/^http:/i, "ws:");
+}
+
+function finishStream(tab: Tab, sessionState: StreamState, note?: string, error?: string): void {
+  const live = liveStreams.get(tab.id);
+  const session = streamOf(tab);
+  session.state = sessionState;
+  if (error) session.error = error;
+  if (live) {
+    session.durationMs = Math.round(performance.now() - live.startedAt);
+    liveStreams.delete(tab.id);
+  }
+  tab.sending = false;
+  if (note) appendStreamMessage(tab, "sys", "close", note);
+  emit();
+}
+
+/** 对应 URL 里的协议：SSE 用 GET 流，WS 走 Go 侧握手。 */
+async function openStream(): Promise<void> {
+  const tab = activeTab();
+  if (!tab || isStreaming(tab)) return;
+
+  const protocol: "sse" | "ws" = (tab.request.protocol ?? "http") === "ws" ? "ws" : "sse";
+  const url = ensureScheme(buildURL(tab.request, resolveText));
+  if (!url.trim()) {
+    toast("请先填写请求地址", "error");
+    return;
+  }
+
+  const missing = interpolate(
+    [
+      tab.request.url,
+      ...tab.request.params.map((p) => `${p.key}${p.value}`),
+      ...tab.request.headers.map((h) => `${h.key}${h.value}`),
+      tab.request.body,
+    ].join("\n"),
+    scope(),
+  ).missing;
+  if (missing.length > 0) {
+    toast(`未定义的变量：${missing.map((m) => `{{${m}}}`).join("、")}`, "error");
+    return;
+  }
+
+  const headers = requestHeaders(tab.request);
+  if (typeof headers === "string") {
+    toast(`请求头「${headers}」不是合法的头名`, "error");
+    return;
+  }
+
+  // 换一个目标地址就丢掉上一轮的消息，保留历史的做法见 clearStreamMessages。
+  tab.stream = { state: "connecting", messages: [] };
+  tab.response = undefined;
+  tab.scriptRuns = [];
+  tab.sending = true;
+  emit();
+
+  void System.setCookies(tab.request.options.keepCookies).catch(() => {});
+
+  const live: LiveStream = {
+    protocol,
+    abort: new AbortController(),
+    startedAt: performance.now(),
+  };
+  liveStreams.set(tab.id, live);
+
+  if (protocol === "sse") {
+    await readSSE(tab, live, url, headers);
+  } else {
+    await connectWS(tab, live, url, headers);
+  }
+}
+
+/** 断开当前标签页的连接（用户点「断开」或关标签页时）。 */
+export function closeStream(tabId?: string): void {
+  const tab = tabId ? state.tabs.find((t) => t.id === tabId) : activeTab();
+  if (!tab) return;
+  closeStreamFor(tab.id);
+}
+
+function closeStreamFor(tabId: string): void {
+  const live = liveStreams.get(tabId);
+  if (!live) return;
+  const tab = state.tabs.find((t) => t.id === tabId);
+  if (live.socket) {
+    try {
+      live.socket.close(1000, "用户断开");
+    } catch {
+      // 连接已经在关闭中就忽略。
+    }
+  }
+  live.abort?.abort(new DOMException("用户断开了连接", "AbortError"));
+  if (tab) {
+    finishStream(tab, "closed", "已断开连接");
+  } else {
+    liveStreams.delete(tabId);
+  }
+}
+
+/** 解析一个 SSE 事件块（已去掉结尾空行）。返回 null 表示只有注释/心跳。 */
+function parseSseChunk(chunk: string): { kind: string; data: string } | null {
+  let event = "message";
+  let id = "";
+  const data: string[] = [];
+  for (const line of chunk.split(/\r?\n/)) {
+    if (!line || line.startsWith(":")) continue; // 空行与注释（心跳）
+    const colon = line.indexOf(":");
+    const field = colon === -1 ? line : line.slice(0, colon);
+    const raw = colon === -1 ? "" : line.slice(colon + 1);
+    const value = raw.startsWith(" ") ? raw.slice(1) : raw;
+    if (field === "event") event = value || "message";
+    else if (field === "data") data.push(value);
+    else if (field === "id") id = value;
+  }
+  if (data.length === 0) return null;
+  const text = data.join("\n");
+  return { kind: id ? `${event} · id=${id}` : event, data: text };
+}
+
+async function readSSE(tab: Tab, live: LiveStream, url: string, headers: Headers): Promise<void> {
+  const session = streamOf(tab);
+  const controller = live.abort as AbortController;
+  try {
+    const res = await fetchFrom(url, {
+      method: tab.request.method.toUpperCase(),
+      headers,
+      body: buildBody(tab.request, headers, tab.request.method.toUpperCase()),
+      signal: controller.signal,
+    });
+
+    const metaHeaders: { key: string; value: string }[] = [];
+    res.headers.forEach((value, key) => metaHeaders.push({ key, value }));
+    metaHeaders.sort((a, b) => a.key.localeCompare(b.key));
+    session.meta = {
+      url: res.url || url,
+      status: res.status,
+      statusText: res.statusText,
+      headers: metaHeaders,
+    };
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      session.error = `服务端返回 ${res.status} ${res.statusText}`;
+      if (text.trim()) appendStreamMessage(tab, "in", "error", text.slice(0, 4000));
+      finishStream(tab, "error", `连接失败：${res.status} ${res.statusText}`);
+      return;
+    }
+    if (!res.body) {
+      finishStream(tab, "error", "这个地址没有返回可读取的流");
+      return;
+    }
+
+    session.state = "open";
+    appendStreamMessage(tab, "sys", "open", `已连接 ${res.status} ${res.statusText}`);
+    emit();
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder("utf-8", { fatal: false });
+    let buffer = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      // 事件之间用空行分隔，\r\n 与 \n 都要认。
+      let cut = buffer.search(/\r?\n\r?\n/);
+      while (cut !== -1) {
+        const chunk = buffer.slice(0, cut);
+        buffer = buffer.slice(buffer.indexOf("\n", cut) + 1);
+        if (buffer.startsWith("\n")) buffer = buffer.slice(1);
+        const parsed = parseSseChunk(chunk);
+        if (parsed) appendStreamMessage(tab, "in", parsed.kind, parsed.data);
+        cut = buffer.search(/\r?\n\r?\n/);
+      }
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) {
+      const parsed = parseSseChunk(buffer);
+      if (parsed) appendStreamMessage(tab, "in", parsed.kind, parsed.data);
+    }
+    finishStream(tab, "closed", "服务端结束了这条流");
+  } catch (err) {
+    const raw = errText(err);
+    const aborted = controller.signal.aborted;
+    if (aborted) {
+      finishStream(tab, "closed", "已断开连接");
+      return;
+    }
+    session.error = friendlyError(raw, raw.toLowerCase().includes("fetch failed") ? "network" : "invalid");
+    finishStream(tab, "error", `连接失败：${session.error}`, session.error);
+  }
+}
+
+async function connectWS(tab: Tab, live: LiveStream, url: string, headers: Headers): Promise<void> {
+  const session = streamOf(tab);
+  const target = toWebSocketURL(url);
+  // 子协议从请求头里取，浏览器同款写法；握手头里不能再带它。
+  const protocols = (headers.get("sec-websocket-protocol") ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  headers.delete("sec-websocket-protocol");
+
+  const handshake: Record<string, string> = {};
+  headers.forEach((value, key) => {
+    handshake[key] = value;
+  });
+
+  try {
+    const { WebSocket: GoSocket } = await import("@mygo-plugins/websocket");
+    const socket = new GoSocket(target, protocols, { headers: handshake });
+    live.socket = socket;
+    session.meta = { url: target, status: 101, statusText: "Switching Protocols", headers: [] };
+
+    socket.onopen = () => {
+      session.state = "open";
+      session.meta = {
+        ...(session.meta ?? { url: target, status: 101, statusText: "Switching Protocols", headers: [] }),
+        protocol: socket.protocol || undefined,
+      };
+      appendStreamMessage(
+        tab,
+        "sys",
+        "open",
+        `已连接${socket.protocol ? `（子协议 ${socket.protocol}）` : ""}`,
+      );
+    };
+    socket.onmessage = (ev: MessageEvent) => {
+      const data = ev.data;
+      if (typeof data === "string") {
+        appendStreamMessage(tab, "in", "text", data);
+        return;
+      }
+      if (data instanceof ArrayBuffer) {
+        appendStreamMessage(tab, "in", "binary", `二进制消息 ${data.byteLength} 字节`);
+        return;
+      }
+      if (typeof Blob !== "undefined" && data instanceof Blob) {
+        appendStreamMessage(tab, "in", "binary", `二进制消息 ${data.size} 字节`);
+        return;
+      }
+      appendStreamMessage(tab, "in", "text", String(data));
+    };
+    socket.onerror = () => {
+      // 浏览器的 error 事件不带原因，具体的错误在 onclose 里补。
+      appendStreamMessage(tab, "sys", "error", "连接出错");
+    };
+    socket.onclose = (ev: CloseEvent) => {
+      const reason = ev.reason ? `：${ev.reason}` : "";
+      if (ev.wasClean) {
+        finishStream(tab, "closed", `连接已关闭（${ev.code}${reason}）`);
+      } else {
+        session.error = `连接异常断开（${ev.code}${reason}）`;
+        finishStream(tab, "error", session.error, session.error);
+      }
+    };
+  } catch (err) {
+    const raw = errText(err);
+    session.error = friendlyError(raw, "invalid");
+    finishStream(tab, "error", `连接失败：${session.error}`, session.error);
+  }
+}
+
+/** WebSocket 里发一条文本消息。 */
+export function sendStreamMessage(text: string): void {
+  const tab = activeTab();
+  if (!tab) return;
+  const live = liveStreams.get(tab.id);
+  if (!live?.socket) {
+    toast("连接还没建立，无法发送", "error");
+    return;
+  }
+  const body = resolveText(text);
+  if (!body) return;
+  try {
+    live.socket.send(body);
+    appendStreamMessage(tab, "out", "text", body);
+  } catch (err) {
+    toast(`发送失败：${errText(err)}`, "error");
+  }
 }
 
 /** 把 Go 侧的错误原文翻译成中文提示，原文仍保留在提示下方可展开。 */

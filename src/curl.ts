@@ -189,6 +189,7 @@ function kv(key: string, value: string): KV {
 export function emptyRequest(url = ""): ApiRequest {
   const { base, params } = splitURL(url);
   return {
+    protocol: "http",
     method: "GET",
     url: base,
     params: params.map((p) => kv(p.key, p.value)),

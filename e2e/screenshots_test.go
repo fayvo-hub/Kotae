@@ -116,6 +116,19 @@ func waitResponse(t *testing.T, want string) {
 	}
 }
 
+// streamShot 打开一个 WebSocket 标签页，连上、发一条消息，然后截图。
+func streamShot(t *testing.T, dir, name string) {
+	t.Helper()
+	newStreamTab(t, "ws", "{{baseUrl}}/ws")
+	h.click(t, ".send-btn")
+	h.wait(t, "WebSocket 连上", `[...document.querySelectorAll('.stream-row')].some(r => (r.textContent || '').includes('hello from fixture'))`)
+	h.typeInto(t, ".stream-composer-input", "你好，WebSocket")
+	h.click(t, ".stream-send")
+	h.wait(t, "消息被回显", `[...document.querySelectorAll('.stream-row.dir-in')].some(r => (r.textContent || '').includes('你好，WebSocket'))`)
+	shotTo(t, dir, name)
+	h.clearOverlays(t)
+}
+
 func TestScreenshots(t *testing.T) {
 	if os.Getenv("MYGO_E2E_SCREENSHOTS") != "1" {
 		t.Skip("设置 MYGO_E2E_SCREENSHOTS=1 才生成 README 截图")
@@ -205,6 +218,9 @@ func TestScreenshots(t *testing.T) {
 	h.wait(t, "历史列表", `document.querySelector('.history-row') !== null`)
 	shotTo(t, dir, "09-history")
 
+	// 11 流式面板：WebSocket 连本机桩服务，收问候 + 发一条回显。
+	streamShot(t, dir, "11-stream")
+
 	// 10 浅色主题：切回集合页签，主题轮转到浅色再拍一张。
 	h.clickContaining(t, ".sidebar-tab", "集合")
 	h.click(t, `[data-role="theme"]`)
@@ -214,6 +230,9 @@ func TestScreenshots(t *testing.T) {
 	h.send(t)
 	waitResponse(t, "200")
 	shotTo(t, dir, "10-light")
+
+	// 12 浅色主题下的流式面板：两种主题都要看过才算验证过界面。
+	streamShot(t, dir, "12-stream-light")
 
 	// 收尾：把主题切回深色，避免影响后续用例的截图基线。
 	h.click(t, `[data-role="theme"]`)

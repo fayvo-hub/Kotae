@@ -125,6 +125,9 @@ func StartEcho() *Echo {
 		http.SetCookie(w, &http.Cookie{Name: "fixture_session", Value: "abc123", Path: "/"})
 		writeJSON(w, http.StatusOK, map[string]any{"cookie": r.Header.Get("Cookie")})
 	})
+	// 流式接口：SSE 推送与最小 WebSocket 回显。
+	mux.HandleFunc("/sse", sseHandler)
+	mux.HandleFunc("/ws", wsHandler)
 	e.Server = httptest.NewServer(mux)
 	return e
 }

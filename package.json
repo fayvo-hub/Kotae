@@ -16,6 +16,7 @@
   "dependencies": {
     "@mygo-plugins/fetch": "^0.7.4",
     "@mygo-plugins/sqlite": "^0.7.4",
+    "@mygo-plugins/websocket": "^0.7.4",
     "mygo-runtime": "^0.7.4"
   },
   "devDependencies": {

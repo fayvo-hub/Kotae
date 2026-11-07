@@ -18,6 +18,7 @@ import (
 	"github.com/egoist/mygo/netproxy"
 	"github.com/egoist/mygo/plugins/fetch"
 	"github.com/egoist/mygo/plugins/sqlite"
+	"github.com/egoist/mygo/plugins/websocket"
 	"github.com/egoist/mygo/transfer"
 )
 
@@ -323,6 +324,9 @@ func main() {
 	mygo.Use(fetch.New(fetch.Options{Client: client}))
 	// 存储层是 SQLite：插件把预编译的 sqlite3 通过 purego 加载，不需要 cgo。
 	mygo.Use(sqlite.Plugin)
+	// WebSocket 连接由 Go 建立：可以带握手请求头（Authorization / Cookie），
+	// 也不受页面同源策略限制，和 Postman 的行为一致。
+	mygo.Use(websocket.New(websocket.Options{Client: client}))
 	mygo.Bind(&System{jar: jar})
 
 	setupAppHooks()

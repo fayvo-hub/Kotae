@@ -6,6 +6,9 @@ import {
   abortSend,
   activeTab,
   applyURL,
+  closeStream,
+  emit,
+  isStreaming,
   mutate,
   send,
   setPendingCurl,
@@ -14,9 +17,23 @@ import {
 } from "../store";
 import { System } from "../mygo";
 import { CurlError, parseCurl } from "../curl";
-import { METHODS, type AuthType, type BodyMode, type HttpMethod, type Tab } from "../types";
+import {
+  METHODS,
+  type AuthType,
+  type BodyMode,
+  type HttpMethod,
+  type RequestProtocol,
+  type Tab,
+} from "../types";
 import { ensureScheme, interpolate, lookupVar, prettyJSON, stripSchemeBeforeVar } from "../util";
 import { scope as storeScope } from "../store";
+
+/** 请求协议：普通 HTTP、SSE 单向流、WebSocket 双向。 */
+const PROTOCOLS: { key: RequestProtocol; label: string }[] = [
+  { key: "http", label: "HTTP" },
+  { key: "sse", label: "SSE" },
+  { key: "ws", label: "WebSocket" },
+];
 
 const COMMON_HEADERS = [
   "Accept",
@@ -59,6 +76,30 @@ function envChip(): HTMLElement {
 function urlBar(tab: Tab): HTMLElement {
   const bar = el("div", { class: "url-bar" });
 
+  const protocol: RequestProtocol = tab.request.protocol ?? "http";
+
+  const protocolSelect = el("select", {
+    class: `protocol-select proto-${protocol}`,
+    attr: { "aria-label": "请求协议" },
+    on: {
+      change: () => {
+        const value = protocolSelect.value as RequestProtocol;
+        mutate((r) => {
+          r.protocol = value;
+        });
+        // 换协议时丢掉上一轮的连接记录，避免旧的 SSE 消息留在 WebSocket 面板里。
+        if (!isStreaming(tab)) {
+          tab.stream = undefined;
+          emit();
+        }
+      },
+    },
+  });
+  for (const p of PROTOCOLS) {
+    protocolSelect.append(el("option", { attr: { value: p.key }, text: p.label }));
+  }
+  protocolSelect.value = protocol;
+
   const methodSelect = el("select", {
     class: `method-select tone-${tab.request.method.toLowerCase()}`,
     attr: { "aria-label": "请求方法" },
@@ -73,6 +114,11 @@ function urlBar(tab: Tab): HTMLElement {
   });
   for (const m of METHODS) methodSelect.append(el("option", { attr: { value: m }, text: m }));
   methodSelect.value = tab.request.method;
+  // WebSocket 握手在 RFC 里是 GET，方法没有意义；SSE 允许 GET/POST，保留可选。
+  if (protocol === "ws") {
+    methodSelect.disabled = true;
+    methodSelect.title = "WebSocket 握手固定用 GET";
+  }
 
   // 变量高亮层：与输入框共用字体与内边距，输入框文字设为透明确保留光标。
   const mirrorInner = el("div", { class: "url-mirror-inner" });
@@ -147,20 +193,33 @@ function urlBar(tab: Tab): HTMLElement {
   paintHighlight();
   enableVarAssist(urlInput);
 
+  const streaming = isStreaming(tab);
+  // 普通请求发送中按钮原地变「取消」，流式连接建立后变「断开」。
+  const cancelling = !streaming && protocol === "http" && tab.sending;
   const sendBtn = el("button", {
     class: "btn primary send-btn",
-    attr: { type: "button", title: "发送（Ctrl+Enter）" },
-    on: { click: () => void send() },
+    attr: {
+      type: "button",
+      title: streaming ? "断开连接" : cancelling ? "取消请求" : protocol === "http" ? "发送（Ctrl+Enter）" : "建立连接（Ctrl+Enter）",
+    },
+    on: {
+      click: () => {
+        if (streaming) closeStream(tab.id);
+        else if (cancelling) abortSend(tab.id);
+        else void send();
+      },
+    },
   });
-  if (tab.sending) {
-    sendBtn.append(el("span", { class: "spinner" }), el("span", { text: "取消" }));
+  if (streaming) {
+    sendBtn.append(icon("close"), el("span", { text: "断开" }));
     sendBtn.classList.add("cancelling");
-    sendBtn.addEventListener("click", (ev) => {
-      ev.stopImmediatePropagation();
-      abortSend(tab.id);
-    });
-  } else {
+  } else if (cancelling) {
+    sendBtn.append(icon("close"), el("span", { text: "取消" }));
+    sendBtn.classList.add("cancelling");
+  } else if (protocol === "http") {
     sendBtn.append(icon("send"), el("span", { text: "发送" }));
+  } else {
+    sendBtn.append(icon("dot"), el("span", { text: "连接" }));
   }
 
   const snippetBtn = iconButton("code", "生成代码片段（Ctrl+Shift+G）", () => {
@@ -173,7 +232,7 @@ function urlBar(tab: Tab): HTMLElement {
 
   fill(
     bar,
-    el("div", { class: "url-method" }, methodSelect),
+    el("div", { class: "url-method" }, protocolSelect, methodSelect),
     el("div", { class: "url-field" }, el("div", { class: "url-input-wrap" }, mirror, urlInput), unresolvedBadge(tab)),
     // 与顶栏、快捷键重复的动作不在这里重复放：导入 cURL 在顶栏与 Ctrl+I，
     // 复制 cURL 走代码片段（选 cURL）或 Ctrl+Shift+C。

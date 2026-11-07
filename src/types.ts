@@ -95,7 +95,12 @@ export interface ScriptRun {
 }
 
 /** 一条请求定义，集合里的请求与标签页里的请求是同一结构。 */
+/** 请求的传输方式：普通 HTTP、服务端推送（SSE）、双向 WebSocket。 */
+export type RequestProtocol = "http" | "sse" | "ws";
+
 export interface ApiRequest {
+  /** 缺省按普通 HTTP 处理，老数据不用迁移。 */
+  protocol?: RequestProtocol;
   method: HttpMethod;
   /** 不含查询串的地址；查询串由 params 维护。 */
   url: string;
@@ -195,6 +200,37 @@ export interface SentRecord {
   at: number;
 }
 
+/** 流式连接里的一条消息（SSE 事件或 WebSocket 消息）。 */
+export interface StreamMessage {
+  id: string;
+  at: number;
+  /** in = 服务端发来，out = 我们发出去，sys = 连接状态变化。 */
+  dir: "in" | "out" | "sys";
+  /** SSE 的事件名（message / update…），WS 的 text | binary，sys 的说明。 */
+  kind: string;
+  text: string;
+}
+
+export type StreamState = "idle" | "connecting" | "open" | "closed" | "error";
+
+/** SSE / WebSocket 会话的运行时状态（不落盘）。 */
+export interface StreamSession {
+  state: StreamState;
+  messages: StreamMessage[];
+  /** SSE 才有：握手得到的 HTTP 状态与响应头。 */
+  meta?: {
+    url: string;
+    status: number;
+    statusText: string;
+    headers: { key: string; value: string }[];
+    protocol?: string;
+  };
+  /** 出错时的中文说明。 */
+  error?: string;
+  /** 连接持续时长（毫秒），断开后显示。 */
+  durationMs?: number;
+}
+
 export interface Tab {
   id: string;
   name: string;
@@ -208,6 +244,8 @@ export interface Tab {
   sent?: SentRecord;
   /** 最近一次发送的脚本记录（前置失败时也要能看到，所以挂在标签页上）。 */
   scriptRuns?: ScriptRun[];
+  /** SSE / WebSocket 的连接状态与消息流（只在当前会话里有效）。 */
+  stream?: StreamSession;
   sending: boolean;
   /** 响应区分栏当前展示的页签。 */
   responseTab: "body" | "headers" | "request";

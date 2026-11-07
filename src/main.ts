@@ -30,6 +30,7 @@ import {
   activeTab,
   closeAllTabs,
   closeOtherTabs,
+  closeStream,
   closeTab,
   copyText,
   createCollection,
@@ -38,6 +39,7 @@ import {
   emit,
   errText,
   finishOnboarding,
+  isStreaming,
   load,
   openHistory,
   openNode,
@@ -553,6 +555,15 @@ function renderResponse(): void {
     ? [
         tab.id,
         tab.sending ? "1" : "0",
+        tab.request.protocol ?? "http",
+        tab.stream
+          ? [
+              tab.stream.state,
+              tab.stream.messages.length,
+              tab.stream.error ?? "",
+              tab.stream.durationMs ?? 0,
+            ].join(":")
+          : "nostream",
         tab.response?.at ?? 0,
         tab.response?.error ?? "",
         tab.responseTab,
@@ -895,6 +906,11 @@ function onKeydown(ev: KeyboardEvent): void {
         return;
       }
       const tab = activeTab();
+      if (tab && isStreaming(tab)) {
+        closeStream(tab.id);
+        toast("已断开连接");
+        return;
+      }
       if (tab?.sending) {
         abortSend(tab.id);
         toast("已取消请求");

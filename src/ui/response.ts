@@ -3,14 +3,34 @@
 import { el, fill, icon, iconButton } from "./dom";
 import { highlightMarkup, highlightText, jsonTree, looksJson, setTreeExpanded } from "./jsonview";
 import { System } from "../mygo";
-import type { ResponseRecord, ScriptRun, SentRecord, Tab } from "../types";
-import { copyText, toast } from "../store";
+import type {
+  RequestProtocol,
+  ResponseRecord,
+  ScriptRun,
+  SentRecord,
+  StreamMessage,
+  StreamSession,
+  StreamState,
+  Tab,
+} from "../types";
+import { copyText, clearStreamMessages, sendStreamMessage, toast } from "../store";
 import { formatBytes, formatDuration } from "../util";
 import { prettyJSON } from "../util";
 
 /** 渲染响应区。没有响应时显示占位提示。 */
 export function responsePanel(tab: Tab): HTMLElement {
   const wrap = el("section", { class: "response-panel" });
+  const protocol = tab.request.protocol ?? "http";
+
+  if (protocol !== "http") {
+    if (tab.stream) {
+      fill(wrap, streamPanel(tab, tab.stream, protocol));
+    } else {
+      fill(wrap, streamEmpty(protocol));
+    }
+    return wrap;
+  }
+
   const res = tab.response;
   const runs = tab.scriptRuns ?? [];
   const logs = runs.length > 0 ? scriptLog(runs) : null;
@@ -65,6 +85,168 @@ function scriptLog(runs: ScriptRun[]): HTMLElement {
     }
     box.append(el("div", { class: `script-log-run${run.error ? " has-error" : ""}` }, head, body));
   }
+  return box;
+}
+
+// ---- SSE / WebSocket ----
+
+const STREAM_STATE_TEXT: Record<StreamState, string> = {
+  idle: "未连接",
+  connecting: "连接中",
+  open: "已连接",
+  closed: "已断开",
+  error: "连接失败",
+};
+
+const DIR_TEXT: Record<StreamMessage["dir"], string> = { in: "收", out: "发", sys: "系统" };
+
+/** WebSocket 发送框的草稿：新消息触发重渲染后，草稿与焦点都不丢。 */
+const composerDrafts = new Map<string, string>();
+
+function streamEmpty(protocol: RequestProtocol): HTMLElement {
+  const ws = protocol === "ws";
+  return el(
+    "div",
+    { class: "response-empty" },
+    icon(ws ? "dot" : "send"),
+    el("p", { text: ws ? "还没有建立 WebSocket 连接" : "还没有建立 SSE 连接" }),
+    el("p", {
+      class: "muted",
+      text: ws
+        ? "点「连接」后由 Go 侧完成握手，请求头里可以写 Authorization、Cookie。"
+        : "点「连接」后服务端推来的每条事件都会实时追加到下面。",
+    }),
+  );
+}
+
+function streamClock(at: number): string {
+  return new Date(at).toLocaleTimeString("zh-CN", { hour12: false });
+}
+
+function streamPanel(tab: Tab, session: StreamSession, protocol: RequestProtocol): HTMLElement {
+  const box = el("div", { class: "stream-panel" });
+  const live = session.state === "connecting" || session.state === "open";
+
+  // 上一次渲染的滚动位置：贴底时继续贴底，往上翻的时候不往回弹。
+  const old = document.querySelector<HTMLElement>(".stream-log");
+  const stickToBottom = !old || old.scrollHeight - old.scrollTop - old.clientHeight < 48;
+  const oldTop = old?.scrollTop ?? 0;
+  const composerFocused = document.activeElement?.classList.contains("stream-composer-input") ?? false;
+
+  const head = el("div", { class: "stream-head" });
+  head.append(
+    el(
+      "span",
+      { class: `stream-state state-${session.state}` },
+      icon("dot"),
+      el("span", { text: STREAM_STATE_TEXT[session.state] }),
+    ),
+    el("span", {
+      class: "stream-url",
+      attr: { title: session.meta?.url ?? "" },
+      text: session.meta?.url ?? "—",
+    }),
+  );
+  if (session.meta && protocol === "sse") {
+    head.append(
+      el("span", { class: "stream-chip", text: `${session.meta.status} ${session.meta.statusText}`.trim() }),
+    );
+  }
+  if (session.meta?.protocol) {
+    head.append(el("span", { class: "stream-chip", text: `子协议 ${session.meta.protocol}` }));
+  }
+  if (session.durationMs !== undefined) {
+    head.append(el("span", { class: "stream-chip", text: formatDuration(session.durationMs) }));
+  }
+  head.append(el("span", { class: "stream-chip", text: `${session.messages.length} 条` }));
+  head.append(el("span", { class: "stream-spacer" }));
+  head.append(
+    iconButton("copy", "复制全部消息", () => {
+      const text = session.messages
+        .map((m) => `[${streamClock(m.at)}] ${DIR_TEXT[m.dir]} ${m.kind}\n${m.text}`)
+        .join("\n\n");
+      if (!text) {
+        toast("还没有消息可复制", "error");
+        return;
+      }
+      void copyText(text, `已复制 ${session.messages.length} 条消息`);
+    }),
+    iconButton("trash", "清空消息", () => clearStreamMessages(tab.id)),
+  );
+  box.append(head);
+
+  if (session.error) {
+    box.append(el("div", { class: "stream-error" }, icon("warn"), el("span", { text: session.error })));
+  }
+
+  const log = el("div", { class: "stream-log" });
+  if (session.messages.length === 0) {
+    log.append(
+      el(
+        "div",
+        { class: "stream-waiting" },
+        icon("info"),
+        el("span", { text: live ? "已连接，等待服务端消息…" : "还没有收到消息" }),
+      ),
+    );
+  }
+  for (const msg of session.messages) {
+    const row = el("div", { class: `stream-row dir-${msg.dir}` });
+    const rowHead = el("div", { class: "stream-row-head" });
+    rowHead.append(
+      el("span", { class: `stream-dir dir-${msg.dir}`, text: DIR_TEXT[msg.dir] }),
+      el("span", { class: "stream-kind", text: msg.kind }),
+      el("span", { class: "stream-time", text: streamClock(msg.at) }),
+    );
+    row.append(rowHead, el("pre", { class: "stream-text", text: msg.text }));
+    log.append(row);
+  }
+  box.append(log);
+
+  if (protocol === "ws") {
+    const input = el("textarea", {
+      class: "stream-composer-input",
+      attr: {
+        placeholder: live ? "输入要发送的消息，Enter 发送，Shift+Enter 换行" : "连接建立后才能发送消息",
+        rows: "2",
+        spellcheck: "false",
+        "aria-label": "要发送的消息",
+      },
+      on: {
+        input: () => composerDrafts.set(tab.id, input.value),
+        keydown: (ev) => {
+          if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) {
+            ev.preventDefault();
+            submit();
+          }
+        },
+      },
+    });
+    input.value = composerDrafts.get(tab.id) ?? "";
+    const submit = (): void => {
+      if (!input.value.trim()) return;
+      sendStreamMessage(input.value);
+      input.value = "";
+      composerDrafts.set(tab.id, "");
+    };
+    const submitBtn = el("button", { class: "btn primary stream-send", attr: { type: "button" }, on: { click: submit } });
+    submitBtn.append(icon("send"), el("span", { text: "发送" }));
+    if (!live) submitBtn.disabled = true;
+    box.append(el("div", { class: "stream-composer" }, input, submitBtn));
+  }
+
+  requestAnimationFrame(() => {
+    const node = document.querySelector<HTMLElement>(".stream-log");
+    if (node) node.scrollTop = stickToBottom ? node.scrollHeight : oldTop;
+    if (composerFocused && protocol === "ws") {
+      const area = document.querySelector<HTMLTextAreaElement>(".stream-composer-input");
+      if (area) {
+        area.focus();
+        area.setSelectionRange(area.value.length, area.value.length);
+      }
+    }
+  });
+
   return box;
 }
 
