@@ -13,6 +13,7 @@ import {
   closeAll,
   commandPalette,
   curlDialog,
+  checkUpdates,
   envDialog,
   importDialog,
   openSaveDialog,
@@ -20,9 +21,12 @@ import {
   settingsDialog,
   snippetsDialog,
 } from "./ui/overlays";
+import { nodeSettingsDialog } from "./ui/nodeSettings";
+import { cookieDialog } from "./ui/cookies";
 import { emptyRequest, parseCurl } from "./curl";
 import { methodTone } from "./util";
 import { closeContextMenu, openContextMenu } from "./ui/menu";
+import { comboOf, isCapturing } from "./shortcuts";
 import {
   DEFAULT_RESPONSE_HEIGHT,
   DEFAULT_SIDEBAR_WIDTH,
@@ -55,6 +59,9 @@ import {
   setCloseToTray,
   setGlobalShortcutFromShell,
   setTheme,
+  actionForCombo,
+  setZoom,
+  stepZoom,
   state,
   subscribe,
   toast,
@@ -624,6 +631,8 @@ function overlaySignature(): string {
     state.envOpen,
     state.settingsOpen,
     state.snippetsOpen,
+    state.cookiesOpen,
+    state.nodeSettings ? `${state.nodeSettings.collectionId}:${state.nodeSettings.nodeId ?? ""}` : "",
     saveOpen,
   ].join("|");
 }
@@ -644,6 +653,10 @@ function renderOverlays(): void {
     overlayRoot.append(envDialog());
   } else if (state.snippetsOpen) {
     overlayRoot.append(snippetsDialog());
+  } else if (state.cookiesOpen) {
+    overlayRoot.append(cookieDialog());
+  } else if (state.nodeSettings) {
+    overlayRoot.append(nodeSettingsDialog());
   } else if (state.settingsOpen) {
     overlayRoot.append(settingsDialog());
   } else if (saveOpen) {
@@ -870,120 +883,117 @@ function bindEvents(): void {
 }
 
 function onKeydown(ev: KeyboardEvent): void {
+  // 设置页正在录制新键位时，按键只交给录制器（见 src/shortcuts.ts）。
+  if (isCapturing()) return;
   const mod = ev.ctrlKey || ev.metaKey;
-  const key = ev.key.toLowerCase();
   const target = ev.target as HTMLElement | null;
   const typing =
     target instanceof HTMLInputElement ||
     target instanceof HTMLTextAreaElement ||
     target?.isContentEditable === true;
 
-  if (mod && ev.key === "Enter") {
-    ev.preventDefault();
-    void send();
-    return;
-  }
   if (!mod) {
-    if (ev.key === "Escape") {
-      if (envMenuOpen) {
-        closeEnvMenu();
-        return;
-      }
-      // 有任何浮层（含首次引导页）时，Esc 先关浮层。
-      if (
-        state.commandOpen ||
-        state.curlOpen ||
-        state.importOpen ||
-        state.envOpen ||
-        state.snippetsOpen ||
-        state.settingsOpen ||
-        saveOpen ||
-        !state.onboardingDone
-      ) {
-        closeAll();
-        // 首次引导页在 Esc 下也作为「关闭」处理。
-        if (!state.onboardingDone) finishOnboarding();
-        return;
-      }
-      const tab = activeTab();
-      if (tab && isStreaming(tab)) {
-        closeStream(tab.id);
-        toast("已断开连接");
-        return;
-      }
-      if (tab?.sending) {
-        abortSend(tab.id);
-        toast("已取消请求");
-      }
+    if (ev.key !== "Escape") return;
+    if (envMenuOpen) {
+      closeEnvMenu();
       return;
+    }
+    // 有任何浮层（含首次引导页）时，Esc 先关浮层。
+    if (
+      state.commandOpen ||
+      state.curlOpen ||
+      state.importOpen ||
+      state.envOpen ||
+      state.snippetsOpen ||
+      state.cookiesOpen ||
+      state.settingsOpen ||
+      state.nodeSettings ||
+      saveOpen ||
+      !state.onboardingDone
+    ) {
+      closeAll();
+      // 首次引导页在 Esc 下也作为「关闭」处理。
+      if (!state.onboardingDone) finishOnboarding();
+      return;
+    }
+    const tab = activeTab();
+    if (tab && isStreaming(tab)) {
+      closeStream(tab.id);
+      toast("已断开连接");
+      return;
+    }
+    if (tab?.sending) {
+      abortSend(tab.id);
+      toast("已取消请求");
     }
     return;
   }
 
-  if (ev.shiftKey) {
-    if (key === "c") {
-      ev.preventDefault();
-      void copyText(currentCurl(true), "已复制 cURL 命令");
-      return;
-    }
-    if (key === "n") {
-      ev.preventDefault();
-      promptNewCollection();
-      return;
-    }
-    if (key === "g") {
-      ev.preventDefault();
-      toggleUI("snippetsOpen", true);
-      return;
-    }
-    if (key === "i") {
-      ev.preventDefault();
-      toggleUI("importOpen", true);
-      return;
-    }
-  }
+  // 组合键全部查表：用户可以在设置页改键位，这里不再硬编码。
+  const combo = comboOf(ev);
+  const action = combo ? actionForCombo(combo) : null;
+  if (!action) return;
+  // 正在输入框里打字时，Ctrl+W 不关标签页（浏览器里也是这个行为）。
+  if (action === "close-tab" && typing) return;
+  ev.preventDefault();
+  runShortcut(action);
+}
 
-  switch (key) {
-    case "s":
-      ev.preventDefault();
-      openSaveDialog("save");
+/** 执行一个快捷键动作，动作 id 见 src/shortcuts.ts。 */
+function runShortcut(action: string): void {
+  switch (action) {
+    case "send":
+      void send();
       break;
-    case "n":
-      ev.preventDefault();
+    case "new-request":
       openTab(emptyRequest(), "未命名请求");
       break;
-    case "k":
-      ev.preventDefault();
-      toggleUI("commandOpen", true);
+    case "new-collection":
+      promptNewCollection();
       break;
-    case "i":
-      ev.preventDefault();
+    case "save":
+      openSaveDialog("save");
+      break;
+    case "import-curl":
       toggleUI("curlOpen", true);
       break;
-    case "e":
-      ev.preventDefault();
+    case "import-postman":
+      toggleUI("importOpen", true);
+      break;
+    case "snippets":
+      toggleUI("snippetsOpen", true);
+      break;
+    case "copy-curl":
+      void copyText(currentCurl(true), "已复制 cURL 命令");
+      break;
+    case "env":
       toggleUI("envOpen", true);
       break;
-    case "b":
-      ev.preventDefault();
-      toggleSidebar();
+    case "palette":
+      toggleUI("commandOpen", true);
       break;
-    case "f":
-      ev.preventDefault();
+    case "search":
       focusBodySearch();
       break;
-    case ",":
-      ev.preventDefault();
+    case "settings":
       toggleUI("settingsOpen", true);
       break;
-    case "w":
-      if (!typing) {
-        const tab = activeTab();
-        if (tab) {
-          ev.preventDefault();
-          closeTab(tab.id);
-        }
-      }
+    case "sidebar":
+      toggleSidebar();
+      break;
+    case "close-tab": {
+      const tab = activeTab();
+      if (tab) closeTab(tab.id);
+      break;
+    }
+    case "zoom-in":
+      stepZoom(1);
+      break;
+    case "zoom-out":
+      stepZoom(-1);
+      break;
+    case "zoom-reset":
+      setZoom(1);
       break;
     default:
       break;
@@ -1070,6 +1080,9 @@ function bindDesktop(): void {
         break;
       case "open-settings":
         toggleUI("settingsOpen", true);
+        break;
+      case "check-updates":
+        checkUpdates();
         break;
       case "toggle-theme": {
         const order = ["auto", "light", "dark"] as const;

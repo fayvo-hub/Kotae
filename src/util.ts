@@ -181,12 +181,16 @@ export interface VarScope {
   env: KV[];
   /** 全局变量。 */
   globals: KV[];
+  /** 集合 / 文件夹级变量，靠前的优先级高（深层文件夹在前）。 */
+  local?: KV[];
 }
 
 /** 解析变量名到值；环境优先于全局。 */
 export function lookupVar(name: string, scope: VarScope): string | undefined {
   const hit = scope.env.find((v) => v.enabled && v.key === name);
   if (hit) return hit.value;
+  const local = scope.local?.find((v) => v.enabled && v.key === name);
+  if (local) return local.value;
   const g = scope.globals.find((v) => v.enabled && v.key === name);
   if (g) return g.value;
   return undefined;
@@ -259,4 +263,34 @@ export function randomHex(len: number): string {
   const bytes = new Uint8Array(Math.ceil(len / 2));
   crypto.getRandomValues(bytes);
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, len);
+}
+
+/** 地址里的路径变量名（`:id` 这种），按出现顺序去重。 */
+export function pathVarNames(url: string): string[] {
+  const out: string[] = [];
+  for (const m of url.matchAll(/:([A-Za-z_][A-Za-z0-9_]*)/g)) {
+    const name = m[1];
+    if (name && !out.includes(name)) out.push(name);
+  }
+  return out;
+}
+
+/** 把地址里的 `:name` 换成路径变量表里的值；没填值的原样保留，方便一眼看出缺哪个。 */
+export function substitutePathVars(
+  url: string,
+  rows: { key: string; value: string; enabled: boolean }[] | undefined,
+  resolve: (text: string) => string,
+): string {
+  if (!rows || rows.length === 0) return url;
+  let out = url;
+  for (const row of rows) {
+    const name = row.key.trim();
+    if (!name) continue;
+    const escaped = name.replace(/[^A-Za-z0-9_]/g, (c) => "\\" + c);
+    const pattern = new RegExp(`:${escaped}(?![A-Za-z0-9_])`, "g");
+    // 没填值就留着占位符，一眼能看出还差哪个变量。
+    const filled = row.enabled && row.value.trim() !== "";
+    out = out.replace(pattern, filled ? resolve(row.value) : `:${name}`);
+  }
+  return out;
 }

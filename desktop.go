@@ -2,7 +2,10 @@ package main
 
 import (
 	_ "embed"
+	"errors"
+	"fmt"
 	"log"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -25,7 +28,7 @@ var trayPNG []byte
 type DesktopCommand struct {
 	// Action 是页面要执行的动作：new-request、import-curl、save、close-tab、
 	// toggle-sidebar、command-palette、open-env、open-settings、snippets、
-	// import-postman、toggle-theme。
+	// import-postman、toggle-theme、check-updates。
 	Action string `json:"action"`
 	// Text 是随动作带过去的内容，例如深链里的 cURL 命令。
 	Text string `json:"text,omitempty"`
@@ -177,6 +180,27 @@ func (s *System) ApplyDesktopPrefs(closeToTray bool, globalShortcut bool) error 
 	return nil
 }
 
+// 界面缩放的上下限：0.7 倍还能看清结构，2 倍已经够用，再大只能看到局部。
+const (
+	zoomMin = 0.7
+	zoomMax = 2.0
+)
+
+// SetZoomFactor 缩放整个页面（1 = 100%）。
+// 走 WebView 自己的缩放而不是 CSS zoom：布局按缩放后的逻辑像素重排，固定定位的
+// 浮层、滚动条、拖拽分栏都跟着一起变，不会出现内容被裁掉或右侧留白。
+func (s *System) SetZoomFactor(factor float64) error {
+	if math.IsNaN(factor) || factor < zoomMin || factor > zoomMax {
+		return fmt.Errorf("缩放比例需要在 %d%% 到 %d%% 之间", int(zoomMin*100), int(zoomMax*100))
+	}
+	win := currentWindow()
+	if win == nil {
+		return errors.New("窗口还没准备好，稍后再试")
+	}
+	win.Page().SetZoomFactor(factor)
+	return nil
+}
+
 // applyGlobalShortcut 按需注册或注销系统级快捷键。注册失败（例如被别的程序占了）
 // 只记日志：快捷键是便利功能，不该拦住应用启动。
 func applyGlobalShortcut(on bool) {
@@ -267,6 +291,9 @@ func buildTrayMenu() *mygo.Menu {
 		}},
 		{Label: "导入 cURL…", Click: func(*mygo.MenuItem, *mygo.Window) {
 			sendDesktop(DesktopCommand{Action: "import-curl"})
+		}},
+		{Label: "检查更新…", Click: func(*mygo.MenuItem, *mygo.Window) {
+			sendDesktop(DesktopCommand{Action: "check-updates"})
 		}},
 		mygo.Separator(),
 		trayItem,

@@ -3,33 +3,47 @@
 import { System, events } from "./mygo";
 import type {
   ApiRequest,
+  AuthConfig,
+  AuthType,
+  BinaryFile,
   Collection,
   Env,
   FolderNode,
   HistoryEntry,
   KV,
   PersistedWorkspace,
+  RedirectMode,
   RequestNode,
+  RequestOptions,
   ResponseRecord,
-  Tab,
-  ThemeMode,
-  TreeNode,
+  ResponseTrace,
+  ScriptRun,
   SentBody,
   SentFile,
   SentRecord,
-  RedirectMode,
-  AuthType,
-  ScriptRun,
   StreamMessage,
   StreamSession,
   StreamState,
+  Tab,
+  ThemeMode,
+  TreeNode,
 } from "./types";
 import type { WebSocket as GoWebSocket } from "@mygo-plugins/websocket";
 import { init as openStorage, load as readStorage, save as writeStorage } from "./db";
 import { buildURL, cloneRequest, emptyRequest, scriptOf, toCurl } from "./curl";
 import { snippetText, type SnippetLang } from "./snippets";
-import { ensureScheme, guessName, interpolate, lookupVar, splitURL, uid, type VarScope } from "./util";
+import {
+  ensureScheme,
+  guessName,
+  interpolate,
+  lookupVar,
+  pathVarNames,
+  splitURL,
+  uid,
+  type VarScope,
+} from "./util";
 import { runScript } from "./script";
+import { SHORTCUT_ACTIONS, comboLabel, shortcutAction } from "./shortcuts";
 
 export interface Toast {
   id: string;
@@ -57,15 +71,25 @@ export interface State {
   globalShortcut: boolean;
   /** 侧边栏是否收起。 */
   sidebarCollapsed: boolean;
+  /** 界面缩放，1 = 100%。 */
+  zoom: number;
+  /** 代码区字号（px）。 */
+  codeFontSize: number;
+  /** 快捷键覆盖（只存改过的动作）。 */
+  shortcuts: Record<string, string>;
   /** 界面浮层状态，不持久化。 */
   commandOpen: boolean;
   settingsOpen: boolean;
   envOpen: boolean;
   curlOpen: boolean;
   importOpen: boolean;
+  /** 正在编辑共享设置的集合 / 文件夹（nodeId 为空表示集合本身）。 */
+  nodeSettings: { collectionId: string; nodeId?: string; name: string } | null;
   /** 双击 .har 打开时带进来的文本，浮层第一次打开会直接用它解析。 */
   importDraft: string;
   snippetsOpen: boolean;
+  /** Cookie 管理器浮层。 */
+  cookiesOpen: boolean;
   /** 代码片段面板选中的语言，不持久化。 */
   snippetLang: SnippetLang;
   /** cURL 解析结果，等待用户确认后填充。 */
@@ -83,6 +107,13 @@ const STORAGE_VERSION = 1;
 // 分栏默认尺寸：双击分隔条复位到这里，默认状态与读回兜底共用同一份数字。
 export const DEFAULT_SIDEBAR_WIDTH = 288;
 export const DEFAULT_RESPONSE_HEIGHT = 340;
+// 界面缩放与代码字号的可选范围：设置页的滑杆、快捷键、读回兜底共用同一份边界。
+export const ZOOM_MIN = 0.7;
+export const ZOOM_MAX = 2;
+export const ZOOM_STEPS = [0.7, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
+export const CODE_FS_MIN = 10;
+export const CODE_FS_MAX = 20;
+export const DEFAULT_CODE_FS = 12;
 
 function blankState(): State {
   return {
@@ -102,13 +133,18 @@ function blankState(): State {
     closeToTray: true,
     globalShortcut: true,
     sidebarCollapsed: false,
+    zoom: 1,
+    codeFontSize: DEFAULT_CODE_FS,
+    shortcuts: {},
     commandOpen: false,
     settingsOpen: false,
     envOpen: false,
     curlOpen: false,
     importOpen: false,
+    nodeSettings: null,
     importDraft: "",
     snippetsOpen: false,
+    cookiesOpen: false,
     snippetLang: "fetch",
     pendingCurl: null,
     pendingImport: null,
@@ -167,6 +203,9 @@ function snapshot(): PersistedWorkspace {
     onboardingDone: state.onboardingDone,
     closeToTray: state.closeToTray,
     globalShortcut: state.globalShortcut,
+    zoom: state.zoom,
+    codeFontSize: state.codeFontSize,
+    shortcuts: state.shortcuts,
   };
 }
 
@@ -213,6 +252,7 @@ export async function load(): Promise<void> {
   }
   state.ready = true;
   applyTheme();
+  applyScale();
   // 把存在库里的桌面偏好交给 Go 侧的桌面外壳（托盘 menu 的勾选状态）。
   void System.applyDesktopPrefs(state.closeToTray, state.globalShortcut).catch(() => {});
   emit();
@@ -234,6 +274,9 @@ function applyPersisted(p: Partial<PersistedWorkspace>): void {
   // 桌面偏好默认开：只有明确存了 false 才关，缺字段（旧库）按默认处理。
   state.closeToTray = p.closeToTray !== false;
   state.globalShortcut = p.globalShortcut !== false;
+  state.zoom = clamp(round2(p.zoom ?? 1), ZOOM_MIN, ZOOM_MAX);
+  state.shortcuts = sanitizeShortcuts(p.shortcuts);
+  state.codeFontSize = clamp(Math.round(p.codeFontSize ?? DEFAULT_CODE_FS), CODE_FS_MIN, CODE_FS_MAX);
   state.tabs = Array.isArray(p.tabs)
     ? p.tabs.map((t) => ({
         ...t,
@@ -248,6 +291,10 @@ function applyPersisted(p: Partial<PersistedWorkspace>): void {
   state.activeTabId = typeof p.activeTabId === "string" ? p.activeTabId : null;
 }
 
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Number.isFinite(n) ? n : min));
 }
@@ -257,15 +304,28 @@ function normalizeRequest(r: Partial<ApiRequest> | undefined): ApiRequest {
   const base = emptyRequest();
   if (!r) return base;
   return {
+    // protocol / script / binary 都必须原样带过去：少了它们，重启后
+    // SSE·WebSocket 标签会退回 HTTP，脚本与二进制请求体会静默消失。
+    protocol: r.protocol ?? "http",
     method: r.method ?? base.method,
     url: r.url ?? base.url,
     params: r.params ?? [],
     headers: r.headers ?? [],
     bodyMode: r.bodyMode ?? "none",
     body: r.body ?? "",
+    binary: r.binary,
+    graphqlVars: r.graphqlVars,
+    pathVars: r.pathVars,
     form: r.form ?? [],
     auth: { ...base.auth, ...(r.auth ?? {}) },
-    options: { ...base.options, ...(r.options ?? {}) },
+    // 老数据（以及自带 fixture）可能没有 proxy / insecureTLS，这里补齐默认值。
+    options: {
+      ...base.options,
+      ...(r.options ?? {}),
+      proxy: r.options?.proxy ?? base.options.proxy ?? "",
+      insecureTLS: r.options?.insecureTLS ?? false,
+    },
+    script: r.script,
   };
 }
 
@@ -280,10 +340,133 @@ function defaultEnv(): Env {
   };
 }
 
-/** 当前环境下发给请求的变量作用域。 */
-export function scope(): VarScope {
+/**
+ * 当前环境下发给请求的变量作用域。带上标签页时会并入它所在集合 / 文件夹的
+ * 共享变量（深层文件夹优先），这样界面上的地址预览与真正发出去的完全一致。
+ */
+export function scope(tab: Tab | null = activeTab() ?? null): VarScope {
   const env = state.envs.find((e) => e.id === state.activeEnvId);
-  return { env: env?.vars ?? [], globals: state.globals };
+  const local = tab ? inheritedFor(tab.origin).vars : [];
+  return { env: env?.vars ?? [], globals: state.globals, local };
+}
+
+// ---- 集合 / 文件夹级共享设置 ----
+
+/** 从集合与沿途文件夹继承下来的共享设置。 */
+export interface Inherited {
+  /** 链上最近一个设了认证的配置。 */
+  auth?: AuthConfig;
+  /** 提供认证的层级名（集合名或文件夹名），界面上用来提示来源。 */
+  authFrom?: string;
+  /** 提供认证的层级 id，用于一键跳到那层设置。 */
+  authFromId?: string;
+  /** 可用的共享变量，深层文件夹在前。 */
+  vars: KV[];
+  /** 变量来自哪些层级（深层在前）。 */
+  varSources: string[];
+}
+
+const NO_INHERIT: Inherited = { vars: [], varSources: [] };
+
+/**
+ * 沿「集合 → 文件夹…→ 请求所在层」解析继承来的认证与变量。
+ * 认证只看请求所在层往上（自己这一层由请求自己的 auth 决定，不参与继承）。
+ */
+export function inheritedFor(origin?: Tab["origin"]): Inherited {
+  if (!origin) return NO_INHERIT;
+  const collection = state.collections.find((c) => c.id === origin.collectionId);
+  if (!collection) return NO_INHERIT;
+
+  // 找到目标节点，同时记下它上方的文件夹链。
+  let path: FolderNode[] | undefined;
+  const walk = (items: TreeNode[], trail: FolderNode[]): boolean => {
+    for (const node of items) {
+      if (node.type === "folder") {
+        const next = [...trail, node];
+        if (node.id === origin.nodeId) {
+          path = next;
+          return true;
+        }
+        if (walk(node.items, next)) return true;
+      } else if (node.id === origin.nodeId) {
+        path = trail;
+        return true;
+      }
+    }
+    return false;
+  };
+  walk(collection.items, []);
+  const layers = (path ?? []).slice().reverse();
+
+  const vars: KV[] = [];
+  const varSources: string[] = [];
+  for (const layer of layers) {
+    if (layer.vars?.length) {
+      vars.push(...layer.vars);
+      varSources.push(layer.name);
+    }
+  }
+  if (collection.vars?.length) {
+    vars.push(...collection.vars);
+    varSources.push(collection.name);
+  }
+
+  const inherited: Inherited = { vars, varSources };
+  for (const layer of layers) {
+    if (layer.auth && layer.auth.type !== "none") {
+      inherited.auth = layer.auth;
+      inherited.authFrom = layer.name;
+      inherited.authFromId = layer.id;
+      break;
+    }
+  }
+  if (!inherited.auth && collection.auth && collection.auth.type !== "none") {
+    inherited.auth = collection.auth;
+    inherited.authFrom = collection.name;
+    inherited.authFromId = collection.id;
+  }
+  return inherited;
+}
+
+/** 真正生效的认证：请求自己设了就用自己，否则继承集合 / 文件夹的。 */
+export function authFor(request: ApiRequest, origin?: Tab["origin"]): AuthConfig {
+  if (request.auth.type !== "none") return request.auth;
+  return inheritedFor(origin).auth ?? request.auth;
+}
+
+export function emptyAuth(): AuthConfig {
+  return { type: "none", token: "", username: "", password: "", key: "", value: "", in: "header" };
+}
+
+/**
+ * 写集合（nodeId 为空）或某个文件夹的共享设置。只传要改的字段，
+ * 传 `undefined` 表示回到「没有这一层设置」。
+ */
+export function setNodeSettings(
+  collectionId: string,
+  nodeId: string | undefined,
+  patch: { auth?: AuthConfig; vars?: KV[] },
+): void {
+  const collection = state.collections.find((c) => c.id === collectionId);
+  if (!collection) return;
+  let target: Collection | FolderNode = collection;
+  if (nodeId) {
+    const hit = findNode(collectionId, nodeId)?.node;
+    if (!hit || hit.type !== "folder") return;
+    target = hit;
+  }
+  if ("auth" in patch) {
+    if (patch.auth && patch.auth.type !== "none") target.auth = patch.auth;
+    else delete target.auth;
+  }
+  if ("vars" in patch) {
+    // 空数组也要原样写回：编辑器持有的是同一个数组引用，
+    // 这里 delete 会让后续输入往一个已经脱离 state 的数组里推。
+    if (patch.vars) target.vars = patch.vars;
+    else delete target.vars;
+  }
+  persist();
+  emit();
 }
 
 /**
@@ -318,6 +501,104 @@ export function applyTheme(): void {
 export function setTheme(mode: ThemeMode): void {
   state.theme = mode;
   applyTheme();
+  persist();
+  emit();
+}
+
+/**
+ * 把界面缩放与代码字号落实到界面上。
+ * 缩放交给 Go 侧的 WebView 真实缩放（见 desktop.go 的 SetZoomFactor），这里只管
+ * 代码字号的 CSS 变量，两者都能被同一次「恢复默认」重置。
+ */
+export function applyScale(): void {
+  document.documentElement.style.setProperty("--fs-code", `${state.codeFontSize}px`);
+  void System.setZoomFactor(state.zoom).catch(() => {
+    // 窗口还没建好时先忽略：下次改缩放或重启会重新下发。
+  });
+}
+
+export function setZoom(next: number): void {
+  const value = clamp(round2(next), ZOOM_MIN, ZOOM_MAX);
+  if (value === state.zoom) return;
+  state.zoom = value;
+  applyScale();
+  persist();
+  emit();
+}
+
+/** 按预设档位放大 / 缩小一档，供 Ctrl+= / Ctrl+- 使用。 */
+export function stepZoom(direction: 1 | -1): void {
+  const steps = ZOOM_STEPS;
+  const current = state.zoom;
+  const next =
+    direction > 0
+      ? steps.find((s) => s > current + 0.001) ?? steps[steps.length - 1]!
+      : [...steps].reverse().find((s) => s < current - 0.001) ?? steps[0]!;
+  setZoom(next);
+}
+
+export function setCodeFontSize(next: number): void {
+  const value = clamp(Math.round(next), CODE_FS_MIN, CODE_FS_MAX);
+  if (value === state.codeFontSize) return;
+  state.codeFontSize = value;
+  applyScale();
+  persist();
+  emit();
+}
+
+// ---- 快捷键 ----
+
+/** 丢掉不认识的 id 与非字符串组合键，避免手工改库后界面炸掉。 */
+function sanitizeShortcuts(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== "object") return {};
+  const out: Record<string, string> = {};
+  for (const [id, combo] of Object.entries(raw as Record<string, unknown>)) {
+    if (!shortcutAction(id) || typeof combo !== "string" || !combo) continue;
+    out[id] = combo;
+  }
+  return out;
+}
+
+/** 某个动作当前生效的组合键。 */
+export function shortcutFor(id: string): string {
+  return state.shortcuts[id] ?? shortcutAction(id)?.def ?? "";
+}
+
+/** 组合键当前绑到哪个动作（没有则 null）。 */
+export function actionForCombo(combo: string): string | null {
+  for (const action of SHORTCUT_ACTIONS) {
+    if (shortcutFor(action.id) === combo) return action.id;
+  }
+  return null;
+}
+
+/**
+ * 改一个动作的键位；combo 为 null 表示恢复默认。
+ * 与其它动作冲突时拒绝并说明，让用户先改另一个，避免悄悄换掉两个键。
+ */
+export function setShortcut(id: string, combo: string | null): boolean {
+  const action = shortcutAction(id);
+  if (!action) return false;
+  if (combo === null || combo === action.def) {
+    delete state.shortcuts[id];
+  } else {
+    const other = actionForCombo(combo);
+    if (other && other !== id) {
+      const name = shortcutAction(other)?.label ?? other;
+      toast(`「${comboLabel(combo)}」已被「${name}」占用，请先改掉它`, "error");
+      return false;
+    }
+    state.shortcuts[id] = combo;
+  }
+  persist();
+  emit();
+  return true;
+}
+
+/** 全部恢复默认键位。 */
+export function resetShortcuts(): void {
+  if (Object.keys(state.shortcuts).length === 0) return;
+  state.shortcuts = {};
   persist();
   emit();
 }
@@ -434,13 +715,31 @@ export function applyURL(raw: string, tabId?: string): void {
   const tab = tabId ? state.tabs.find((t) => t.id === tabId) : activeTab();
   if (!tab) return;
   const { base, params } = splitURL(raw.trim());
+  // 同一段文字被重复提交（失焦两次、blur 与回车各一次）时不能再把同样的参数
+  // 追加一遍，否则地址栏里一个 ?x=1 会变成两条同名参数。
+  const kept = tab.request.params.filter((p) => p.key.trim() !== "" || p.value.trim() !== "");
+  const added = params
+    .filter((p) => !kept.some((e) => e.key === p.key && e.value === p.value))
+    .map((p) => ({ id: uid("kv"), key: p.key, value: p.value, enabled: true }));
+  const droppedEmpty = kept.length !== tab.request.params.length;
+  // 地址里的 `:id` 这类占位符变了，路径变量表也得跟着变，否则参数页签会停在旧列表。
+  const nextNames = pathVarNames(base);
+  const currentRows = tab.request.pathVars ?? [];
+  const namesChanged =
+    nextNames.length !== currentRows.length || nextNames.some((name) => !currentRows.some((r) => r.key === name));
+  // 什么都没变就别落库、别重绘：重绘会擦掉正在就地编辑的东西。
+  if (tab.request.url === base && added.length === 0 && !droppedEmpty && !namesChanged) return;
   tab.request.url = base;
-  if (params.length > 0) {
-    tab.request.params = [
-      ...tab.request.params.filter((p) => p.key.trim() !== "" || p.value.trim() !== ""),
-      ...params.map((p) => ({ id: uid("kv"), key: p.key, value: p.value, enabled: true })),
-    ];
+  if (namesChanged) {
+    tab.request.pathVars =
+      nextNames.length === 0
+        ? undefined
+        : nextNames.map(
+            (name) => currentRows.find((r) => r.key === name) ?? { id: uid("kv"), key: name, value: "", enabled: true },
+          );
   }
+  if (added.length > 0) tab.request.params = [...kept, ...added];
+  else if (droppedEmpty) tab.request.params = kept;
   tab.dirty = true;
   persist();
   emit();
@@ -459,7 +758,23 @@ export function abortSend(tabId: string): void {
 }
 
 /** 按界面上的请求头与认证设置拼出实际发送的头；头名非法时把那个头名当字符串返回。 */
-function requestHeaders(request: ApiRequest): Headers | string {
+// ---- 请求级网络出口 ----
+// 代理与 TLS 校验是单条请求的选项，但 Go 侧只有一个共享的 http.Client，
+// 所以用两个内部头把选项带过去：transport.go 会在发出前把它们删掉。
+const PROXY_HEADER = "X-Mygo-Proxy";
+const INSECURE_HEADER = "X-Mygo-Insecure-Tls";
+const TRACE_ID_HEADER = "X-Mygo-Trace-Id";
+const TRACE_RESULT_HEADER = "x-mygo-trace";
+
+function applyNetworkOptions(headers: Headers, options: RequestOptions): void {
+  const proxy = (options.proxy ?? "").trim();
+  if (proxy) headers.set(PROXY_HEADER, proxy);
+  if (options.insecureTLS) headers.set(INSECURE_HEADER, "1");
+  // 链路与分阶段耗时也靠内部头回传：Go 侧用这个 id 记住这条请求的每一跳。
+  headers.set(TRACE_ID_HEADER, uid("tr"));
+}
+
+function requestHeaders(request: ApiRequest, auth: AuthConfig = request.auth): Headers | string {
   const headers = new Headers();
   for (const h of request.headers) {
     if (!h.enabled || !h.key.trim()) continue;
@@ -470,7 +785,6 @@ function requestHeaders(request: ApiRequest): Headers | string {
     }
   }
 
-  const auth = request.auth;
   if (auth.type === "bearer" && auth.token) {
     headers.set("Authorization", `Bearer ${resolveText(auth.token)}`);
   } else if (auth.type === "basic") {
@@ -487,6 +801,15 @@ function requestHeaders(request: ApiRequest): Headers | string {
 /** 按界面上的请求体设置构造要发送的 body，顺带补上对应的 Content-Type。 */
 function buildBody(request: ApiRequest, headers: Headers, method: string): BodyInit | undefined {
   if (method === "GET" || method === "HEAD" || request.bodyMode === "none") return undefined;
+  if (request.bodyMode === "binary") {
+    const file = request.binary;
+    if (!file || !file.data) return undefined;
+    const bytes = base64ToBytes(file.data);
+    if (!headers.has("content-type")) headers.set("Content-Type", "application/octet-stream");
+    return new Blob([bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer], {
+      type: headers.get("content-type") ?? "application/octet-stream",
+    });
+  }
   if (request.bodyMode === "form") {
     const fd = new FormData();
     for (const f of request.form) {
@@ -514,6 +837,20 @@ function buildBody(request: ApiRequest, headers: Headers, method: string): BodyI
       usp.append(resolveText(f.key), resolveText(f.value));
     }
     return usp;
+  }
+  if (request.bodyMode === "graphql") {
+    // GraphQL 走 HTTP 的既定形状：{query, variables} 的 JSON，变量填错了就当空。
+    let variables: unknown = {};
+    const vars = resolveText(request.graphqlVars ?? "").trim();
+    if (vars) {
+      try {
+        variables = JSON.parse(vars) as unknown;
+      } catch {
+        variables = {};
+      }
+    }
+    if (!headers.has("content-type")) headers.set("Content-Type", "application/json");
+    return JSON.stringify({ query: resolveText(request.body), variables });
   }
   const body = resolveText(request.body);
   if (request.bodyMode === "json" && !headers.has("content-type")) {
@@ -554,7 +891,10 @@ export async function send(): Promise<void> {
     return;
   }
 
-  let headers = requestHeaders(tab.request);
+  // 请求自己没设认证时，用集合 / 文件夹继承下来的那一份。
+  const auth = authFor(tab.request, tab.origin);
+  let headers = requestHeaders(tab.request, auth);
+  if (typeof headers !== "string") applyNetworkOptions(headers, tab.request.options);
   if (typeof headers === "string") {
     toast(`请求头「${headers}」不是合法的头名`, "error");
     return;
@@ -565,7 +905,6 @@ export async function send(): Promise<void> {
   let body = buildBody(tab.request, headers, tab.request.method.toUpperCase());
   let methodUpper = tab.request.method.toUpperCase();
 
-  const auth = tab.request.auth;
   if (auth.type === "apikey" && auth.in === "query" && auth.key.trim()) {
     const u = new URL(url);
     u.searchParams.set(resolveText(auth.key), resolveText(auth.value));
@@ -608,7 +947,7 @@ export async function send(): Promise<void> {
         scriptVars,
       );
       scriptVars = pre.vars;
-      scriptRuns.push({ phase: "pre", logs: pre.logs, error: pre.error, ms: pre.ms });
+      scriptRuns.push({ phase: "pre", logs: pre.logs, error: pre.error, ms: pre.ms, tests: pre.tests });
       if (pre.error) {
         tab.sending = false;
         emit();
@@ -648,7 +987,8 @@ export async function send(): Promise<void> {
     timeoutMs,
     redirect: tab.request.options.redirect,
     keepCookies: tab.request.options.keepCookies,
-    authType: tab.request.auth.type,
+    authType: auth.type,
+    binary: tab.request.bodyMode === "binary" ? tab.request.binary : undefined,
   });
   emit();
 
@@ -703,6 +1043,7 @@ export async function send(): Promise<void> {
           error: post.error,
           ms: post.ms,
           bodyEdited: post.responseBody !== undefined,
+          tests: post.tests,
         });
       }
     }
@@ -743,6 +1084,8 @@ interface SentInput {
   url: string;
   headers: Headers;
   body: BodyInit | undefined;
+  /** 二进制直传的文件信息，用来在「请求」页签里显示实际发的是什么。 */
+  binary?: BinaryFile;
   timeoutMs: number;
   redirect: RedirectMode;
   keepCookies: boolean;
@@ -757,7 +1100,7 @@ function buildSentRecord(input: SentInput): SentRecord {
     method: input.method,
     url: input.url,
     headers,
-    body: sentBodyOf(input.body, input.headers),
+    body: sentBodyOf(input.body, input.headers, input.binary),
     timeoutMs: input.timeoutMs,
     redirect: input.redirect,
     keepCookies: input.keepCookies,
@@ -766,8 +1109,16 @@ function buildSentRecord(input: SentInput): SentRecord {
   };
 }
 
-function sentBodyOf(body: BodyInit | undefined, headers: Headers): SentBody {
+function sentBodyOf(body: BodyInit | undefined, headers: Headers, binary?: BinaryFile): SentBody {
   if (body === undefined) return { kind: "none" };
+  if (binary && body instanceof Blob) {
+    return {
+      kind: "binary",
+      contentType: headers.get("content-type") ?? "application/octet-stream",
+      name: binary.name,
+      bytes: binary.size,
+    };
+  }
   if (body instanceof FormData) {
     const fields: [string, string][] = [];
     const files: SentFile[] = [];
@@ -813,9 +1164,29 @@ function base64ToBytes(b64: string): Uint8Array {
 
 const PREVIEW_LIMIT = 2 * 1024 * 1024;
 
+/** 解析 Go 侧回传的链路快照；坏数据就当没有。 */
+function decodeTrace(value: string | null): ResponseTrace | undefined {
+  if (!value) return undefined;
+  try {
+    const bin = atob(value);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as ResponseTrace;
+    if (!Array.isArray(parsed.hops) || parsed.hops.length === 0) return undefined;
+    return { hops: parsed.hops, timings: Array.isArray(parsed.timings) ? parsed.timings : [] };
+  } catch {
+    return undefined;
+  }
+}
+
 async function readResponse(res: Response, started: number, waitMs: number): Promise<ResponseRecord> {
+  const trace = decodeTrace(res.headers.get(TRACE_RESULT_HEADER));
   const headers: [string, string][] = [];
-  res.headers.forEach((value, key) => headers.push([key, value]));
+  res.headers.forEach((value, key) => {
+    // X-Mygo-* 是页面和 Go 之间的内部约定，不该出现在响应头列表里。
+    if (key.toLowerCase().startsWith("x-mygo-")) return;
+    headers.push([key, value]);
+  });
   headers.sort((a, b) => a[0].localeCompare(b[0]));
 
   const contentType = res.headers.get("content-type") ?? "";
@@ -851,6 +1222,7 @@ async function readResponse(res: Response, started: number, waitMs: number): Pro
     at: Date.now(),
     contentType,
     truncated,
+    trace,
   };
 }
 
@@ -1024,7 +1396,8 @@ async function openStream(): Promise<void> {
     return;
   }
 
-  const headers = requestHeaders(tab.request);
+  const headers = requestHeaders(tab.request, authFor(tab.request, tab.origin));
+  if (typeof headers !== "string") applyNetworkOptions(headers, tab.request.options);
   if (typeof headers === "string") {
     toast(`请求头「${headers}」不是合法的头名`, "error");
     return;
@@ -1825,7 +2198,14 @@ export async function pasteText(): Promise<string> {
 // ---- 界面开关（不持久化） ----
 
 export function toggleUI(
-  key: "commandOpen" | "settingsOpen" | "envOpen" | "curlOpen" | "importOpen" | "snippetsOpen",
+  key:
+    | "commandOpen"
+    | "settingsOpen"
+    | "envOpen"
+    | "curlOpen"
+    | "importOpen"
+    | "snippetsOpen"
+    | "cookiesOpen",
   open?: boolean,
 ): void {
   const next = open === undefined ? !state[key] : open;
@@ -1835,7 +2215,34 @@ export function toggleUI(
   state.curlOpen = false;
   state.importOpen = false;
   state.snippetsOpen = false;
+  state.cookiesOpen = false;
+  state.nodeSettings = null;
   state[key] = next;
+  emit();
+}
+
+/** 打开集合 / 文件夹的共享设置（认证与变量）。 */
+export function openNodeSettings(
+  collectionId: string,
+  nodeId?: string,
+  name?: string,
+): void {
+  const collection = state.collections.find((c) => c.id === collectionId);
+  if (!collection) return;
+  let label = name ?? collection.name;
+  if (nodeId && !name) {
+    const hit = findNode(collectionId, nodeId)?.node;
+    if (!hit) return;
+    label = hit.name;
+  }
+  state.commandOpen = false;
+  state.settingsOpen = false;
+  state.envOpen = false;
+  state.curlOpen = false;
+  state.importOpen = false;
+  state.snippetsOpen = false;
+  state.cookiesOpen = false;
+  state.nodeSettings = { collectionId, nodeId, name: label };
   emit();
 }
 

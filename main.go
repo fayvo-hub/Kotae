@@ -6,18 +6,16 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"net/http/cookiejar"
-	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/netproxy"
 	"github.com/egoist/mygo/plugins/fetch"
 	"github.com/egoist/mygo/plugins/sqlite"
+	"github.com/egoist/mygo/plugins/updater"
 	"github.com/egoist/mygo/plugins/websocket"
 	"github.com/egoist/mygo/transfer"
 )
@@ -30,62 +28,8 @@ const maxFileSize = 32 << 20
 // 之后不再读写。
 const legacyStateFileName = "workspace.json"
 
-// toggleJar 是一个可以整体开关的 Cookie 罐：界面上关闭「保持 Cookie」时，
-// 请求不再携带、也不再记录 Cookie；关闭时清空已保存的 Cookie。
-type toggleJar struct {
-	mu   sync.Mutex
-	jar  http.CookieJar
-	open bool
-}
-
-func newToggleJar() *toggleJar {
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		log.Printf("创建 Cookie 罐失败：%v", err)
-	}
-	return &toggleJar{jar: jar, open: true}
-}
-
-func (j *toggleJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	if j.open && j.jar != nil {
-		j.jar.SetCookies(u, cookies)
-	}
-}
-
-func (j *toggleJar) Cookies(u *url.URL) []*http.Cookie {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	if !j.open || j.jar == nil {
-		return nil
-	}
-	return j.jar.Cookies(u)
-}
-
-// reset 换上一个空的 Cookie 罐。
-func (j *toggleJar) reset() {
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		log.Printf("创建 Cookie 罐失败：%v", err)
-		return
-	}
-	j.mu.Lock()
-	j.jar = jar
-	j.mu.Unlock()
-}
-
-func (j *toggleJar) setOpen(open bool) {
-	j.mu.Lock()
-	j.open = open
-	j.mu.Unlock()
-	if !open {
-		j.reset()
-	}
-}
-
 // System 暴露给前端的桌面能力：应用信息、剪贴板、文件选择与保存、系统通知、
-// Cookie 开关。全部是纯本地操作，不产生网络请求。
+// Cookie 开关与管理。全部是纯本地操作，不产生网络请求。
 type System struct {
 	jar *toggleJar
 }
@@ -319,7 +263,7 @@ func main() {
 	// 可读除 Set-Cookie 之外的全部响应头；Transport 跟随系统代理与 HTTPS_PROXY/NO_PROXY。
 	// 超时不放在 http.Client 上，由前端按请求设置 AbortSignal 计时，这样每条请求可以
 	// 用不同的超时。
-	client := &http.Client{Transport: netproxy.Transport(), Jar: jar}
+	client := &http.Client{Transport: newRoutingTransport(netproxy.Transport()), Jar: jar}
 
 	mygo.Use(fetch.New(fetch.Options{Client: client}))
 	// 存储层是 SQLite：插件把预编译的 sqlite3 通过 purego 加载，不需要 cgo。
@@ -327,6 +271,9 @@ func main() {
 	// WebSocket 连接由 Go 建立：可以带握手请求头（Authorization / Cookie），
 	// 也不受页面同源策略限制，和 Postman 的行为一致。
 	mygo.Use(websocket.New(websocket.Options{Client: client}))
+	// 自动更新：后台每天检查一次，发现新版本时弹 mygo 自带的更新窗口（发布说明 /
+	// 跳过此版本 / 下载进度 / 重启进入新版本）。界面语言固定中文。
+	mygo.Use(updater.New(updater.Options{Language: "zh"}))
 	mygo.Bind(&System{jar: jar})
 
 	setupAppHooks()

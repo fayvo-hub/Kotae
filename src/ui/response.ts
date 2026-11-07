@@ -6,6 +6,7 @@ import { System } from "../mygo";
 import type {
   RequestProtocol,
   ResponseRecord,
+  ResponseTrace,
   ScriptRun,
   SentRecord,
   StreamMessage,
@@ -78,10 +79,31 @@ function scriptLog(runs: ScriptRun[]): HTMLElement {
       el("span", { class: "script-log-ms", text: `${run.ms} ms` }),
     );
     if (run.bodyEdited) head.append(el("span", { class: "script-log-tag", text: "已改写响应体" }));
+    const tests = run.tests ?? [];
+    if (tests.length > 0) {
+      const passed = tests.filter((t) => t.passed).length;
+      head.append(
+        el("span", {
+          class: `script-log-tag${passed === tests.length ? "" : " bad"}`,
+          text: `断言 ${String(passed)}/${String(tests.length)}`,
+        }),
+      );
+    }
     if (run.error) head.append(el("span", { class: "script-log-error", text: run.error }));
     const body = el("div", { class: "script-log-body" });
     for (const log of run.logs) {
       body.append(el("div", { class: `script-log-line ${log.level}`, text: log.text }));
+    }
+    for (const t of tests) {
+      body.append(
+        el(
+          "div",
+          { class: `script-test ${t.passed ? "pass" : "fail"}` },
+          el("span", { class: "script-test-icon", text: t.passed ? "✓" : "✗" }),
+          el("span", { class: "script-test-name", text: t.name }),
+          t.error ? el("span", { class: "script-test-error", text: t.error }) : null,
+        ),
+      );
     }
     box.append(el("div", { class: `script-log-run${run.error ? " has-error" : ""}` }, head, body));
   }
@@ -349,6 +371,7 @@ function resTabs(tab: Tab, res: ResponseRecord): HTMLElement {
     { key: "headers", label: "响应头", count: res.headers.length },
     { key: "request", label: "请求", count: tab.sent ? tab.sent.headers.length : 0 },
   ];
+  if (res.trace) tabs.push({ key: "trace", label: "链路", count: res.trace.hops.length });
   for (const t of tabs) {
     const active = tab.responseTab === t.key;
     const btn = el("button", {
@@ -375,6 +398,7 @@ function resTabs(tab: Tab, res: ResponseRecord): HTMLElement {
   wrap.append(strip);
   if (tab.responseTab === "body") wrap.append(bodyView(tab, res));
   else if (tab.responseTab === "headers") wrap.append(headersView(tab, res));
+  else if (tab.responseTab === "trace" && res.trace) wrap.append(traceView(res.trace));
   else wrap.append(requestView(tab));
   return wrap;
 }
@@ -414,6 +438,72 @@ function requestView(tab: Tab): HTMLElement {
   host.append(sentBody(sent));
   host.append(sentOptions(sent));
   return host;
+}
+
+/** 「链路」页签：走了几跳、每跳打到哪，以及最后一跳的耗时拆解。 */
+function traceView(trace: ResponseTrace): HTMLElement {
+  const host = el("div", { class: "body-view trace-view" });
+
+  const hops = el("div", { class: "trace-hops" });
+  trace.hops.forEach((hop, i) => {
+    const row = el("div", { class: "trace-hop" });
+    row.append(el("span", { class: "trace-index", text: String(i + 1) }));
+    row.append(el("span", { class: `method-tag tone-${hop.method.toLowerCase()}`, text: hop.method }));
+    row.append(el("span", { class: "trace-url", attr: { title: hop.url }, text: hop.url }));
+    row.append(el("span", { class: `trace-status tone-${statusTone(hop.status)}`, text: String(hop.status) }));
+    hops.append(row);
+  });
+  host.append(sentSection(trace.hops.length > 1 ? `重定向链路 ${trace.hops.length} 跳` : "直连，没有重定向"));
+  host.append(hops);
+
+  const timing = trace.timings[trace.timings.length - 1];
+  if (!timing) return host;
+  const phases: [string, number][] = [
+    ["DNS 解析", timing.dnsMs],
+    ["建立连接", timing.connectMs],
+    ["TLS 握手", timing.tlsMs],
+    ["等待首字节", timing.ttfbMs],
+  ];
+  const widest = Math.max(timing.totalMs, ...phases.map(([, ms]) => ms), 1);
+  const list = el("div", { class: "trace-phases" });
+  for (const [label, ms] of phases) {
+    if (ms <= 0) continue;
+    list.append(phaseRow(label, ms, widest));
+  }
+  if (!list.firstElementChild) {
+    // 本机回环或复用连接时不会产生解析/连接/TLS 耗时，只剩总计。
+    list.append(el("p", { class: "muted small", text: "这次没有产生 DNS、连接或 TLS 开销（本机地址或复用连接）。" }));
+  }
+  list.append(phaseRow("总计", timing.totalMs, widest, true));
+  host.append(sentSection("耗时拆解（最后一跳）", [
+    timing.reused ? el("span", { class: "muted small", text: "复用了已有连接" }) : el("span", { class: "muted small", text: "新建连接" }),
+  ]));
+  host.append(list);
+  host.append(
+    el("p", {
+      class: "muted small",
+      text: "阶段耗时由 Go 侧 httptrace 采集；正文下载时间见状态栏的「读取」值。",
+    }),
+  );
+  return host;
+}
+
+function phaseRow(label: string, ms: number, widest: number, strong = false): HTMLElement {
+  const row = el("div", { class: `trace-phase${strong ? " strong" : ""}` });
+  row.append(el("span", { class: "trace-phase-label", text: label }));
+  const bar = el("div", { class: "trace-bar" }, el("div", { class: "trace-bar-fill" }));
+  const fillEl = bar.firstElementChild as HTMLElement;
+  fillEl.style.width = `${Math.max(2, Math.round((ms / widest) * 100))}%`;
+  row.append(bar);
+  row.append(el("span", { class: "trace-phase-ms", text: formatDuration(ms) }));
+  return row;
+}
+
+function statusTone(status: number): string {
+  if (status >= 500) return "delete";
+  if (status >= 400) return "put";
+  if (status >= 300) return "post";
+  return "get";
 }
 
 function sentAt(at: number): string {
@@ -494,6 +584,15 @@ function sentBody(sent: SentRecord): HTMLElement {
     if (body.truncated) {
       box.append(el("p", { class: "muted small", text: "请求体超过 64 KB，这里只保留前 64 KB。" }));
     }
+    return box;
+  }
+
+  if (body.kind === "binary") {
+    box.append(sentSection(`请求体 · ${body.contentType} · 文件直传`));
+    box.append(sentRows([
+      ["文件", body.name],
+      ["大小", formatBytes(body.bytes)],
+    ]));
     return box;
   }
 

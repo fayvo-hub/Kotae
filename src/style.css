@@ -66,6 +66,9 @@
   --fs-lg: 13px;
   --fs-xl: 15px;
   --fs-2xl: 20px;
+  /* 代码区字号：设置页「外观」的滑杆改它，请求体 / 响应体 / 脚本一起变。
+     用 --fs- 前缀是因为它是静态字号令牌，不是需要跟着主题走的颜色令牌。 */
+  --fs-code: var(--fs-md);
 
   /* 圆角：控件 xs/sm、容器 radius、浮层 lg、引导卡片 xl；胶囊用 999px，圆形用 50% */
   --radius-xs: 4px;
@@ -246,8 +249,13 @@ a {
 }
 
 code,
-kbd,
 pre {
+  font-family: var(--mono);
+  font-size: var(--fs-code);
+}
+
+/* 键位提示跟着界面字号走，不跟代码字号走。 */
+kbd {
   font-family: var(--mono);
   font-size: var(--fs-md);
 }
@@ -487,7 +495,7 @@ pre {
   background: var(--surface);
   color: var(--text);
   font-family: var(--mono);
-  font-size: var(--fs-md);
+  font-size: var(--fs-code);
   line-height: 1.5;
 }
 
@@ -719,7 +727,7 @@ select.text-input,
   background: var(--surface-2);
   color: var(--text);
   font-family: var(--mono);
-  font-size: var(--fs-md);
+  font-size: var(--fs-code);
   line-height: 1.65;
   resize: vertical;
   tab-size: 2;
@@ -2181,6 +2189,34 @@ body.resizing-row * {
   line-height: 1.6;
 }
 
+/* 需要用户处理的提示（例如导入的 cURL 缺文件内容）。 */
+.pane-hint.warn-text {
+  color: var(--warn);
+}
+
+/* 认证编辑器：请求自己的认证与集合 / 文件夹的共享认证共用。 */
+.auth-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 「继承自 XX 的认证」提示条。 */
+.inherit-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--border-strong);
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.inherit-note .ic {
+  color: var(--text-3);
+}
+
 /* ---- 脚本 ---- */
 
 .script-pane {
@@ -2360,6 +2396,46 @@ body.resizing-row * {
   font-size: var(--fs-2xs);
 }
 
+.script-log-tag.bad {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
+.script-test {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: var(--fs-sm);
+}
+
+.script-test-icon {
+  width: 12px;
+  flex: none;
+  text-align: center;
+}
+
+.script-test.pass .script-test-icon {
+  color: var(--ok);
+}
+
+.script-test.fail .script-test-icon {
+  color: var(--bad);
+}
+
+.script-test-name {
+  color: var(--text-2);
+}
+
+.script-test.fail .script-test-name {
+  color: var(--bad);
+}
+
+.script-test-error {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
 .script-log-error {
   flex: 1 1 auto;
   font-family: var(--mono);
@@ -2507,10 +2583,187 @@ body.resizing-row * {
   margin-top: 2px;
 }
 
+/* 「保持 Cookie」勾选框与「管理 Cookie」入口并排。 */
+.cookie-field {
+  gap: 12px;
+}
+
+.checkbox-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---- Cookie 管理器 ---- */
+
+.cookie-manager-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cookie-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cookie-search {
+  flex: 1;
+  min-width: 180px;
+}
+
+.cookie-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 380px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.cookie-domain {
+  margin-top: 4px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.cookie-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.cookie-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 40%;
+}
+
+.cookie-name {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: var(--fs-code);
+}
+
+.cookie-value {
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: var(--fs-code);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cookie-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
 .desktop-toggle-text {
   display: flex;
   flex-direction: column;
   gap: 3px;
+}
+
+/* 设置页「快捷键」一节：一行一个动作，右侧是当前键位与修改入口。 */
+.shortcut-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+  padding: 0 2px;
+  font-size: var(--fs-md);
+}
+
+.shortcut-label {
+  flex: 1 1 auto;
+  color: var(--text);
+}
+
+.shortcut-key {
+  flex: 0 0 auto;
+  min-width: 92px;
+  text-align: center;
+  padding: 3px 8px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+.shortcut-key.recording {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: var(--ring);
+}
+
+.shortcut-row .link-btn {
+  flex: 0 0 auto;
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+
+.shortcut-row .link-btn:hover {
+  color: var(--accent);
+}
+
+/* 设置页的加减档位（界面缩放 / 代码字号）：文字在左，档位在右。 */
+.stepper-field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 2px;
+}
+
+.stepper-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1 1 auto;
+  font-size: var(--fs-md);
+  color: var(--text);
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.stepper-value {
+  min-width: 46px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.icon-btn[disabled] {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .details {
@@ -2743,6 +2996,77 @@ textarea.kv-value {
   padding: 5px 8px;
   background: var(--surface-2);
   border-top: 1px solid var(--border);
+}
+
+/* 二进制直传：选文件前后的两个状态，都是同一块卡片。 */
+.binary-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.binary-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.binary-empty .ic {
+  color: var(--text-3);
+  flex: none;
+}
+
+.binary-empty .btn {
+  margin-left: auto;
+  flex: none;
+}
+
+.binary-pane.dragging .binary-empty,
+.binary-pane.dragging .binary-file {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.binary-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.binary-file .ic {
+  color: var(--accent);
+  flex: none;
+}
+
+.binary-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.binary-name {
+  font-size: var(--fs-sm);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.binary-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 10px;
+  flex: none;
 }
 
 .file-btn {
@@ -3045,7 +3369,8 @@ textarea.kv-value {
   color: var(--text-2);
 }
 
-.info-box {
+.info-box,
+.update-box {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -3076,6 +3401,24 @@ textarea.kv-value {
   text-overflow: ellipsis;
   white-space: nowrap;
   user-select: text;
+}
+
+/* 设置页「更新」一节：状态圆点，发现新版本时点亮 */
+.update-box .info-row {
+  min-height: 26px;
+}
+
+.update-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.update-dot.has-update {
+  background: var(--accent);
+  box-shadow: var(--ring);
 }
 
 .warn-box {
@@ -3523,6 +3866,129 @@ mark,
   user-select: text;
 }
 
+/* ---- GraphQL 请求体 ---- */
+
+.graphql-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.graphql-pane .code-input {
+  min-height: 120px;
+}
+
+.graphql-pane .graphql-vars {
+  min-height: 84px;
+}
+
+.graphql-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* ---- 链路（重定向与耗时） ---- */
+
+.trace-view {
+  padding: 10px 14px 20px;
+}
+
+.trace-hops {
+  display: flex;
+  flex-direction: column;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.trace-hop {
+  display: grid;
+  grid-template-columns: 24px 48px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+  transition: background var(--speed);
+}
+
+.trace-hop:last-child {
+  border-bottom: none;
+}
+
+.trace-hop:hover {
+  background: var(--surface-2);
+}
+
+.trace-index {
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+}
+
+.trace-url {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--text);
+  user-select: text;
+}
+
+.trace-status {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.trace-phases {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.trace-phase {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr) 72px;
+  gap: 10px;
+  align-items: center;
+  font-size: var(--fs-sm);
+}
+
+.trace-phase-label {
+  color: var(--text-2);
+}
+
+.trace-phase.strong .trace-phase-label {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.trace-bar {
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--radius-xs);
+  background: var(--surface-2);
+}
+
+.trace-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.trace-phase-ms {
+  text-align: right;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
 /* ---- 环境 ---- */
 
 .env-layout {
@@ -3787,7 +4253,7 @@ mark,
   min-height: 132px;
   padding: 8px 10px;
   font-family: var(--mono);
-  font-size: var(--fs-md);
+  font-size: var(--fs-code);
   line-height: 1.55;
   resize: vertical;
   white-space: pre;

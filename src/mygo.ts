@@ -4,12 +4,27 @@ import { call, event } from "mygo-runtime";
 
 // ---- Types ----
 
+/**
+ * CookieRecord 是界面上看到的一条 Cookie。Expires 用毫秒时间戳，0 表示会话
+ * Cookie（关应用就没了）。
+ */
+export interface CookieRecord {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  secure: boolean;
+  httpOnly: boolean;
+  hostOnly: boolean;
+  expires: number;
+}
+
 /** DesktopCommand 是桌面集成发给页面的指令。 */
 export interface DesktopCommand {
   /**
    * Action 是页面要执行的动作：new-request、import-curl、save、close-tab、
    * toggle-sidebar、command-palette、open-env、open-settings、snippets、
-   * import-postman、toggle-theme。
+   * import-postman、toggle-theme、check-updates。
    */
   action: string;
   /** Text 是随动作带过去的内容，例如深链里的 cURL 命令。 */
@@ -50,11 +65,25 @@ export interface PickedFile {
   data: string;
 }
 
+/** UpdateState 是设置面板「更新」一节需要的状态。 */
+export interface UpdateState {
+  /** Supported 表示这个构建能不能自我更新。 */
+  supported: boolean;
+  /** Available 是上次检查发现的新版本号，没有新版本时为空。 */
+  available: string;
+  /** LastCheck 是上次检查成功的时间（Unix 毫秒），0 表示还没检查过。 */
+  lastCheck: number;
+  /** AutomaticChecks 是后台每天检查一次是否开启。 */
+  automaticChecks: boolean;
+  /** AutomaticDownloads 是「发现新版本直接下载，下次启动装好」是否开启。 */
+  automaticDownloads: boolean;
+}
+
 // ---- Services ----
 
 /**
  * System 暴露给前端的桌面能力：应用信息、剪贴板、文件选择与保存、系统通知、
- * Cookie 开关。全部是纯本地操作，不产生网络请求。
+ * Cookie 开关与管理。全部是纯本地操作，不产生网络请求。
  */
 export const System = {
   /**
@@ -64,9 +93,17 @@ export const System = {
   applyDesktopPrefs(closeToTray: boolean, globalShortcut: boolean): Promise<void> {
     return call("System.ApplyDesktopPrefs", closeToTray, globalShortcut);
   },
+  /** CheckForUpdates 打开更新窗口检查新版本，用户点菜单或设置页按钮时调用。 */
+  checkForUpdates(): Promise<void> {
+    return call("System.CheckForUpdates");
+  },
   /** ClearCookies 清空已记录的 Cookie。 */
   clearCookies(): Promise<void> {
     return call("System.ClearCookies");
+  },
+  /** Cookies 返回当前 Cookie 罐里的全部 Cookie。界面上的「Cookie 管理器」用它。 */
+  cookies(): Promise<CookieRecord[]> {
+    return call("System.Cookies");
   },
   /**
    * CopyText 把文本写入系统剪贴板。自定义协议下 webview 的剪贴板 API 不可靠，
@@ -74,6 +111,10 @@ export const System = {
    */
   copyText(text: string): Promise<void> {
     return call("System.CopyText", text);
+  },
+  /** DeleteCookie 删掉一条 Cookie；域名与路径同时匹配才算同一条。 */
+  deleteCookie(name: string, domain: string, path: string): Promise<void> {
+    return call("System.DeleteCookie", name, domain, path);
   },
   /** DesktopReady 由页面在首次渲染完成后调用，表示可以接收菜单与深链发来的指令。 */
   desktopReady(): Promise<void> {
@@ -121,6 +162,18 @@ export const System = {
   setCookies(open: boolean): Promise<void> {
     return call("System.SetCookies", open);
   },
+  /** SetUpdatePrefs 保存更新偏好（后台自动检查、自动下载安装）。 */
+  setUpdatePrefs(automaticChecks: boolean, automaticDownloads: boolean): Promise<void> {
+    return call("System.SetUpdatePrefs", automaticChecks, automaticDownloads);
+  },
+  /**
+   * SetZoomFactor 缩放整个页面（1 = 100%）。
+   * 走 WebView 自己的缩放而不是 CSS zoom：布局按缩放后的逻辑像素重排，固定定位的
+   * 浮层、滚动条、拖拽分栏都跟着一起变，不会出现内容被裁掉或右侧留白。
+   */
+  setZoomFactor(factor: number): Promise<void> {
+    return call("System.SetZoomFactor", factor);
+  },
   /**
    * TakeLegacyState 返回早期 JSON 工作区文件的内容，并把文件改名成
    * workspace.json.bak：内容由页面导入 SQLite，导入成功前不会丢掉原始数据，
@@ -128,6 +181,10 @@ export const System = {
    */
   takeLegacyState(): Promise<string> {
     return call("System.TakeLegacyState");
+  },
+  /** UpdateState 返回更新相关的当前状态，供设置面板渲染。 */
+  updateState(): Promise<UpdateState> {
+    return call("System.UpdateState");
   },
 } as const;
 

@@ -6,7 +6,7 @@ export default defineConfig({
   // 文件系统里必须用纯 ASCII 的地方（安装包文件名、Debian 包名、desktop 条目）。
   slug: "mygo-api",
   identifier: "com.mygoapi.app",
-  version: "0.1.0",
+  version: "0.2.0",
   copyright: "© 2025 MyGo API",
   publisher: "MyGo API",
   icon: "resources/icon.png",
@@ -33,10 +33,18 @@ export default defineConfig({
     // %LOCALAPPDATA%\Programs 下的目录名保持纯 ASCII，避免中文/空格路径出问题。
     installDirName: "MyGoAPI",
   },
-  // ---- 代码签名与自动更新：当前未启用 ----
-  // 这两项都需要真实证书/密钥，仓库里不存放。要启用时取消下面的注释并补齐文件，
-  // 然后按 README「发布与签名」一节验证：签名后 Windows 上的 SmartScreen 才会放行，
-  // 自动更新则要求 publicKey 与私钥配对（私钥由 `npx mygo-cli keygen` 生成）。
+  // ---- 自动更新：已启用 ----
+  // publicKey 是 `npx mygo-cli keygen` 生成的公钥，私钥只在发布机上（CI secret
+  // MYGO_UPDATER_PRIVATE_KEY）。tagPrefix 默认 "v"，与本仓库的 v0.2.0 这类标签一致。
+  // 读发布说明：仓库根目录 CHANGELOG.md 里 `## 0.2.0` 那一段。
+  updates: {
+    publicKey: "udSJM9PEbjCiDLdSIadYODhlRzSi/UM1sOEutcoc6FU=",
+    github: "fayvo-hub/mygo-api",
+    tagPrefix: "v",
+    changelog: "CHANGELOG.md",
+  },
+  // ---- 代码签名：仍未启用 ----
+  // 需要真实证书，仓库里不存放。启用后 Windows 上的 SmartScreen 才会放行。
   // windows: {
   //   certificate: "证书.pfx",              // 密码走 MYGO_WINDOWS_CERTIFICATE_PASSWORD
   //   timestampUrl: "http://timestamp.digicert.com",
@@ -44,11 +52,6 @@ export default defineConfig({
   // macos: {
   //   signingIdentity: "Developer ID Application: …",
   //   notarize: { keychainProfile: "AC_PASSWORD" },
-  // },
-  // updates: {
-  //   publicKey: "<mygo keygen 生成的公钥>",
-  //   github: "owner/repo",                 // 用 GitHub Releases 作为更新源
-  //   changelog: true,
   // },
   linux: {
     maintainer: "MyGo API <mygo-api@users.noreply.github.com>",

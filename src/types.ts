@@ -30,8 +30,8 @@ export interface KV {
   secret?: boolean;
 }
 
-/** 请求体形态。binary（二进制直传）属首版不做的范围。 */
-export type BodyMode = "none" | "json" | "text" | "urlencoded" | "form";
+/** 请求体形态。binary 是把整个文件当正文直传（不是 multipart）。 */
+export type BodyMode = "none" | "json" | "text" | "urlencoded" | "form" | "binary" | "graphql";
 
 /** multipart 表单里的一行，可以是文本或文件。 */
 export interface FormField {
@@ -44,6 +44,16 @@ export interface FormField {
   fileSize?: number;
   /** base64 编码的文件内容，来自 System.pickFile。 */
   fileData?: string;
+}
+
+/** 直传的文件：只需要名字、大小与 base64 内容。 */
+export interface BinaryFile {
+  name: string;
+  size: number;
+  /** base64 编码的原始字节。 */
+  data: string;
+  /** 来源路径，仅用于界面提示。 */
+  path?: string;
 }
 
 export type AuthType = "none" | "bearer" | "basic" | "apikey";
@@ -66,6 +76,10 @@ export interface RequestOptions {
   redirect: RedirectMode;
   /** 关闭时请求不带 Cookie，也不写入 Cookie（由 Go 侧 Cookie 罐实现）。 */
   keepCookies: boolean;
+  /** 这条请求自己的代理，空表示跟随系统代理。 */
+  proxy: string;
+  /** 跳过 TLS 证书校验（自签证书的测试环境用）。 */
+  insecureTLS: boolean;
 }
 
 /**
@@ -84,6 +98,13 @@ export interface ScriptLog {
   text: string;
 }
 
+/** 脚本里 pm.test 产出的一条断言结果。 */
+export interface ScriptTest {
+  name: string;
+  passed: boolean;
+  error?: string;
+}
+
 /** 一次脚本执行的记录，前置与后置各一条。 */
 export interface ScriptRun {
   phase: "pre" | "post";
@@ -92,6 +113,8 @@ export interface ScriptRun {
   ms: number;
   /** 后置脚本改写了响应体。 */
   bodyEdited?: boolean;
+  /** 脚本里的 pm.test 断言，按执行顺序。 */
+  tests?: ScriptTest[];
 }
 
 /** 一条请求定义，集合里的请求与标签页里的请求是同一结构。 */
@@ -108,6 +131,12 @@ export interface ApiRequest {
   headers: KV[];
   bodyMode: BodyMode;
   body: string;
+  /** binary 模式下要直传的那个文件：内容存 base64，跟着工作区落库。 */
+  binary?: BinaryFile;
+  /** GraphQL 变量（JSON 文本），body 里存的是 query。 */
+  graphqlVars?: string;
+  /** 路径变量：地址里 `:id` 这样的占位符对应的值。 */
+  pathVars?: KV[];
   form: FormField[];
   auth: AuthConfig;
   options: RequestOptions;
@@ -128,6 +157,10 @@ export interface FolderNode {
   name: string;
   open: boolean;
   items: TreeNode[];
+  /** 文件夹级共享认证：子请求自己没设认证时继承它。 */
+  auth?: AuthConfig;
+  /** 文件夹级变量：子请求插值时优先于环境变量之外的集合与全局。 */
+  vars?: KV[];
 }
 
 export type TreeNode = RequestNode | FolderNode;
@@ -136,6 +169,32 @@ export interface Collection {
   id: string;
   name: string;
   items: TreeNode[];
+  /** 集合级共享认证：整棵树里没单独设认证的请求都用它。 */
+  auth?: AuthConfig;
+  /** 集合级变量：文件夹与请求之外的一层，优先级低于文件夹。 */
+  vars?: KV[];
+}
+
+/** 一跳：这次用了什么方法、打到哪个地址、返回什么状态码。 */
+export interface TraceHop {
+  method: string;
+  url: string;
+  status: number;
+}
+
+/** 一跳的分阶段耗时（毫秒），没有发生的阶段为 0。 */
+export interface TraceTiming {
+  dnsMs: number;
+  connectMs: number;
+  tlsMs: number;
+  ttfbMs: number;
+  totalMs: number;
+  reused: boolean;
+}
+
+export interface ResponseTrace {
+  hops: TraceHop[];
+  timings: TraceTiming[];
 }
 
 export interface ResponseRecord {
@@ -168,6 +227,8 @@ export interface ResponseRecord {
   errorKind?: "network" | "timeout" | "aborted" | "invalid";
   /** 本次请求的脚本执行记录（前置 / 后置），只在内存里。 */
   scripts?: ScriptRun[];
+  /** 重定向逐跳链路与分阶段耗时（由 Go 侧 trace.go 采集）。 */
+  trace?: ResponseTrace;
 }
 
 /** multipart 里的一个文件：只记名字与大小，不重复存内容。 */
@@ -181,7 +242,8 @@ export interface SentFile {
 export type SentBody =
   | { kind: "none" }
   | { kind: "text"; contentType: string; text: string; chars: number; truncated: boolean }
-  | { kind: "form"; contentType: string; fields: [string, string][]; files: SentFile[] };
+  | { kind: "form"; contentType: string; fields: [string, string][]; files: SentFile[] }
+  | { kind: "binary"; contentType: string; name: string; bytes: number };
 
 /**
  * 最近一次实际发出的请求快照。变量已插值、认证头已合并、自动 Content-Type 已补上，
@@ -248,7 +310,7 @@ export interface Tab {
   stream?: StreamSession;
   sending: boolean;
   /** 响应区分栏当前展示的页签。 */
-  responseTab: "body" | "headers" | "request";
+  responseTab: "body" | "headers" | "request" | "trace";
   /** 响应体展示方式。 */
   bodyView: "pretty" | "raw";
   /** 响应体搜索词。 */
@@ -295,6 +357,12 @@ export interface PersistedWorkspace {
   closeToTray: boolean;
   /** 是否注册系统级快捷键（CmdOrCtrl+Shift+M 唤起窗口）。 */
   globalShortcut: boolean;
+  /** 界面缩放，1 = 100%。走 WebView 的真实缩放，重启后恢复。 */
+  zoom: number;
+  /** 代码区（请求体 / 响应体 / 脚本）的字号，单位 px。 */
+  codeFontSize: number;
+  /** 快捷键覆盖：只存用户改过的动作（id → 组合键），没改的用 src/shortcuts.ts 的默认值。 */
+  shortcuts: Record<string, string>;
 }
 
 export type PersistedTab = Omit<

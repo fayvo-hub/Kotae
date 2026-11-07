@@ -5,7 +5,7 @@
 
 import type { ApiRequest, FormField, HttpMethod, KV, RequestOptions, RequestScript } from "./types";
 import { METHODS } from "./types";
-import { splitURL, stripSchemeBeforeVar, uid } from "./util";
+import { pathVarNames, splitURL, stripSchemeBeforeVar, substitutePathVars, uid } from "./util";
 
 export class CurlError extends Error {
   /** 出错位置在原始文本中的行号（从 1 开始）。 */
@@ -198,7 +198,13 @@ export function emptyRequest(url = ""): ApiRequest {
     body: "",
     form: [],
     auth: { type: "none", token: "", username: "", password: "", key: "", value: "", in: "header" },
-    options: { timeoutMs: 30_000, redirect: "follow", keepCookies: true },
+    options: {
+      timeoutMs: 30_000,
+      redirect: "follow",
+      keepCookies: true,
+      proxy: "",
+      insecureTLS: false,
+    },
     script: { pre: "", post: "", trusted: true },
   };
 }
@@ -213,6 +219,12 @@ export function scriptOf(request: ApiRequest): RequestScript {
 /** 深拷贝请求（结构化克隆即可，请求里没有函数）。 */
 export function cloneRequest(r: ApiRequest): ApiRequest {
   return JSON.parse(JSON.stringify(r)) as ApiRequest;
+}
+
+/** 只取路径里的文件名：Windows 与 POSIX 分隔符都认。 */
+function basename(path: string): string {
+  const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return cut < 0 ? path : path.slice(cut + 1);
 }
 
 const METHOD_SET = new Set(METHODS as string[]);
@@ -233,6 +245,12 @@ interface RawParse {
   head?: boolean;
   getMode?: boolean;
   jsonBody?: string;
+  /** -T/--upload-file 或 --data-binary @file 引用的本地文件（只有路径，内容读不到）。 */
+  uploadPath?: string;
+  /** -x/--proxy 指定的代理。 */
+  proxy?: string;
+  /** -k/--insecure。 */
+  insecure?: boolean;
   warnings: string[];
   ignored: Set<string>;
 }
@@ -266,9 +284,16 @@ export function parseCurl(input: string): CurlParseResult {
   const { base, params } = splitURL(raw.url);
   request.url = base;
   request.params = params.map((p) => kv(p.key, p.value));
+  // 地址里的 `:id` 是路径变量，导入后自动列出来等着填值。
+  const pathNames = pathVarNames(base);
+  if (pathNames.length > 0) request.pathVars = pathNames.map((name) => kv(name, ""));
 
   // 方法推断：显式 -X 优先，其次是 -I（HEAD），再按有无请求体判断。
-  const hasBody = raw.dataParts.length > 0 || raw.formParts.length > 0 || raw.jsonBody !== undefined;
+  const hasBody =
+    raw.dataParts.length > 0 ||
+    raw.formParts.length > 0 ||
+    raw.jsonBody !== undefined ||
+    raw.uploadPath !== undefined;
   let method = raw.method?.toUpperCase();
   if (raw.head) method = "HEAD";
   if (!method) method = hasBody ? "POST" : "GET";
@@ -317,8 +342,11 @@ export function parseCurl(input: string): CurlParseResult {
     }
   }
 
-  // 请求体
-  if (raw.formParts.length > 0) {
+  // 请求体：引用了本地文件的 -T / --data-binary 走二进制直传，内容需要用户重新选一次。
+  if (raw.uploadPath) {
+    request.bodyMode = "binary";
+    request.binary = { name: basename(raw.uploadPath), size: 0, data: "", path: raw.uploadPath };
+  } else if (raw.formParts.length > 0) {
     request.bodyMode = "form";
     request.form = raw.formParts.map(parseFormPart);
     const fileFields = request.form.filter((f) => f.kind === "file");
@@ -363,6 +391,8 @@ export function parseCurl(input: string): CurlParseResult {
     timeoutMs: raw.timeoutSec !== undefined ? Math.max(0, Math.round(raw.timeoutSec * 1000)) : 30_000,
     redirect: raw.follow === false ? "manual" : "follow",
     keepCookies: true,
+    proxy: raw.proxy ?? "",
+    insecureTLS: raw.insecure === true,
   };
   request.options = options;
 
@@ -436,6 +466,7 @@ function parseArgs(tokens: Token[], text: string): RawParse {
   const out: RawParse = {
     headers: [],
     dataParts: [],
+    uploadPath: undefined,
     urlencodeParts: [],
     formParts: [],
     warnings: [],
@@ -510,8 +541,9 @@ function parseArgs(tokens: Token[], text: string): RawParse {
       case "--data-binary": {
         const d = consume(arg);
         if (d.startsWith("@")) {
+          out.uploadPath = d.slice(1);
           out.warnings.push(
-            `参数 ${arg} 引用了本地文件 ${d.slice(1)}，无法自动读取，已留空，请手动粘贴文件内容`,
+            `参数 ${arg} 引用了本地文件 ${d.slice(1)}：只记住了文件名，请点「选择文件」补上内容后再发送`,
           );
         } else {
           out.dataParts.push(d);
@@ -591,18 +623,22 @@ function parseArgs(tokens: Token[], text: string): RawParse {
         break;
       case "--proxy":
       case "-x":
-        consume(arg);
-        out.warnings.push("单条命令的代理设置首版不支持，将使用系统代理设置");
+        out.proxy = consume(arg) ?? "";
         break;
       case "-k":
       case "--insecure":
-        out.warnings.push("跳过 TLS 证书校验首版不支持，仍会正常校验证书");
+        out.insecure = true;
         break;
       case "-T":
-      case "--upload-file":
-        consume(arg);
-        out.warnings.push("文件上传（-T）首版不支持，请改用表单文件字段");
+      case "--upload-file": {
+        const path = consume(arg);
+        out.uploadPath = path;
+        if (!out.method) out.method = "PUT";
+        out.warnings.push(
+          `文件上传引用了本地文件 ${path}：只记住了文件名，请点「选择文件」补上内容后再发送`,
+        );
         break;
+      }
       case "-c":
       case "--cookie-jar":
         consume(arg);
@@ -662,7 +698,8 @@ function shellQuote(value: string): string {
 /** 把查询参数拼回完整 URL。 */
 export function buildURL(request: ApiRequest, resolve: (t: string) => string): string {
   // 变量外面写的协议先摘掉，协议交给变量值（发送与预览都走这里）。
-  const base = resolve(stripSchemeBeforeVar(request.url)).trim();
+  // 路径变量先换掉，再去拼查询串；没填值的 `:id` 原样留着。
+  const base = substitutePathVars(resolve(stripSchemeBeforeVar(request.url)).trim(), request.pathVars, resolve);
   const pairs = request.params
     .filter((p) => p.enabled && p.key.trim() !== "")
     .map((p) => `${encodeURIComponent(resolve(p.key))}=${encodeURIComponent(resolve(p.value))}`);
@@ -727,6 +764,23 @@ export function toCurl(request: ApiRequest, opts: CurlExportOptions): string {
         lines.push(`-F ${shellQuote(`${f.key}=${opts.resolve(f.value)}`)}`);
       }
     }
+  } else if (request.bodyMode === "binary" && request.binary) {
+    lines.push(`--data-binary ${shellQuote(`@${request.binary.path ?? request.binary.name}`)}`);
+  } else if (request.bodyMode === "graphql") {
+    let variables: unknown = {};
+    const raw = (request.graphqlVars ?? "").trim();
+    if (raw) {
+      try {
+        variables = JSON.parse(raw) as unknown;
+      } catch {
+        variables = {};
+      }
+    }
+    const hasType = request.headers.some((h) => h.enabled && h.key.toLowerCase() === "content-type");
+    if (!hasType) lines.push(`-H ${shellQuote("Content-Type: application/json")}`);
+    lines.push(
+      `--data-raw ${shellQuote(JSON.stringify({ query: opts.resolve(request.body), variables }))}`,
+    );
   } else if (request.body && request.bodyMode !== "none") {
     lines.push(`--data-raw ${shellQuote(opts.resolve(request.body))}`);
   }
@@ -735,6 +789,8 @@ export function toCurl(request: ApiRequest, opts: CurlExportOptions): string {
     lines.push(`--max-time ${String(Math.round(request.options.timeoutMs / 1000))}`);
   }
   if (request.options.redirect === "manual") lines.push("--max-redirs 0");
+  if (request.options.proxy) lines.push(`--proxy ${shellQuote(request.options.proxy)}`);
+  if (request.options.insecureTLS) lines.push("--insecure");
 
   const joined = lines.join(" \\\n  ");
   return `curl ${joined}`;

@@ -37,6 +37,7 @@ const SCHEMA: string[] = [
      id         TEXT PRIMARY KEY,
      name       TEXT NOT NULL,
      position   INTEGER NOT NULL,
+     settings   TEXT,
      created_at INTEGER NOT NULL,
      updated_at INTEGER NOT NULL
    )`,
@@ -46,7 +47,8 @@ const SCHEMA: string[] = [
      parent_id     TEXT,
      name          TEXT NOT NULL,
      position      INTEGER NOT NULL,
-     open          INTEGER NOT NULL DEFAULT 1
+     open          INTEGER NOT NULL DEFAULT 1,
+     settings      TEXT
    )`,
   `CREATE INDEX IF NOT EXISTS folders_parent ON folders (collection_id, parent_id, position)`,
   `CREATE TABLE IF NOT EXISTS requests (
@@ -117,8 +119,40 @@ async function connect(): Promise<Database> {
   await db.execute("PRAGMA foreign_keys = ON");
   await db.execute("PRAGMA busy_timeout = 5000");
   for (const sql of SCHEMA) await db.execute(sql);
+  // 老库没有共享设置列（集合 / 文件夹的认证与变量），补上即可，不需要迁移数据。
+  await ensureColumn(db, "collections", "settings", "TEXT");
+  await ensureColumn(db, "folders", "settings", "TEXT");
   conn = db;
   return db;
+}
+
+/** 集合 / 文件夹的共享设置只写有内容的字段，空值不占库。 */
+function sharedJSON(node: { auth?: { type: string }; vars?: KV[] }): string | null {
+  const out: { auth?: unknown; vars?: KV[] } = {};
+  if (node.auth && node.auth.type !== "none") out.auth = node.auth;
+  if (node.vars && node.vars.length > 0) out.vars = node.vars;
+  return Object.keys(out).length > 0 ? JSON.stringify(out) : null;
+}
+
+/** 读回共享设置：没有设置时保持字段缺失，让「继承」逻辑按缺省处理。 */
+function applyShared(node: { auth?: unknown; vars?: KV[] }, raw: string): void {
+  if (!raw) return;
+  let parsed: { auth?: unknown; vars?: KV[] };
+  try {
+    parsed = JSON.parse(raw) as { auth?: unknown; vars?: KV[] };
+  } catch {
+    return;
+  }
+  const auth = parsed.auth as { type?: string } | undefined;
+  if (auth && auth.type && auth.type !== "none") node.auth = auth;
+  if (Array.isArray(parsed.vars) && parsed.vars.length > 0) node.vars = parsed.vars;
+}
+
+/** 表里没有这一列就补一列：SQLite 没有 `ADD COLUMN IF NOT EXISTS`。 */
+async function ensureColumn(db: Database, table: string, column: string, type: string): Promise<void> {
+  const info = await db.query(`PRAGMA table_info(${table})`);
+  const has = info.rows.some((row) => text(row[1]) === column);
+  if (!has) await db.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
 }
 
 /** 数据库文件的绝对路径，设置面板里展示用。 */
@@ -173,9 +207,9 @@ export async function load(): Promise<PersistedWorkspace> {
   }
 
   const collections: Collection[] = [];
-  const collectionRows = await db.query("SELECT id, name FROM collections ORDER BY position");
+  const collectionRows = await db.query("SELECT id, name, settings FROM collections ORDER BY position");
   const folderRows = await db.query(
-    "SELECT id, collection_id, parent_id, name, position, open FROM folders ORDER BY position",
+    "SELECT id, collection_id, parent_id, name, position, open, settings FROM folders ORDER BY position",
   );
   const requestRows = await db.query(
     "SELECT id, collection_id, folder_id, name, position, request FROM requests ORDER BY position",
@@ -191,6 +225,7 @@ export async function load(): Promise<PersistedWorkspace> {
       open: num(row[5]) !== 0,
       items: [],
     };
+    applyShared(node, text(row[6]));
     push(foldersByParent, `${text(row[1])}\u0000${text(row[2])}`, { pos: num(row[4]), node });
   }
   const requestsByParent = new Map<string, Placed<RequestNode>[]>();
@@ -206,7 +241,13 @@ export async function load(): Promise<PersistedWorkspace> {
 
   for (const row of collectionRows.rows) {
     const id = text(row[0]);
-    collections.push({ id, name: text(row[1]), items: childrenOf(id, "", foldersByParent, requestsByParent) });
+    const collection: Collection = {
+      id,
+      name: text(row[1]),
+      items: childrenOf(id, "", foldersByParent, requestsByParent),
+    };
+    applyShared(collection, text(row[2]));
+    collections.push(collection);
   }
 
   const history: HistoryEntry[] = [];
@@ -276,6 +317,9 @@ export async function load(): Promise<PersistedWorkspace> {
     onboardingDone: settings.get("onboardingDone") === "1",
     closeToTray: settings.get("closeToTray") !== "0",
     globalShortcut: settings.get("globalShortcut") !== "0",
+    zoom: float(settings.get("zoom"), 1),
+    codeFontSize: int(settings.get("codeFontSize"), 12),
+    shortcuts: parseShortcuts(settings.get("shortcuts")),
   };
   // 刚读出来的内容就是库里的内容，先认账，第一次保存才不会把全部行重写一遍。
   written = new Map(rows(data).map((row) => [`${row.table}:${row.id}`, row.signature]));
@@ -332,10 +376,11 @@ function rows(data: PersistedWorkspace): Row[] {
     out.push({
       table: "collections",
       id: collection.id,
-      signature: JSON.stringify([collection.name, ci]),
-      sql: `INSERT INTO collections(id, name, position, created_at, updated_at) VALUES(?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET name = excluded.name, position = excluded.position, updated_at = excluded.updated_at`,
-      params: [collection.id, collection.name, ci, now, now],
+      signature: JSON.stringify([collection.name, ci, collection.auth ?? null, collection.vars ?? null]),
+      sql: `INSERT INTO collections(id, name, position, settings, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET name = excluded.name, position = excluded.position,
+              settings = excluded.settings, updated_at = excluded.updated_at`,
+      params: [collection.id, collection.name, ci, sharedJSON(collection), now, now],
     });
     walk(collection.id, collection.items, null, out, now);
   }
@@ -394,6 +439,9 @@ function rows(data: PersistedWorkspace): Row[] {
     ["onboardingDone", data.onboardingDone ? "1" : "0"],
     ["closeToTray", data.closeToTray ? "1" : "0"],
     ["globalShortcut", data.globalShortcut ? "1" : "0"],
+    ["zoom", String(data.zoom)],
+    ["codeFontSize", String(data.codeFontSize)],
+    ["shortcuts", JSON.stringify(data.shortcuts ?? {})],
   ];
   for (const [key, value] of settings) {
     out.push({
@@ -421,11 +469,20 @@ function walk(
       out.push({
         table: "folders",
         id: node.id,
-        signature: JSON.stringify([collectionId, parentId, node.name, i, node.open]),
-        sql: `INSERT INTO folders(id, collection_id, parent_id, name, position, open) VALUES(?, ?, ?, ?, ?, ?)
+        signature: JSON.stringify([
+          collectionId,
+          parentId,
+          node.name,
+          i,
+          node.open,
+          node.auth ?? null,
+          node.vars ?? null,
+        ]),
+        sql: `INSERT INTO folders(id, collection_id, parent_id, name, position, open, settings) VALUES(?, ?, ?, ?, ?, ?, ?)
               ON CONFLICT(id) DO UPDATE SET collection_id = excluded.collection_id, parent_id = excluded.parent_id,
-                name = excluded.name, position = excluded.position, open = excluded.open`,
-        params: [node.id, collectionId, parentId, node.name, i, node.open ? 1 : 0],
+                name = excluded.name, position = excluded.position, open = excluded.open,
+                settings = excluded.settings`,
+        params: [node.id, collectionId, parentId, node.name, i, node.open ? 1 : 0, sharedJSON(node)],
       });
       walk(collectionId, node.items, node.id, out, now);
       continue;
@@ -530,6 +587,23 @@ function int(value: string | undefined, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+/** 读快捷键覆盖表；坏掉的 JSON 当作没有覆盖，别让设置面板打不开。 */
+function parseShortcuts(raw: string | undefined): Record<string, string> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** 读一个小数设置（界面缩放）。兼容旧库里可能写成的 "1.1"。 */
+function float(value: string | undefined, fallback: number): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 function parseJSON<T>(raw: string): T {
   return JSON.parse(raw) as T;
 }
@@ -557,5 +631,8 @@ function normalize(p: Partial<PersistedWorkspace>): PersistedWorkspace {
     onboardingDone: p.onboardingDone === true,
     closeToTray: p.closeToTray !== false,
     globalShortcut: p.globalShortcut !== false,
+    zoom: typeof p.zoom === "number" && p.zoom > 0 ? p.zoom : 1,
+    codeFontSize: typeof p.codeFontSize === "number" && p.codeFontSize > 0 ? p.codeFontSize : 12,
+    shortcuts: p.shortcuts && typeof p.shortcuts === "object" ? p.shortcuts : {},
   };
 }

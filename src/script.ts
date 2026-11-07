@@ -11,7 +11,7 @@
 //   pm.utils.{hmacSha256,sha256,base64Encode,base64Decode,now,uuid,randomInt}
 //   console.log / warn / error
 
-import type { ScriptLog } from "./types";
+import type { ScriptLog, ScriptTest } from "./types";
 
 export type ScriptPhase = "pre" | "post";
 
@@ -48,6 +48,8 @@ export interface ScriptOutcome {
   responseBody?: string;
   /** 脚本里 pm.variables.set 收集到的值，前置的能在后置里读到。 */
   vars: Record<string, string>;
+  /** pm.test 断言结果。 */
+  tests: ScriptTest[];
   ms: number;
 }
 
@@ -59,7 +61,7 @@ const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as
 ) => AsyncFn;
 
 export function emptyScriptOutcome(request: ScriptRequestState): ScriptOutcome {
-  return { logs: [], request, vars: {}, ms: 0 };
+  return { logs: [], request, vars: {}, tests: [], ms: 0 };
 }
 
 /** 把脚本里 console.log 的多个参数拼成一行可读文本。 */
@@ -213,6 +215,32 @@ export async function runScript(
     logs.push({ level, text: args.map(formatArg).join(" ") });
   };
 
+  // pm.test 断言：通过就记一条绿的，抛错记一条红的，不打断脚本后续逻辑。
+  const tests: ScriptTest[] = [];
+  const pending: Promise<void>[] = [];
+  const test = (name: string, fn?: unknown): void => {
+    const entry: ScriptTest = { name: String(name ?? "").trim() || "未命名断言", passed: true };
+    tests.push(entry);
+    if (typeof fn !== "function") return;
+    try {
+      const result = (fn as () => unknown)();
+      if (result && typeof (result as Promise<unknown>).then === "function") {
+        pending.push(
+          (result as Promise<unknown>).then(
+            () => undefined,
+            (err: unknown) => {
+              entry.passed = false;
+              entry.error = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+            },
+          ),
+        );
+      }
+    } catch (err) {
+      entry.passed = false;
+      entry.error = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    }
+  };
+
   const pm = {
     variables: {
       get: (name: string) => vars[name] ?? ctx.getVar(name),
@@ -307,8 +335,7 @@ export async function runScript(
           }
         : undefined,
     utils: buildUtils(),
-    // 导入的 Collection 常带 pm.test 断言，我们不跑断言，直接跳过，免得脚本报错。
-    test: (_name: string, _fn?: unknown) => undefined,
+    test,
     expect: undefined,
   };
 
@@ -340,6 +367,7 @@ export async function runScript(
     request,
     responseBody: phase === "post" && responseBody !== ctx.response?.body ? responseBody : undefined,
     vars,
+    tests,
     ms: Math.max(0, Math.round(performance.now() - started)),
   };
 }

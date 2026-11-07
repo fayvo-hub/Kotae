@@ -62,6 +62,16 @@ func StartEcho() *Echo {
 			"body":    string(body),
 		})
 	})
+	// 路径变量：/users/:id 换好之后打到这里，回显最终路径。
+	mux.HandleFunc("/users/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"path":   r.URL.Path,
+			"userId": strings.TrimPrefix(r.URL.Path, "/users/"),
+			"query":  r.URL.RawQuery,
+		})
+	})
+
 	mux.HandleFunc("/text", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = io.WriteString(w, "纯文本响应：中文可以正常显示。\n第二行。\n")
@@ -124,6 +134,11 @@ func StartEcho() *Echo {
 	mux.HandleFunc("/cookie", func(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, &http.Cookie{Name: "fixture_session", Value: "abc123", Path: "/"})
 		writeJSON(w, http.StatusOK, map[string]any{"cookie": r.Header.Get("Cookie")})
+	})
+	// 同一个服务也能当 HTTP 代理用：代理模式下的请求行是绝对地址（http://host/path），
+	// 这里把收到的目标地址原样回显，用来证明请求真的走了代理。
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{"proxied": true, "target": r.RequestURI})
 	})
 	// 流式接口：SSE 推送与最小 WebSocket 回显。
 	mux.HandleFunc("/sse", sseHandler)

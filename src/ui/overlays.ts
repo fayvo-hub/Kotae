@@ -26,7 +26,18 @@ import {
   setEnv,
   setPendingCurl,
   setDesktopPrefs,
+  setCodeFontSize,
+  setShortcut,
+  shortcutFor,
+  resetShortcuts,
   setTheme,
+  setZoom,
+  stepZoom,
+  CODE_FS_MAX,
+  CODE_FS_MIN,
+  DEFAULT_CODE_FS,
+  ZOOM_MAX,
+  ZOOM_MIN,
   state,
   toast,
   toggleUI,
@@ -39,10 +50,21 @@ import type { ApiRequest } from "../types";
 import { System } from "../mygo";
 import { formatBytes } from "../util";
 import { askConfirm, askText } from "./prompt";
+import {
+  SHORTCUT_ACTIONS,
+  beginShortcutCapture,
+  comboLabel,
+  endShortcutCapture,
+} from "../shortcuts";
 
 // ---- 通用浮层外壳 ----
 
-function modal(title: string, body: HTMLElement, footer?: HTMLElement, width = 560): HTMLElement {
+export function modal(
+  title: string,
+  body: HTMLElement,
+  footer?: HTMLElement,
+  width = 560,
+): HTMLElement {
   const backdrop = el("div", {
     class: "backdrop",
     on: {
@@ -63,11 +85,13 @@ function modal(title: string, body: HTMLElement, footer?: HTMLElement, width = 5
 }
 
 export function closeAll(): void {
+  state.nodeSettings = null;
   state.commandOpen = false;
   state.settingsOpen = false;
   state.envOpen = false;
   state.curlOpen = false;
   state.snippetsOpen = false;
+  state.cookiesOpen = false;
   state.importOpen = false;
   state.pendingCurl = null;
   state.pendingImport = null;
@@ -610,6 +634,126 @@ export function globalsSection(): HTMLElement {
 
 // ---- 设置 ----
 
+/**
+ * 打开 mygo 的更新窗口检查新版本。
+ * 开发版与包管理器安装的版本没有配置更新源，Go 侧会返回原因，这里如实提示而不是静默。
+ */
+export function checkUpdates(): void {
+  void System.checkForUpdates().catch((err: unknown) => {
+    toast(`检查更新失败：${(err as Error).message}`, "error");
+  });
+}
+
+/** 上次检查时间的中文说法。 */
+function checkedAtText(ms: number): string {
+  if (!ms) return "还没检查过";
+  const diff = Date.now() - ms;
+  if (diff < 60_000) return "刚刚检查过";
+  if (diff < 3_600_000) return `${Math.round(diff / 60_000)} 分钟前检查过`;
+  if (diff < 86_400_000) return `${Math.round(diff / 3_600_000)} 小时前检查过`;
+  return `${new Date(ms).toLocaleDateString()} 检查过`;
+}
+
+/**
+ * 设置页的「更新」一节：状态 + 检查按钮 + 两个偏好开关。
+ * 状态每渲染一次读一次 Go 侧（插件把偏好存在自己的 updater.json 里，页面不落库）。
+ */
+function updateSection(): HTMLElement {
+  const box = el("div", { class: "stack-tight" });
+  const status = el("div", { class: "update-box" });
+  box.append(status);
+
+  const paint = (): void => {
+    void System.updateState()
+      .then((st) => {
+        const stateText = st.supported
+          ? st.available
+            ? `发现新版本 ${st.available}`
+            : "已是最新版本"
+          : "这个构建不能自我更新（开发版或包管理器安装的版本）";
+        const row = el("div", { class: "info-row" });
+        row.append(
+          el("span", {
+            class: `update-dot${st.available ? " has-update" : ""}`,
+            attr: { "aria-hidden": "true" },
+          }),
+          el("span", { text: stateText }),
+          el("span", { class: "spacer" }),
+          el("span", { class: "muted", text: checkedAtText(st.lastCheck) }),
+        );
+        fill(
+          status,
+          row,
+          el("div", { class: "info-row" }, el("span", { class: "spacer" }), checkBtn),
+        );
+        checks.checked = st.automaticChecks;
+        checks.disabled = !st.supported;
+        downloads.checked = st.automaticDownloads;
+        downloads.disabled = !st.supported;
+      })
+      .catch((err: unknown) => {
+        fill(status, el("div", { class: "info-row", text: `读不到更新状态：${(err as Error).message}` }));
+      });
+  };
+
+  const checkBtn = el("button", {
+    class: "btn small",
+    attr: { type: "button" },
+    text: "检查更新",
+    on: {
+      click: () => {
+        checkUpdates();
+        // 插件自己的窗口负责展示进度，这里稍等一会儿重读状态（可用版本、上次检查时间）。
+        window.setTimeout(paint, 1200);
+      },
+    },
+  });
+
+  const checks = el("input", {
+    attr: { type: "checkbox" },
+    on: { change: () => void saveUpdatePrefs() },
+  });
+  const downloads = el("input", {
+    attr: { type: "checkbox" },
+    on: { change: () => void saveUpdatePrefs() },
+  });
+  const saveUpdatePrefs = async (): Promise<void> => {
+    try {
+      await System.setUpdatePrefs(checks.checked, downloads.checked);
+    } catch (err) {
+      toast(`保存更新偏好失败：${(err as Error).message}`, "error");
+    }
+  };
+
+  box.append(
+    el(
+      "label",
+      { class: "field checkbox-field update-toggle" },
+      checks,
+      el(
+        "span",
+        { class: "desktop-toggle-text" },
+        el("span", { text: "后台自动检查更新" }),
+        el("span", { class: "field-hint", text: "每天检查一次，发现新版本时弹出更新窗口。" }),
+      ),
+    ),
+    el(
+      "label",
+      { class: "field checkbox-field update-toggle" },
+      downloads,
+      el(
+        "span",
+        { class: "desktop-toggle-text" },
+        el("span", { text: "自动下载并安装" }),
+        el("span", { class: "field-hint", text: "发现新版本直接下载，下次启动时生效；也可以在更新窗口里临时打开。" }),
+      ),
+    ),
+  );
+
+  paint();
+  return box;
+}
+
 // ---- 桌面偏好 ----
 
 /** 一行开关：勾选框 + 标题 + 说明，说明换行跟在标题下面。 */
@@ -646,10 +790,13 @@ function desktopSection(): HTMLElement {
   );
 }
 
-export function settingsDialog(): HTMLElement {
-  const body = el("div", { class: "stack settings-body" });
-
-  const themeRow = el("div", { class: "segmented" });
+/**
+ * 「外观」一节：主题 + 界面缩放 + 代码字号。
+ * 缩放与字号立刻生效并落库，改完不需要「保存」；涉及重绘的地方统一用
+ * mygo:rerender-settings 让弹窗自己重建。
+ */
+function appearanceSection(): HTMLElement {
+  const themeRow = el("div", { class: "segmented", attr: { "aria-label": "主题" } });
   for (const mode of [
     { value: "auto" as const, label: "跟随系统" },
     { value: "light" as const, label: "浅色" },
@@ -670,6 +817,163 @@ export function settingsDialog(): HTMLElement {
     );
   }
 
+  const stepBtn = (name: "minus" | "plus", title: string, disabled: boolean, run: () => void): HTMLElement => {
+    const btn = el("button", {
+      class: "icon-btn",
+      attr: { type: "button", title, "aria-label": title, disabled },
+      on: { click: run },
+    });
+    btn.append(icon(name));
+    return btn;
+  };
+
+  const stepper = (
+    label: string,
+    hint: string,
+    valueText: string,
+    canDown: boolean,
+    canUp: boolean,
+    step: (dir: 1 | -1) => void,
+    reset: () => void,
+  ): HTMLElement =>
+    el(
+      "div",
+      { class: "stepper-field" },
+      el(
+        "div",
+        { class: "stepper-text" },
+        el("span", { text: label }),
+        el("span", { class: "field-hint", text: hint }),
+      ),
+      el(
+        "div",
+        { class: "stepper" },
+        stepBtn("minus", `减小${label}`, !canDown, () => step(-1)),
+        el("span", { class: "stepper-value", text: valueText }),
+        stepBtn("plus", `增大${label}`, !canUp, () => step(1)),
+        el("button", { class: "link-btn", attr: { type: "button" }, text: "复位", on: { click: reset } }),
+      ),
+    );
+
+  return el(
+    "div",
+    { class: "stack" },
+    themeRow,
+    stepper(
+      "界面缩放",
+      "整页缩放，窗口大小不变；Ctrl+= 放大、Ctrl+- 缩小、Ctrl+0 复位。",
+      `${Math.round(state.zoom * 100)}%`,
+      state.zoom > ZOOM_MIN + 0.001,
+      state.zoom < ZOOM_MAX - 0.001,
+      (dir) => {
+        stepZoom(dir);
+        window.dispatchEvent(new CustomEvent("mygo:rerender-settings"));
+      },
+      () => {
+        setZoom(1);
+        window.dispatchEvent(new CustomEvent("mygo:rerender-settings"));
+      },
+    ),
+    stepper(
+      "代码字号",
+      "只影响请求体、响应体与脚本区，界面上其余文字不变。",
+      `${state.codeFontSize}px`,
+      state.codeFontSize > CODE_FS_MIN,
+      state.codeFontSize < CODE_FS_MAX,
+      (dir) => {
+        setCodeFontSize(state.codeFontSize + dir);
+        window.dispatchEvent(new CustomEvent("mygo:rerender-settings"));
+      },
+      () => {
+        setCodeFontSize(DEFAULT_CODE_FS);
+        window.dispatchEvent(new CustomEvent("mygo:rerender-settings"));
+      },
+    ),
+  );
+}
+
+/** 「快捷键」一节：每行一个动作，点「修改」进入录制，Esc 取消，冲突时提示。 */
+function shortcutsSection(): HTMLElement {
+  const list = el("div", { class: "shortcut-list" });
+  const rerender = (): void => {
+    window.dispatchEvent(new CustomEvent("mygo:rerender-settings"));
+  };
+
+  for (const action of SHORTCUT_ACTIONS) {
+    const combo = shortcutFor(action.id);
+    const key = el("kbd", { class: "shortcut-key", text: comboLabel(combo) });
+    // 录制中再点一次同一个按钮＝取消；靠这个标志而不是改写 onclick，
+    // 否则原有的 click 监听还会再启动一轮录制。
+    let recording = false;
+    const edit = el("button", {
+      class: "link-btn",
+      attr: { type: "button" },
+      text: "修改",
+      on: {
+        click: () => {
+          if (recording) {
+            endShortcutCapture();
+            rerender();
+            return;
+          }
+          recording = true;
+          key.textContent = "按下新组合键…";
+          key.classList.add("recording");
+          edit.textContent = "取消";
+          beginShortcutCapture((next) => {
+            if (!next) {
+              rerender();
+              return;
+            }
+            if (setShortcut(action.id, next)) {
+              toast(`「${action.label}」现在是 ${comboLabel(next)}`);
+            }
+            rerender();
+          });
+        },
+      },
+    });
+    list.append(
+      el(
+        "div",
+        { class: "shortcut-row" },
+        el("span", { class: "shortcut-label", text: action.label }),
+        key,
+        edit,
+      ),
+    );
+  }
+
+  return el(
+    "div",
+    { class: "stack" },
+    el(
+      "div",
+      { class: "info-row" },
+      el("span", {
+        class: "field-hint",
+        text: "点「修改」后按下新的组合键，Esc 取消；与别的动作冲突时会提示。",
+      }),
+      el("span", { class: "spacer" }),
+      el("button", {
+        class: "link-btn",
+        attr: { type: "button" },
+        text: "全部恢复默认",
+        on: {
+          click: () => {
+            resetShortcuts();
+            rerender();
+          },
+        },
+      }),
+    ),
+    list,
+  );
+}
+
+export function settingsDialog(): HTMLElement {
+  const body = el("div", { class: "stack settings-body" });
+
   const varList = el("div", { class: "var-list" });
   for (const d of DYNAMIC_VARS) {
     const row = el("div", { class: "var-row" });
@@ -681,11 +985,13 @@ export function settingsDialog(): HTMLElement {
   const versionLine = el("div", { class: "info-row" });
 
   body.append(
-    section("外观", themeRow),
+    section("外观", appearanceSection()),
+    section("快捷键", shortcutsSection()),
     section("桌面", desktopSection()),
     section("全局变量", globalsSection()),
     section("内置动态变量", varList),
     section("数据与备份", backupSection()),
+    section("更新", updateSection()),
     section("关于", infoBox),
   );
 
@@ -939,6 +1245,34 @@ export function commandPalette(): HTMLElement {
       hint: "",
       icon: "settings",
       run: () => toggleUI("settingsOpen", true),
+    },
+    {
+      id: "zoom-in",
+      title: "放大界面",
+      hint: "Ctrl+=",
+      icon: "plus",
+      run: () => stepZoom(1),
+    },
+    {
+      id: "zoom-out",
+      title: "缩小界面",
+      hint: "Ctrl+-",
+      icon: "minus",
+      run: () => stepZoom(-1),
+    },
+    {
+      id: "zoom-reset",
+      title: "复位界面缩放（100%）",
+      hint: "Ctrl+0",
+      icon: "refresh",
+      run: () => setZoom(1),
+    },
+    {
+      id: "check-updates",
+      title: "检查更新",
+      hint: "",
+      icon: "download",
+      run: () => checkUpdates(),
     },
     {
       id: "theme",

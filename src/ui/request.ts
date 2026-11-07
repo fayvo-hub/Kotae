@@ -16,17 +16,33 @@ import {
   toggleUI,
 } from "../store";
 import { System } from "../mygo";
-import { CurlError, parseCurl } from "../curl";
+import { CurlError, buildURL, parseCurl } from "../curl";
 import {
   METHODS,
-  type AuthType,
   type BodyMode,
   type HttpMethod,
+  type KV,
   type RequestProtocol,
   type Tab,
 } from "../types";
-import { ensureScheme, interpolate, lookupVar, prettyJSON, stripSchemeBeforeVar } from "../util";
-import { scope as storeScope } from "../store";
+import {
+  ensureScheme,
+  formatBytes,
+  interpolate,
+  lookupVar,
+  pathVarNames,
+  prettyJSON,
+  uid,
+} from "../util";
+import {
+  inheritedFor,
+  openNodeSettings,
+  scope as storeScope,
+} from "../store";
+import { authEditor, authLabel } from "./authEditor";
+
+/** 本地读取文件的上限，与 Go 侧 maxFileSize 保持一致（32 MB）。 */
+const FILE_LIMIT = 32 * 1024 * 1024;
 
 /** 请求协议：普通 HTTP、SSE 单向流、WebSocket 双向。 */
 const PROTOCOLS: { key: RequestProtocol; label: string }[] = [
@@ -184,6 +200,12 @@ function urlBar(tab: Tab): HTMLElement {
       blur: () => {
         const raw = urlInput.value;
         if (!raw.trim()) return;
+        // 值没变就什么都别做：整页重绘会把正在就地编辑的东西（比如集合树里的
+        // 改名框）直接擦掉，输入框失焦只该在真的改了内容时落库。
+        if (raw === tab.request.url) {
+          setUrlInvalid(urlInput, false);
+          return;
+        }
         applyURL(raw, tab.id);
         setUrlInvalid(urlInput, false);
       },
@@ -503,6 +525,33 @@ function tabBody(tab: Tab): HTMLElement {
 
 function paramsPane(tab: Tab): HTMLElement {
   const host = el("div", { class: "pane" });
+  // 地址里有 `:id` 这种占位符时，参数页签顶部多一张路径变量表。
+  const pathNames = pathVarNames(tab.request.url);
+  const head: Node[] = [];
+  if (pathNames.length > 0) {
+    const stored = tab.request.pathVars ?? [];
+    const rows: KV[] = pathNames.map(
+      (name) => stored.find((s) => s.key === name) ?? { id: uid("kv"), key: name, value: "", enabled: true },
+    );
+    head.push(
+      el("p", {
+        class: "pane-hint",
+        text: `地址里有 ${String(pathNames.length)} 个路径变量：URL 中的 :name 会替换成下面的值。`,
+      }),
+      kvTable({
+        rows,
+        keyPlaceholder: "参数名",
+        valuePlaceholder: "路径变量值（支持 {{变量}}）",
+        onChange: () => {
+          mutate((r) => {
+            r.pathVars = rows;
+          });
+          window.dispatchEvent(new CustomEvent("mygo:rerender-request"));
+        },
+        emptyHint: "暂无路径变量",
+      }),
+    );
+  }
   const hint = el("p", {
     class: "pane-hint",
     text: "同名参数会全部发送；勾选框控制是否启用。粘贴带查询串的完整 URL 会自动拆到这里。",
@@ -522,22 +571,13 @@ function paramsPane(tab: Tab): HTMLElement {
   const url = tab.request.url ? ensureScheme(buildPreview(tab)) : "";
   preview.append(el("span", { class: "pane-preview-label", text: "实际地址" }));
   preview.append(el("code", { class: "pane-preview-url", text: url || "（尚未填写地址）" }));
-  fill(host, hint, table, preview);
+  fill(host, ...head, hint, table, preview);
   return host;
 }
 
 function buildPreview(tab: Tab): string {
-  const base = interpolate(stripSchemeBeforeVar(tab.request.url), storeScope()).text;
-  const pairs = tab.request.params
-    .filter((p) => p.enabled && p.key.trim())
-    .map(
-      (p) =>
-        `${encodeURIComponent(interpolate(p.key, storeScope()).text)}=${encodeURIComponent(
-          interpolate(p.value, storeScope()).text,
-        )}`,
-    );
-  if (pairs.length === 0) return base;
-  return `${base}${base.includes("?") ? "&" : "?"}${pairs.join("&")}`;
+  const resolve = (text: string): string => interpolate(text, storeScope()).text;
+  return buildURL(tab.request, resolve);
 }
 
 function headersPane(tab: Tab): HTMLElement {
@@ -567,6 +607,8 @@ const BODY_MODES: { value: BodyMode; label: string }[] = [
   { value: "text", label: "纯文本" },
   { value: "urlencoded", label: "表单编码" },
   { value: "form", label: "表单（可含文件）" },
+  { value: "binary", label: "二进制文件" },
+  { value: "graphql", label: "GraphQL" },
 ];
 
 function bodyPane(tab: Tab): HTMLElement {
@@ -637,6 +679,16 @@ function bodyPane(tab: Tab): HTMLElement {
     host.append(
       el("div", { class: "pane-empty" }, icon("info"), el("span", { text: "这条请求不发送请求体" })),
     );
+    return host;
+  }
+
+  if (tab.request.bodyMode === "binary") {
+    host.append(binaryBodyPane(tab));
+    return host;
+  }
+
+  if (tab.request.bodyMode === "graphql") {
+    host.append(graphqlBodyPane(tab));
     return host;
   }
 
@@ -763,6 +815,103 @@ function bodyPane(tab: Tab): HTMLElement {
   return host;
 }
 
+/** GraphQL：上面写 query，下面写变量，发送时拼成 {query, variables} 的 JSON。 */
+function graphqlBodyPane(tab: Tab): HTMLElement {
+  const box = el("div", { class: "graphql-pane" });
+
+  const query = el("textarea", {
+    class: "code-input graphql-query",
+    attr: {
+      placeholder: "query ($id: ID!) {\n  user(id: $id) { id name }\n}",
+      spellcheck: "false",
+      "aria-label": "GraphQL 查询",
+    },
+    on: {
+      input: () => {
+        const value = query.value;
+        mutate((r) => {
+          r.body = value;
+        });
+      },
+    },
+  });
+  query.value = tab.request.body;
+  enableVarAssist(query);
+
+  const vars = el("textarea", {
+    class: "code-input graphql-vars",
+    attr: {
+      placeholder: '{\n  "id": 1\n}',
+      spellcheck: "false",
+      "aria-label": "GraphQL 变量",
+    },
+    on: {
+      input: () => {
+        const value = vars.value;
+        mutate((r) => {
+          r.graphqlVars = value;
+        });
+        paintVarsStatus(value);
+      },
+    },
+  });
+  vars.value = tab.request.graphqlVars ?? "";
+
+  const status = el("div", { class: "pane-status" });
+  const paintVarsStatus = (value: string): void => {
+    if (!value.trim()) {
+      fill(status);
+      return;
+    }
+    try {
+      JSON.parse(value);
+      fill(status, el("span", { class: "ok", text: "变量 JSON 语法正确" }));
+    } catch (err) {
+      fill(status, el("span", { class: "bad", text: `变量 JSON 语法错误：${(err as Error).message}` }));
+    }
+  };
+  paintVarsStatus(vars.value);
+
+  const tools = el("div", { class: "pane-toolbar-right" });
+  tools.append(
+    el("button", {
+      class: "link-btn",
+      attr: { type: "button" },
+      text: "格式化变量",
+      on: {
+        click: () => {
+          const pretty = prettyJSON(vars.value);
+          if (!pretty) {
+            toast("变量不是合法 JSON，无法格式化", "error");
+            return;
+          }
+          vars.value = pretty;
+          mutate((r) => {
+            r.graphqlVars = pretty;
+          });
+          paintVarsStatus(pretty);
+        },
+      },
+    }),
+  );
+
+  const varsHead = el("div", { class: "graphql-head" });
+  varsHead.append(el("span", { class: "field-label", text: "变量（JSON）" }), el("span", { class: "spacer" }), tools);
+
+  box.append(
+    el("span", { class: "field-label", text: "查询" }),
+    query,
+    varsHead,
+    vars,
+    status,
+    el("p", {
+      class: "pane-hint",
+      text: "发送时自动拼成 {query, variables} 并设置 Content-Type: application/json；支持 {{变量}}。",
+    }),
+  );
+  return box;
+}
+
 async function pickFile(): Promise<{ name: string; size: number; data: string } | null> {
   try {
     const file = await System.pickFile("选择要上传的文件");
@@ -774,127 +923,171 @@ async function pickFile(): Promise<{ name: string; size: number; data: string } 
   }
 }
 
-const AUTH_TYPES: { value: AuthType; label: string }[] = [
-  { value: "none", label: "无认证" },
-  { value: "bearer", label: "Bearer Token" },
-  { value: "basic", label: "Basic 用户名密码" },
-  { value: "apikey", label: "API Key" },
-];
+/** 把拖进来的 File 读成 base64：走页面 API，不需要弹系统对话框。 */
+function readBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result ?? "");
+      resolve(text.slice(text.indexOf(",") + 1));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("读取文件失败"));
+    reader.readAsDataURL(file);
+  });
+}
+
+/** 二进制直传：把整个文件当正文发出去，Content-Type 默认 application/octet-stream。 */
+function binaryBodyPane(tab: Tab): HTMLElement {
+  const box = el("div", { class: "binary-pane" });
+  const file = tab.request.binary;
+
+  // 拖一个文件进来就等于选好文件：省一次系统对话框，也是 e2e 唯一能稳定走通的入口。
+  const takeFile = async (dropped: File): Promise<void> => {
+    if (dropped.size > FILE_LIMIT) {
+      toast(`文件超过 ${formatBytes(FILE_LIMIT)}，暂不支持`, "error");
+      return;
+    }
+    try {
+      const data = await readBase64(dropped);
+      mutate((r) => {
+        r.binary = { name: dropped.name, size: dropped.size, data };
+        if (r.bodyMode !== "binary") r.bodyMode = "binary";
+      });
+      window.dispatchEvent(new CustomEvent("mygo:rerender-request"));
+    } catch (err) {
+      toast(`读取文件失败：${(err as Error).message}`, "error");
+    }
+  };
+  box.addEventListener("dragover", (ev) => {
+    ev.preventDefault();
+    box.classList.add("dragging");
+  });
+  box.addEventListener("dragleave", () => box.classList.remove("dragging"));
+  box.addEventListener("drop", (ev) => {
+    ev.preventDefault();
+    box.classList.remove("dragging");
+    const dropped = ev.dataTransfer?.files?.[0];
+    if (dropped) void takeFile(dropped);
+  });
+
+  const choose = async (): Promise<void> => {
+    const done = await pickFile();
+    if (!done) return;
+    mutate((r) => {
+      r.binary = { name: done.name, size: done.size, data: done.data };
+    });
+    window.dispatchEvent(new CustomEvent("mygo:rerender-request"));
+  };
+
+  if (!file) {
+    box.append(
+      el(
+        "div",
+        { class: "binary-empty" },
+        icon("upload"),
+        el("span", { text: "把文件拖到这里，或点右侧按钮选择" }),
+        el("button", {
+          class: "btn small",
+          attr: { type: "button" },
+          text: "选择文件",
+          on: { click: () => void choose() },
+        }),
+      ),
+    );
+    box.append(el("p", { class: "pane-hint", text: "Content-Type 默认 application/octet-stream，可在「请求头」里改成文件的实际类型。" }));
+    return box;
+  }
+
+  const actions = el("div", { class: "binary-actions" });
+  actions.append(
+    el("button", {
+      class: "link-btn",
+      attr: { type: "button" },
+      text: "更换",
+      on: { click: () => void choose() },
+    }),
+    el("button", {
+      class: "link-btn",
+      attr: { type: "button" },
+      text: "移除",
+      on: {
+        click: () => {
+          mutate((r) => {
+            r.binary = undefined;
+          });
+          window.dispatchEvent(new CustomEvent("mygo:rerender-request"));
+        },
+      },
+    }),
+  );
+
+  box.append(
+    el(
+      "div",
+      { class: "binary-file" },
+      icon("file"),
+      el(
+        "div",
+        { class: "binary-meta" },
+        el("span", { class: "binary-name", text: file.name }),
+        el("span", { class: "muted small", text: formatBytes(file.size) }),
+      ),
+      actions,
+    ),
+  );
+  if (!file.data) {
+    box.append(
+      el("p", {
+        class: "pane-hint warn-text",
+        text: "这个文件的内容还没读进来（例如从 cURL 导入），请重新拖入或选择一次。",
+      }),
+    );
+  }
+  box.append(
+    el("p", {
+      class: "pane-hint",
+      text: "整个文件按原始字节发送，不做任何编码；Content-Type 默认 application/octet-stream，也可以拖一个新文件进来替换。",
+    }),
+  );
+  return box;
+}
 
 function authPane(tab: Tab): HTMLElement {
   const host = el("div", { class: "pane" });
-  const auth = tab.request.auth;
-  const row = el("div", { class: "pane-toolbar" });
-  const seg = el("div", { class: "segmented", attr: { role: "radiogroup", "aria-label": "认证方式" } });
-  for (const t of AUTH_TYPES) {
-    const active = auth.type === t.value;
-    seg.append(
+  const inherited = inheritedFor(tab.origin);
+
+  host.append(
+    authEditor(tab.request.auth, {
+      update: (recipe) => mutate((r) => recipe(r.auth)),
+      rebuild: () => window.dispatchEvent(new CustomEvent("mygo:rerender-request")),
+      emptyText:
+        inherited.auth && tab.request.auth.type === "none"
+          ? "不额外添加认证信息，使用继承来的认证"
+          : "不额外添加认证信息",
+    }),
+  );
+
+  // 自己没有认证但上层有：说清用的是谁的，点一下就能改。
+  if (tab.request.auth.type === "none" && inherited.auth && tab.origin) {
+    const box = el("div", { class: "inherit-note" });
+    box.append(
+      icon("info"),
+      el("span", {
+        text: `继承「${inherited.authFrom}」的认证：${authLabel(inherited.auth.type)}`,
+      }),
+      el("span", { class: "spacer" }),
       el("button", {
-        class: `segmented-item${active ? " active" : ""}`,
-        attr: { type: "button", role: "radio", "aria-checked": active ? "true" : "false" },
-        text: t.label,
+        class: "link-btn",
+        attr: { type: "button" },
+        text: "编辑共享设置",
         on: {
-          click: () => {
-            mutate((r) => {
-              r.auth.type = t.value;
-            });
-            window.dispatchEvent(new CustomEvent("mygo:rerender-request"));
-          },
+          click: () =>
+            openNodeSettings(tab.origin!.collectionId, inherited.authFromId, inherited.authFrom),
         },
       }),
     );
+    host.append(box);
   }
-  row.append(seg);
-  host.append(row);
-
-  const form = el("div", { class: "form-grid" });
-  const field = (
-    label: string,
-    value: string,
-    placeholder: string,
-    onInput: (v: string) => void,
-    type = "text",
-  ): HTMLElement => {
-    const input = el("input", {
-      class: "text-input",
-      attr: { placeholder, type, spellcheck: "false", autocomplete: "off" },
-      on: {
-        input: () => onInput(input.value),
-      },
-    });
-    input.value = value;
-    return el("label", { class: "field" }, el("span", { class: "field-label", text: label }), input);
-  };
-
-  if (auth.type === "none") {
-    host.append(
-      el("div", { class: "pane-empty" }, icon("info"), el("span", { text: "不额外添加认证信息" })),
-    );
-    return host;
-  }
-  if (auth.type === "bearer") {
-    // 只有 Token 一个字段时让它独占整行，避免左半边输入框看着像没填完。
-    form.classList.add("form-single");
-    form.append(
-      field(
-        "Token",
-        auth.token,
-        "粘贴 token，支持 {{token}}",
-        (v) => mutate((r) => (r.auth.token = v)),
-      ),
-      el("p", {
-        class: "field-hint",
-        text: "发送时会加上 Authorization: Bearer <token> 请求头。",
-      }),
-    );
-  }
-  if (auth.type === "basic") {
-    form.append(
-      field(
-        "用户名",
-        auth.username,
-        "username",
-        (v) => mutate((r) => (r.auth.username = v)),
-      ),
-      field(
-        "密码",
-        auth.password,
-        "password",
-        (v) => mutate((r) => (r.auth.password = v)),
-        "password",
-      ),
-      el("p", { class: "field-hint", text: "发送时会加上 Authorization: Basic base64(用户名:密码)。" }),
-    );
-  }
-  if (auth.type === "apikey") {
-    form.append(
-      field("名称", auth.key, "例如 X-Api-Key", (v) => mutate((r) => (r.auth.key = v))),
-      field("值", auth.value, "支持 {{变量}}", (v) => mutate((r) => (r.auth.value = v))),
-    );
-    const seg2 = el("div", { class: "segmented small" });
-    for (const where of [
-      { value: "header" as const, label: "放在请求头" },
-      { value: "query" as const, label: "放在查询参数" },
-    ]) {
-      seg2.append(
-        el("button", {
-          class: `segmented-item${auth.in === where.value ? " active" : ""}`,
-          attr: { type: "button" },
-          text: where.label,
-          on: {
-            click: () => {
-              mutate((r) => {
-                r.auth.in = where.value;
-              });
-              window.dispatchEvent(new CustomEvent("mygo:rerender-request"));
-            },
-          },
-        }),
-      );
-    }
-    form.append(seg2);
-  }
-  host.append(form);
   return host;
 }
 
@@ -936,6 +1129,36 @@ function optionsPane(tab: Tab): HTMLElement {
   }
   redirect.value = opt.redirect;
 
+  const proxy = el("input", {
+    class: "text-input",
+    attr: {
+      type: "text",
+      placeholder: "留空跟随系统代理，例如 http://127.0.0.1:7897",
+      spellcheck: "false",
+      "aria-label": "代理地址",
+    },
+    on: {
+      change: () => {
+        mutate((r) => {
+          r.options.proxy = proxy.value.trim();
+        });
+      },
+    },
+  });
+  proxy.value = opt.proxy;
+
+  const insecure = el("input", {
+    attr: { type: "checkbox" },
+    on: {
+      change: () => {
+        mutate((r) => {
+          r.options.insecureTLS = insecure.checked;
+        });
+      },
+    },
+  });
+  insecure.checked = opt.insecureTLS;
+
   const cookie = el("input", {
     attr: { type: "checkbox" },
     on: {
@@ -968,9 +1191,27 @@ function optionsPane(tab: Tab): HTMLElement {
       ),
       el(
         "label",
+        { class: "field" },
+        el("span", { class: "field-label", text: "代理" }),
+        proxy,
+        el("span", { class: "field-hint", text: "只对这一条请求生效，支持 http / https / socks5。" }),
+      ),
+      el(
+        "label",
         { class: "field checkbox-field" },
-        cookie,
-        el("span", { text: "保持 Cookie 会话（多次请求共享登录态）" }),
+        el("label", { class: "checkbox-inline" }, insecure, el("span", { text: "跳过 TLS 证书校验（自签证书环境）" })),
+        el("span", { class: "field-hint", text: "开启后不再校验证书链，只建议对本地或内网服务使用。" }),
+      ),
+      el(
+        "div",
+        { class: "field checkbox-field cookie-field" },
+        el("label", { class: "checkbox-inline" }, cookie, el("span", { text: "保持 Cookie 会话（多次请求共享登录态）" })),
+        el("button", {
+          class: "link-btn",
+          attr: { type: "button" },
+          text: "管理 Cookie",
+          on: { click: () => toggleUI("cookiesOpen") },
+        }),
       ),
     ),
     el("p", {

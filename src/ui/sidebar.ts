@@ -18,6 +18,7 @@ import {
   openNode,
   openTab,
   persist,
+  openNodeSettings,
   renameCollection,
   renameNode,
   resolveText,
@@ -215,7 +216,7 @@ function collectionNode(col: Collection, filter: string): HTMLElement | null {
     if (last) moveTreeNode(src, { collectionId: col.id, nodeId: last.id, mode: "after" });
   });
   row.addEventListener("click", () => {
-    if (renaming) return;
+    if (renamingNow()) return;
     children.classList.toggle("collapsed");
     twisty.classList.toggle("collapsed");
   });
@@ -336,11 +337,15 @@ function hoverActions(actions: { icon: keyof typeof icons; title: string; run: (
 // 双击或右键「重命名」后，名字直接在树上变成输入框（Enter 确认、Esc 或空名字取消），
 // 比弹对话框顺手，也避免名称改完才发现改错行。
 
-let renaming = false;
+// 改名框是否开着：直接看 DOM，不用模块变量。
+// 用变量记状态的话，树在改名途中被重绘（任何一次 emit 都会）就把输入框删掉了，
+// blur 不一定触发，标志会永远卡在 true，之后所有改名都静默失败。
+function renamingNow(): boolean {
+  return !!document.querySelector(".tree-rename");
+}
 
 function inlineRename(label: HTMLElement, current: string, commit: (name: string) => void): void {
-  if (renaming || !label.parentElement) return;
-  renaming = true;
+  if (renamingNow() || !label.parentElement) return;
   let done = false;
   const input = el("input", {
     class: "tree-rename",
@@ -353,7 +358,6 @@ function inlineRename(label: HTMLElement, current: string, commit: (name: string
     done = true;
     const value = input.value.trim();
     input.replaceWith(label);
-    renaming = false;
     if (save && value && value !== current) commit(value);
   };
 
@@ -378,8 +382,10 @@ function inlineRename(label: HTMLElement, current: string, commit: (name: string
   input.select();
 }
 
-function newRequestIn(collectionId: string): void {
-  openTab(emptyRequest(), "新请求", { collectionId, nodeId: "" });
+// folderId 只是「这个标签页挂在哪个文件夹下」的标记：保存前就靠它继承
+// 文件夹的共享认证与变量，否则从文件夹里新建的请求要等重新打开才生效。
+function newRequestIn(collectionId: string, folderId = ""): void {
+  openTab(emptyRequest(), "新请求", { collectionId, nodeId: folderId });
   toast("已新建请求，编辑后按 Ctrl+S 保存到集合", "info");
 }
 
@@ -391,6 +397,10 @@ function openCollectionMenu(ev: MouseEvent, col: Collection, label: HTMLElement,
   openContextMenu(ev, [
     { label: "新建请求", run: () => newRequestIn(col.id) },
     { label: "新建文件夹", run: () => createFolder(col.id) },
+    {
+      label: "共享认证与变量…",
+      run: () => openNodeSettings(col.id, undefined, col.name),
+    },
     {
       label: "重命名",
       hint: "双击",
@@ -407,8 +417,12 @@ function openFolderMenu(
   label: HTMLElement,
 ): void {
   openContextMenu(ev, [
-    { label: "新建请求", run: () => newRequestIn(collectionId) },
+    { label: "新建请求", run: () => newRequestIn(collectionId, folder.id) },
     { label: "新建子文件夹", run: () => createFolder(collectionId, folder.id) },
+    {
+      label: "共享认证与变量…",
+      run: () => openNodeSettings(collectionId, folder.id, folder.name),
+    },
     {
       label: "重命名",
       hint: "双击",
@@ -477,7 +491,7 @@ function treeItem(collectionId: string, node: TreeNode, depth: number, filter: s
     for (const child of folder.items) children.append(treeItem(collectionId, child, depth + 1, filter));
     attachDrag(row, collectionId, folder);
     row.addEventListener("click", () => {
-      if (renaming) return;
+      if (renamingNow()) return;
       toggleFolder(collectionId, folder.id);
     });
     row.addEventListener("dblclick", (ev) => {
@@ -512,7 +526,7 @@ function treeItem(collectionId: string, node: TreeNode, depth: number, filter: s
   );
   attachDrag(row, collectionId, node);
   row.addEventListener("click", () => {
-    if (renaming) return;
+    if (renamingNow()) return;
     openNode(collectionId, node.id);
   });
   row.addEventListener("dblclick", (ev) => {
