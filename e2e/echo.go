@@ -1,7 +1,10 @@
 package e2e
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -76,6 +79,29 @@ func StartEcho() *Echo {
 		}
 		w.Header().Set("Content-Type", "image/png")
 		_, _ = w.Write(png)
+	})
+	// /signed 校验 HMAC-SHA256(secret, 路径+"|"+时间戳)，用来验证前置脚本算的签名头。
+	mux.HandleFunc("/signed", func(w http.ResponseWriter, r *http.Request) {
+		ts := r.Header.Get("X-Ts")
+		sign := r.Header.Get("X-Sign")
+		mac := hmac.New(sha256.New, []byte("e2e-secret"))
+		_, _ = mac.Write([]byte(r.URL.Path + "|" + ts))
+		want := hex.EncodeToString(mac.Sum(nil))
+		if ts == "" || sign != want {
+			writeJSON(w, http.StatusUnauthorized, map[string]any{
+				"verified": false,
+				"reason":   "签名不匹配",
+				"want":     want,
+				"got":      sign,
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"verified": true, "ts": ts})
+	})
+	// /b64 返回 base64 文本，后置脚本负责解成中文。
+	mux.HandleFunc("/b64", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = io.WriteString(w, base64.StdEncoding.EncodeToString([]byte("解码后的响应体：中文正常。")))
 	})
 	mux.HandleFunc("/slow", func(w http.ResponseWriter, r *http.Request) {
 		ms, _ := strconv.Atoi(r.URL.Query().Get("ms"))

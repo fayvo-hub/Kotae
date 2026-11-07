@@ -3,7 +3,7 @@
 import { el, fill, icon, iconButton } from "./dom";
 import { highlightMarkup, highlightText, jsonTree, looksJson, setTreeExpanded } from "./jsonview";
 import { System } from "../mygo";
-import type { ResponseRecord, SentRecord, Tab } from "../types";
+import type { ResponseRecord, ScriptRun, SentRecord, Tab } from "../types";
 import { copyText, toast } from "../store";
 import { formatBytes, formatDuration } from "../util";
 import { prettyJSON } from "../util";
@@ -12,6 +12,8 @@ import { prettyJSON } from "../util";
 export function responsePanel(tab: Tab): HTMLElement {
   const wrap = el("section", { class: "response-panel" });
   const res = tab.response;
+  const runs = tab.scriptRuns ?? [];
+  const logs = runs.length > 0 ? scriptLog(runs) : null;
 
   if (tab.sending) {
     fill(
@@ -30,6 +32,7 @@ export function responsePanel(tab: Tab): HTMLElement {
   if (!res) {
     fill(
       wrap,
+      logs,
       el(
         "div",
         { class: "response-empty" },
@@ -41,8 +44,28 @@ export function responsePanel(tab: Tab): HTMLElement {
     return wrap;
   }
 
-  fill(wrap, statusBar(tab, res), res.error ? errorPane(res) : resTabs(tab, res));
+  fill(wrap, statusBar(tab, res), logs, res.error ? errorPane(res) : resTabs(tab, res));
   return wrap;
+}
+
+/** 脚本执行记录：前置 / 后置各自一行摘要，下面跟 console 输出与报错。 */
+function scriptLog(runs: ScriptRun[]): HTMLElement {
+  const box = el("section", { class: "script-log" });
+  for (const run of runs) {
+    const head = el("div", { class: "script-log-head" });
+    head.append(
+      el("span", { class: "script-log-phase", text: run.phase === "pre" ? "前置脚本" : "后置脚本" }),
+      el("span", { class: "script-log-ms", text: `${run.ms} ms` }),
+    );
+    if (run.bodyEdited) head.append(el("span", { class: "script-log-tag", text: "已改写响应体" }));
+    if (run.error) head.append(el("span", { class: "script-log-error", text: run.error }));
+    const body = el("div", { class: "script-log-body" });
+    for (const log of run.logs) {
+      body.append(el("div", { class: `script-log-line ${log.level}`, text: log.text }));
+    }
+    box.append(el("div", { class: `script-log-run${run.error ? " has-error" : ""}` }, head, body));
+  }
+  return box;
 }
 
 function statusBar(tab: Tab, res: ResponseRecord): HTMLElement {

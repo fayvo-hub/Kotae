@@ -19,11 +19,13 @@ import type {
   SentRecord,
   RedirectMode,
   AuthType,
+  ScriptRun,
 } from "./types";
 import { init as openStorage, load as readStorage, save as writeStorage } from "./db";
-import { buildURL, cloneRequest, emptyRequest, toCurl } from "./curl";
+import { buildURL, cloneRequest, emptyRequest, scriptOf, toCurl } from "./curl";
 import { snippetText, type SnippetLang } from "./snippets";
-import { ensureScheme, guessName, interpolate, splitURL, uid, type VarScope } from "./util";
+import { ensureScheme, guessName, interpolate, lookupVar, splitURL, uid, type VarScope } from "./util";
+import { runScript } from "./script";
 
 export interface Toast {
   id: string;
@@ -280,6 +282,23 @@ export function scope(): VarScope {
   return { env: env?.vars ?? [], globals: state.globals };
 }
 
+/**
+ * 脚本里 pm.environment.set / pm.globals.set 的落点：写到当前环境或全局变量，
+ * 和界面里手改的效果一样（含持久化）。不发事件，发送流程末尾会统一 emit。
+ */
+function writeScriptVar(kind: "env" | "global", name: string, value: string): void {
+  const list = kind === "env" ? state.envs.find((e) => e.id === state.activeEnvId)?.vars : state.globals;
+  if (!list) return;
+  const hit = list.find((v) => v.key === name);
+  if (hit) {
+    hit.value = value;
+    hit.enabled = true;
+  } else {
+    list.push({ id: uid("kv"), key: name, value, enabled: true });
+  }
+  persist();
+}
+
 /** 把 {{变量}} 替换成实际值（生成 URL、头、体时用）。 */
 export function resolveText(text: string): string {
   return interpolate(text, scope()).text;
@@ -449,7 +468,7 @@ export async function send(): Promise<void> {
     return;
   }
 
-  const headers = new Headers();
+  let headers = new Headers();
   for (const h of tab.request.headers) {
     if (!h.enabled || !h.key.trim()) continue;
     try {
@@ -473,7 +492,7 @@ export async function send(): Promise<void> {
   }
 
   let body: BodyInit | undefined;
-  const methodUpper = tab.request.method.toUpperCase();
+  let methodUpper = tab.request.method.toUpperCase();
   if (methodUpper !== "GET" && methodUpper !== "HEAD" && tab.request.bodyMode !== "none") {
     if (tab.request.bodyMode === "form") {
       const fd = new FormData();
@@ -518,6 +537,57 @@ export async function send(): Promise<void> {
     url = u.toString();
   }
 
+  // 前置脚本可能跑满 5 秒：先占住 sending 并立刻渲染「取消」，这期间再点发送会被
+  // 开头的 tab.sending 挡住，不会并行跑两份脚本。
+  tab.sending = true;
+  emit();
+
+  // 前置脚本：拿到的就是「马上要发出去」的请求，改头、改地址、改体都直接生效。
+  const script = scriptOf(tab.request);
+  const scriptRuns: ScriptRun[] = [];
+  tab.scriptRuns = scriptRuns;
+  let scriptVars: Record<string, string> = {};
+  const scriptRequestState = () => ({
+    method: methodUpper,
+    url,
+    headers: [...headers.entries()] as [string, string][],
+    body: typeof body === "string" ? body : null,
+  });
+  if (script.pre.trim()) {
+    if (!script.trusted) {
+      scriptRuns.push({
+        phase: "pre",
+        logs: [{ level: "warn", text: "这段脚本来自导入文件，还没被信任，本次不执行" }],
+        ms: 0,
+      });
+    } else {
+      const pre = await runScript(
+        "pre",
+        script.pre,
+        {
+          request: scriptRequestState(),
+          getVar: (name) => lookupVar(name, scope()),
+          setEnvVar: (name, value) => writeScriptVar("env", name, value),
+          setGlobalVar: (name, value) => writeScriptVar("global", name, value),
+        },
+        scriptVars,
+      );
+      scriptVars = pre.vars;
+      scriptRuns.push({ phase: "pre", logs: pre.logs, error: pre.error, ms: pre.ms });
+      if (pre.error) {
+        tab.sending = false;
+        emit();
+        toast(`前置脚本出错，请求已取消：${pre.error}`, "error");
+        return;
+      }
+      url = pre.request.url;
+      methodUpper = pre.request.method;
+      headers = new Headers();
+      for (const [key, value] of pre.request.headers) headers.append(key, value);
+      if (typeof body === "string" && pre.request.body !== null) body = pre.request.body;
+    }
+  }
+
   // Cookie 开关：关掉时通知 Go 侧停止携带与记录。
   void System.setCookies(tab.request.options.keepCookies).catch(() => {});
 
@@ -533,7 +603,6 @@ export async function send(): Promise<void> {
         }, timeoutMs)
       : undefined;
 
-  tab.sending = true;
   tab.response = undefined;
   // 真正发出去的东西先记一份：排查时看的就是这份快照，不是编辑区里可能又改过的状态。
   tab.sent = buildSentRecord({
@@ -551,13 +620,59 @@ export async function send(): Promise<void> {
   const started = performance.now();
   try {
     const res = await fetchFrom(url, {
-      method: tab.request.method,
+      // 用脚本改过的方法（前置脚本可以改 pm.request.method）。
+      method: methodUpper,
       headers,
       body,
       signal: controller.signal,
       redirect: tab.request.options.redirect,
     });
     const record = await readResponse(res, started, performance.now() - started);
+
+    // 后置脚本：可以读响应、改响应体（解密、脱敏、重排都在这做）。
+    if (script.post.trim()) {
+      if (!script.trusted) {
+        scriptRuns.push({
+          phase: "post",
+          logs: [{ level: "warn", text: "这段脚本来自导入文件，还没被信任，本次不执行" }],
+          ms: 0,
+        });
+      } else {
+        const post = await runScript(
+          "post",
+          script.post,
+          {
+            request: scriptRequestState(),
+            response: {
+              code: record.status,
+              status: record.statusText,
+              headers: record.headers,
+              body: record.body,
+            },
+            getVar: (name) => lookupVar(name, scope()),
+            setEnvVar: (name, value) => writeScriptVar("env", name, value),
+            setGlobalVar: (name, value) => writeScriptVar("global", name, value),
+          },
+          scriptVars,
+        );
+        scriptVars = post.vars;
+        if (post.responseBody !== undefined) {
+          record.body = post.responseBody;
+          record.binary = false;
+          record.base64 = undefined;
+          record.truncated = false;
+        }
+        scriptRuns.push({
+          phase: "post",
+          logs: post.logs,
+          error: post.error,
+          ms: post.ms,
+          bodyEdited: post.responseBody !== undefined,
+        });
+      }
+    }
+    if (scriptRuns.length > 0) record.scripts = scriptRuns;
+
     const current = state.tabs.find((t) => t.id === tab.id);
     if (current) {
       current.response = record;

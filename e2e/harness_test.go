@@ -369,6 +369,23 @@ func (hb *harness) clearOverlays(t *testing.T) {
 			hb.pressKeys(t, "Escape", false, false)
 		}
 	}
+	// 清掉残留的搜索词：树被过滤后集合数量、请求列表都会对不上。
+	hb.eval(t, `(() => {
+  const s = document.querySelector('.search-input');
+  if (s && s.value) {
+    s.value = '';
+    s.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  return true;
+})()`, nil)
+	// 清掉残留的提示条：上一条「共 N 条请求」的 toast 会让后续等待条件立刻成立，掩盖真实导入结果。
+	hb.clearToasts(t)
+}
+
+// clearToasts 清空提示条区域，截图前也能用来去掉上一用例的残留。
+func (hb *harness) clearToasts(t *testing.T) {
+	t.Helper()
+	hb.eval(t, `(() => { const host = document.querySelector('.toasts'); if (host) host.replaceChildren(); return true })()`, nil)
 }
 
 // openRequest 在侧边栏里点开一条固定用例。
@@ -390,17 +407,32 @@ func (hb *harness) openRequest(t *testing.T, name string) {
 	hb.wait(t, "请求成为当前标签", fmt.Sprintf(`[...document.querySelectorAll('.tab.active .tab-name')].some(el => (el.textContent || '').trim() === %s)`, jsString(name)))
 }
 
-// send 点发送并等这一次请求结束。判据是状态条内容发生变化——只看「有状态条」
-// 会被上一次响应骗过去，本机桩服务几十毫秒就返回，靠发送中状态也可能错过。
+// send 点发送并等这一次请求结束。最可靠的信号是发送按钮先进入「取消」再复原；
+// 桩服务几十毫秒就返回，观察不到「取消」时退化为「状态条变了之后再等一小会」。
 func (hb *harness) send(t *testing.T) {
 	t.Helper()
 	before := hb.text(t, ".status-bar")
 	hb.click(t, ".send-btn")
 	start := time.Now()
+	started := false
+	var changedAt time.Time
 	for {
 		sending := strings.Contains(hb.text(t, ".send-btn"), "取消")
+		if sending {
+			started = true
+		}
 		after := hb.text(t, ".status-bar")
-		if !sending && (after != before || time.Since(start) > 1200*time.Millisecond) {
+		if started && !sending {
+			return
+		}
+		if !started && after != before && changedAt.IsZero() {
+			changedAt = time.Now()
+		}
+		if !changedAt.IsZero() && time.Since(changedAt) > 350*time.Millisecond {
+			return
+		}
+		if changedAt.IsZero() && !started && time.Since(start) > 1200*time.Millisecond {
+			// 请求被前置校验拦下（如未定义变量）：不会进入发送态，状态条也不变。
 			return
 		}
 		if time.Since(start) > 25*time.Second {
@@ -410,7 +442,7 @@ func (hb *harness) send(t *testing.T) {
 			hb.eval(t, `JSON.stringify({body: document.body.innerHTML.length, btn: (document.querySelector('.send-btn')||{}).textContent || '', errs: window.__zz || []})`, &scene)
 			t.Fatalf("等请求结束超时\n地址：%s\n状态栏：%s\n提示：%s\n现场：%s\n应用日志：\n%s", url, after, toasts, scene, hb.appLog())
 		}
-		time.Sleep(40 * time.Millisecond)
+		time.Sleep(30 * time.Millisecond)
 	}
 }
 

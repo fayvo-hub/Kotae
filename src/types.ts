@@ -68,6 +68,32 @@ export interface RequestOptions {
   keepCookies: boolean;
 }
 
+/**
+ * 前置 / 后置脚本。老数据里没有这个字段，读的时候统一用 `scriptOf()` 兜底。
+ * trusted 只对导入来的脚本有意义：false 时不会执行，直到用户点「信任」。
+ */
+export interface RequestScript {
+  pre: string;
+  post: string;
+  trusted: boolean;
+}
+
+/** 脚本里 console.log / warn / error 产出的一行。 */
+export interface ScriptLog {
+  level: "log" | "warn" | "error";
+  text: string;
+}
+
+/** 一次脚本执行的记录，前置与后置各一条。 */
+export interface ScriptRun {
+  phase: "pre" | "post";
+  logs: ScriptLog[];
+  error?: string;
+  ms: number;
+  /** 后置脚本改写了响应体。 */
+  bodyEdited?: boolean;
+}
+
 /** 一条请求定义，集合里的请求与标签页里的请求是同一结构。 */
 export interface ApiRequest {
   method: HttpMethod;
@@ -80,6 +106,8 @@ export interface ApiRequest {
   form: FormField[];
   auth: AuthConfig;
   options: RequestOptions;
+  /** 前置 / 后置脚本；缺省视为没有脚本。 */
+  script?: RequestScript;
 }
 
 export interface RequestNode {
@@ -133,6 +161,8 @@ export interface ResponseRecord {
   error?: string;
   /** 错误分类，用于提示文案。 */
   errorKind?: "network" | "timeout" | "aborted" | "invalid";
+  /** 本次请求的脚本执行记录（前置 / 后置），只在内存里。 */
+  scripts?: ScriptRun[];
 }
 
 /** multipart 里的一个文件：只记名字与大小，不重复存内容。 */
@@ -176,6 +206,8 @@ export interface Tab {
   response?: ResponseRecord;
   /** 最近一次实际发出的请求快照（排查用，不落盘）。 */
   sent?: SentRecord;
+  /** 最近一次发送的脚本记录（前置失败时也要能看到，所以挂在标签页上）。 */
+  scriptRuns?: ScriptRun[];
   sending: boolean;
   /** 响应区分栏当前展示的页签。 */
   responseTab: "body" | "headers" | "request";
@@ -184,7 +216,7 @@ export interface Tab {
   /** 响应体搜索词。 */
   search: string;
   /** 请求编辑区的当前子页签。 */
-  requestTab: "params" | "headers" | "body" | "auth" | "options";
+  requestTab: "params" | "headers" | "body" | "auth" | "options" | "script";
 }
 
 export interface HistoryEntry {

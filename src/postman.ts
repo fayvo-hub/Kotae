@@ -69,6 +69,44 @@ interface PMItem {
   name?: unknown;
   item?: unknown;
   request?: unknown;
+  /** Postman 把脚本挂在 item 上：prerequest 是前置，test 是后置。 */
+  event?: unknown;
+}
+
+/** 把 Postman 的 script.exec（字符串数组或单字符串）拼回多行代码。 */
+function scriptSource(exec: unknown): string {
+  if (typeof exec === "string") return exec;
+  return arrayOf(exec)
+    .map((line) => asString(line))
+    .join("\n")
+    .replace(/[ \t]+$/, "");
+}
+
+/**
+ * 导入脚本：默认标成「未信任」，界面上要点一次「信任并启用」才会执行。
+ * 一个 Collection 往往是别人发来的，脚本内容不该在没有任何提示的情况下跑起来。
+ */
+function applyScript(req: ApiRequest, raw: unknown, warnings: string[]): void {
+  const events = arrayOf(raw).filter(isObject) as Record<string, unknown>[];
+  if (events.length === 0) return;
+  let pre = "";
+  let post = "";
+  for (const event of events) {
+    const listen = asString(event.listen).toLowerCase();
+    const script = isObject(event.script) ? (event.script as Record<string, unknown>) : {};
+    const source = scriptSource(script.exec);
+    if (!source.trim()) continue;
+    if (listen === "prerequest") pre = pre ? `${pre}
+
+${source}` : source;
+    else if (listen === "test" || listen === "postresponse") post = post ? `${post}
+
+${source}` : source;
+    else if (listen) warnings.push(`脚本事件 ${listen} 暂不支持，已跳过`);
+  }
+  if (!pre && !post) return;
+  req.script = { pre, post, trusted: false };
+  warnings.push("脚本已导入但默认不执行，在「脚本」页签点「信任并启用」后才会运行");
 }
 
 function keyValList(raw: unknown): PMKeyVal[] {
@@ -212,7 +250,9 @@ function walkPMItems(items: unknown, warnings: string[]): TreeNode[] {
       continue;
     }
     if (item.request !== undefined) {
-      nodes.push({ id: uid("req"), type: "request", name, request: requestFromPM(item.request, warnings) });
+      const request = requestFromPM(item.request, warnings);
+      applyScript(request, item.event, warnings);
+      nodes.push({ id: uid("req"), type: "request", name, request });
     }
   }
   return nodes;
@@ -417,13 +457,34 @@ function toPMRequest(req: ApiRequest): Record<string, unknown> {
   return out;
 }
 
+/** 导出脚本：prerequest / test 两个事件，exec 按行拆开（Postman 的存储格式）。 */
+function toPMEvents(req: ApiRequest): Record<string, unknown>[] | undefined {
+  const script = req.script;
+  if (!script) return undefined;
+  const events: Record<string, unknown>[] = [];
+  for (const [listen, source] of [
+    ["prerequest", script.pre],
+    ["test", script.post],
+  ] as const) {
+    if (!source.trim()) continue;
+    events.push({
+      listen,
+      script: { type: "text/javascript", exec: source.split("\n") },
+    });
+  }
+  return events.length > 0 ? events : undefined;
+}
+
 function toPMItems(nodes: TreeNode[], prefix: string): Record<string, unknown>[] {
   return nodes.map((node, i) => {
     const name = node.name || `${prefix}${i + 1}`;
     if (node.type === "folder") {
       return { name, item: toPMItems(node.items, `${name} / `) };
     }
-    return { name, request: toPMRequest(node.request) };
+    const out: Record<string, unknown> = { name, request: toPMRequest(node.request) };
+    const event = toPMEvents(node.request);
+    if (event) out.event = event;
+    return out;
   });
 }
 

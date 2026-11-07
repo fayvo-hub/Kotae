@@ -250,6 +250,7 @@ function tabStrip(tab: Tab): HTMLElement {
     headers: tab.request.headers.filter((h) => h.enabled && h.key).length,
     body: 0,
     auth: tab.request.auth.type === "none" ? 0 : 1,
+    script: tab.request.script?.pre.trim() || tab.request.script?.post.trim() ? 1 : 0,
     options: 0,
   };
   const defs: { key: Tab["requestTab"]; label: string; icon: keyof typeof icons }[] = [
@@ -257,6 +258,7 @@ function tabStrip(tab: Tab): HTMLElement {
     { key: "headers", label: "请求头", icon: "table" },
     { key: "body", label: "请求体", icon: "terminal" },
     { key: "auth", label: "认证", icon: "lock" },
+    { key: "script", label: "脚本", icon: "code" },
     { key: "options", label: "选项", icon: "sliders" },
   ];
   for (const def of defs) {
@@ -279,6 +281,140 @@ function tabStrip(tab: Tab): HTMLElement {
   return strip;
 }
 
+/** 脚本编辑块：一块标题 + 一个等宽文本域。 */
+function scriptBlock(
+  tab: Tab,
+  phase: "pre" | "post",
+  title: string,
+  hint: string,
+  placeholder: string,
+): HTMLElement {
+  const script = tab.request.script ?? { pre: "", post: "", trusted: true };
+  const box = el("section", { class: "script-block" });
+  const head = el("div", { class: "script-block-head" });
+  head.append(
+    el("span", { class: "script-block-title", text: title }),
+    el("span", { class: "script-block-hint", text: hint }),
+  );
+  const area = el("textarea", {
+    class: "code-input script-input",
+    attr: { spellcheck: "false", placeholder, "aria-label": title, "data-phase": phase },
+    on: {
+      input: () => {
+        const value = area.value;
+        mutate((r) => {
+          r.script = { ...(r.script ?? { pre: "", post: "", trusted: true }), [phase]: value };
+        });
+      },
+    },
+  });
+  area.value = phase === "pre" ? script.pre : script.post;
+  box.append(head, area);
+  return box;
+}
+
+/** 脚本页一次只显示一段，前置与后置用分段控件切换，两块都塞进去会把面板压扁。 */
+let scriptPhase: "pre" | "post" = "pre";
+
+function scriptPane(tab: Tab): HTMLElement {
+  const host = el("div", { class: "pane script-pane" });
+  if (!tab.request.script) {
+    mutate((r) => {
+      r.script = { pre: "", post: "", trusted: true };
+    });
+  }
+  const script = tab.request.script ?? { pre: "", post: "", trusted: true };
+  const switchRow = el("div", { class: "script-switch" });
+  const modes = el("div", { class: "segmented", attr: { role: "radiogroup", "aria-label": "脚本阶段" } });
+  for (const item of [
+    { key: "pre" as const, label: "前置脚本", hint: "发送前执行", has: script.pre.trim() !== "" },
+    { key: "post" as const, label: "后置脚本", hint: "拿到响应后执行", has: script.post.trim() !== "" },
+  ]) {
+    const active = scriptPhase === item.key;
+    const btn = el("button", {
+      class: `segmented-item${active ? " active" : ""}`,
+      attr: { type: "button", role: "radio", "aria-checked": active ? "true" : "false" },
+      text: item.label,
+      on: {
+        click: () => {
+          scriptPhase = item.key;
+          window.dispatchEvent(new CustomEvent("mygo:rerender-request"));
+        },
+      },
+    });
+    if (item.has && !active) btn.append(el("span", { class: "script-dot", attr: { "aria-hidden": "true" } }));
+    modes.append(btn);
+  }
+  switchRow.append(modes);
+  host.append(
+    switchRow,
+    el("p", {
+      class: "pane-hint",
+      text:
+        scriptPhase === "pre"
+          ? "发送前执行：能改请求头、地址与请求体，适合算签名、时间戳。脚本是本地 JavaScript，单次最多 5 秒。"
+          : "拿到响应后执行：能改写响应体，适合解密、脱敏、重排。脚本是本地 JavaScript，单次最多 5 秒。",
+    }),
+  );
+  host.append(
+    scriptPhase === "pre"
+      ? scriptBlock(
+          tab,
+          "pre",
+          "前置脚本",
+          "发送前执行",
+          "加签名头，例如：pm.request.headers.upsert('X-Sign', await pm.utils.hmacSha256(pm.environment.get('secret'), pm.request.url))",
+        )
+      : scriptBlock(
+          tab,
+          "post",
+          "后置脚本",
+          "拿到响应后执行",
+          "解密响应体，例如：pm.response.setBody(pm.utils.base64Decode(pm.response.text()))",
+        ),
+  );
+  // 默认折叠：面板高度有限，先把编辑器露出来，需要查 API 时再展开。
+  const api = el("details", { class: "script-api" });
+  api.append(el("summary", { class: "script-api-title", text: "可用对象（pm.variables / pm.request / pm.response / pm.utils / console）" }));
+  const list = el("ul", { class: "script-api-list" });
+  for (const line of [
+    "pm.variables / pm.environment / pm.globals：get、set，环境会写回当前环境",
+    "pm.request.method、pm.request.url、pm.request.headers.{add,upsert,remove,get,has}",
+    "pm.request.body.raw：文本或 JSON 请求体的当前内容，可读写",
+    "pm.response.{code,status,headers,text,json,setBody}：仅后置脚本可用",
+    "pm.utils.{hmac,hmacSha256,sha256,base64Encode,base64Decode,now,uuid,randomInt,queryString}",
+    "console.log / warn / error：输出显示在响应区的「脚本」里",
+  ]) {
+    list.append(el("li", { text: line }));
+  }
+  api.append(list);
+  host.append(api);
+  if (!(tab.request.script?.trusted ?? true)) {
+    const warn = el("div", { class: "script-untrusted" });
+    warn.append(
+      el("span", {
+        text: "这段脚本随导入文件一起进来，默认不执行。确认内容后再信任。",
+      }),
+      el("button", {
+        class: "btn small danger-solid",
+        attr: { type: "button" },
+        text: "信任并启用",
+        on: {
+          click: () => {
+            mutate((r) => {
+              r.script = { ...(r.script ?? { pre: "", post: "", trusted: true }), trusted: true };
+            });
+            toast("已信任这段脚本，下次发送会执行", "success");
+            window.dispatchEvent(new CustomEvent("mygo:rerender-request"));
+          },
+        },
+      }),
+    );
+    host.append(warn);
+  }
+  return host;
+}
+
 function tabBody(tab: Tab): HTMLElement {
   const host = el("div", { class: "subtabs-body" });
   switch (tab.requestTab) {
@@ -293,6 +429,9 @@ function tabBody(tab: Tab): HTMLElement {
       break;
     case "auth":
       fill(host, authPane(tab));
+      break;
+    case "script":
+      fill(host, scriptPane(tab));
       break;
     case "options":
       fill(host, optionsPane(tab));

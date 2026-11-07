@@ -1919,6 +1919,215 @@ body.resizing-row * {
   line-height: 1.6;
 }
 
+/* ---- 脚本 ---- */
+
+.script-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 面板高度不够时让外层滚动，不要把编辑器压扁。 */
+.script-pane > * {
+  flex: 0 0 auto;
+}
+
+.script-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.script-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-left: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  vertical-align: middle;
+}
+
+.script-block {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.script-block-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.script-block-title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.script-block-hint {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.script-input {
+  min-height: 96px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  resize: vertical;
+}
+
+.script-input:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.script-block:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+
+.script-api {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.script-api-title {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-2);
+  cursor: pointer;
+  list-style: revert;
+}
+
+.script-api[open] .script-api-title {
+  margin-bottom: 6px;
+}
+
+.script-api-list {
+  margin: 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  line-height: 1.6;
+}
+
+.script-api-list li {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+.script-untrusted {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  background: var(--warn-soft);
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+
+.script-untrusted span {
+  flex: 1 1 auto;
+}
+
+.script-log {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  max-height: 140px;
+  overflow: auto;
+}
+
+.script-log-run {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 14px;
+}
+
+.script-log-run + .script-log-run {
+  border-top: 1px solid var(--border);
+}
+
+.script-log-run.has-error {
+  background: var(--bad-soft);
+}
+
+.script-log-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.script-log-phase {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.script-log-ms {
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
+
+.script-log-tag {
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--fs-2xs);
+}
+
+.script-log-error {
+  flex: 1 1 auto;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--bad);
+  word-break: break-word;
+}
+
+.script-log-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.script-log-line {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.script-log-line.warn {
+  color: var(--warn);
+}
+
+.script-log-line.error {
+  color: var(--bad);
+}
+
 .pane-toolbar {
   display: flex;
   align-items: center;

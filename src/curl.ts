@@ -3,7 +3,7 @@
 // -A/--user-agent、-e/--referer、--compressed、-k/--insecure、-L/--location、
 // --max-time、--url、--json、-G/--get、-I/--head。其余参数忽略并给出提示。
 
-import type { ApiRequest, FormField, HttpMethod, KV, RequestOptions } from "./types";
+import type { ApiRequest, FormField, HttpMethod, KV, RequestOptions, RequestScript } from "./types";
 import { METHODS } from "./types";
 import { splitURL, stripSchemeBeforeVar, uid } from "./util";
 
@@ -198,7 +198,15 @@ export function emptyRequest(url = ""): ApiRequest {
     form: [],
     auth: { type: "none", token: "", username: "", password: "", key: "", value: "", in: "header" },
     options: { timeoutMs: 30_000, redirect: "follow", keepCookies: true },
+    script: { pre: "", post: "", trusted: true },
   };
+}
+
+/** 老数据里没有 script 字段，统一在这里兜底；用户自己写的脚本默认是受信任的。 */
+export function scriptOf(request: ApiRequest): RequestScript {
+  const s = request.script;
+  if (!s) return { pre: "", post: "", trusted: true };
+  return { pre: s.pre ?? "", post: s.post ?? "", trusted: s.trusted !== false };
 }
 
 /** 深拷贝请求（结构化克隆即可，请求里没有函数）。 */
