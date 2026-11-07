@@ -169,7 +169,9 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-两个平台并行构建：`windows-latest` 跑 `mygo-cli build -platform windows/amd64`（出 exe 与 NSIS 安装包），`macos-latest` 跑 `-platform darwin/universal`（出 `.app` 与 `.dmg`），最后由 `release` job 汇总上传。没有配签名证书时构建带 `-skip-notarize`，产物能装能跑但需要用户手动放行；接入签名后去掉这个参数，并按上一节补配置。
+两个平台并行构建：`windows-latest` 跑 `mygo-cli build -platform windows/amd64`（出 exe、NSIS 安装包，并把裸 exe 改名成 `mygo-api-<版本>-portable.exe`），`macos-latest` 跑 `-platform darwin/universal`（出 `.app` 与 `.dmg`），最后由 `release` job 汇总上传。没有配签名证书时构建带 `-skip-notarize`，产物能装能跑但需要用户手动放行；接入签名后去掉这个参数，并按上一节补配置。
+
+发完整流程（版本号对齐清单、资产核对命令、重发同一版本、失败排查）见 `.agents/skills/mygo-release/SKILL.md`。
 
 ### 发布检查清单
 
@@ -178,5 +180,6 @@ git push origin v0.1.0
 3. `npm run build`，确认 `build/windows-amd64/` 里有 exe、`mygo-sqlite3.dll` 与 setup 安装包。
 4. 装一次安装包（含 `/S` 静默安装）验证快捷方式、卸载项与「数据目录保留」。
 5. 打 tag 触发发布流水线：`git tag vX.Y.Z && git push origin vX.Y.Z`；要签名/自动更新的话先按「代码签名与自动更新」补配置，并把 `release.yml` 里的 `-skip-notarize` 去掉。
+6. 等 5 分钟左右到 Release 页面确认资产齐了：setup 安装包、portable、dmg 三个都在。
 
 图标由 `scripts/make-icons.py` 生成（需要 Pillow）：`python scripts/make-icons.py` 会重写 `resources/icon.png`（1024×1024 应用图标）与 `resources/tray.png`（32×32 托盘图标），两者是同一套品牌渐变加 `>_` 字形，改配色只改脚本顶部的两个颜色常量。

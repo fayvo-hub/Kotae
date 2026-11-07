@@ -20,7 +20,7 @@ AI 代理修改本仓库时的强制规则。与 `~/.pi/agent/AGENTS.md` 冲突�
 - 提交消息用简体中文，保留 Conventional Commits 英文前缀：`feat:` / `fix:` / `docs:` / `test:` / `chore:` / `refactor:`
 - 提交前必须跑完「验证」一节里对应的命令，绿了才提交
 - 只 `git add` 本次任务实际改动的文件（可点名路径），**不用** `git add .` / `git add -A`；`dist/`、`build/`、`.mygo/`、`e2e/artifacts/` 永不入库
-- 不 `push`（本机新建仓库，无 remote）；不 `--no-verify`；不 amend/rebase 已提交的 commit；不改写历史
+- 不 `push`；不 `--no-verify`；不 amend/rebase 已提交的 commit；不改写历史。**例外**：发版流程需要推送 `main` 与标签，按 `.agents/skills/mygo-release/SKILL.md` 执行，且只在用户要求发版时
 - 工作区里有**不是本次任务**产生的改动时，先问再动，不要把别人的半成品裹进提交
 
 ## 动手之前
@@ -82,6 +82,7 @@ AI 代理修改本仓库时的强制规则。与 `~/.pi/agent/AGENTS.md` 冲突�
 - 图标与托盘图标的唯一来源是 `scripts/make-icons.py`：改设计就改脚本再 `python scripts/make-icons.py`，不要手改 `resources/icon.png` / `resources/tray.png`（两处尺寸与视觉要一致）
 - 本机没有 Bun：`devCommand` / `buildCommand` 走 `npm`，不要改回 `bun`
 - Windows 上做过安装/卸载实测：静默安装 `/S`、安装目录 `%LOCALAPPDATA%\Programs\MyGoAPI`、卸载**不会**删 `%APPDATA%\MyGo API`。手动跑真实二进制/安装包验证后，自己产生的 `%APPDATA%\MyGo API` 与 `%APPDATA%\mygo-api Dev` 必须清理干净
+- 发版（版本对齐、闸门、打标签、资产核对、重发与排查）走 `.agents/skills/mygo-release/SKILL.md`，不要在对话里临时拼命令
 
 ## 禁止清单
 
