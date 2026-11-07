@@ -690,7 +690,9 @@ export async function send(): Promise<void> {
     notifyIfBackground(record);
   } catch (err) {
     const current = state.tabs.find((t) => t.id === tab.id);
-    const record = errorRecord(err, performance.now() - started, timedOut);
+    // 用户点「取消」时 Go 侧回的是 context canceled 一类文本，靠关键字判断会漏，
+    // 这里直接看我们自己那个 controller 有没有被 abort。
+    const record = errorRecord(err, performance.now() - started, timedOut, controller.signal.aborted);
     if (current) {
       current.response = record;
       current.sending = false;
@@ -848,11 +850,16 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(s);
 }
 
-function errorRecord(err: unknown, durationMs: number, timedOut: boolean): ResponseRecord {
+function errorRecord(
+  err: unknown,
+  durationMs: number,
+  timedOut: boolean,
+  aborted = false,
+): ResponseRecord {
   const raw = errText(err);
   const kind = timedOut
     ? "timeout"
-    : raw.toLowerCase().includes("abort")
+    : aborted || raw.toLowerCase().includes("abort")
       ? "aborted"
       : raw.toLowerCase().includes("fetch failed")
         ? "network"

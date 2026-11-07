@@ -367,3 +367,24 @@ func TestEnvDialogButtons(t *testing.T) {
 	h.wait(t, "环境已删除", fmt.Sprintf(`document.querySelectorAll('.env-item').length === %d`, before))
 	h.clearOverlays(t)
 }
+
+// 发送中的「取消」按钮：点下去要真的中断请求，页面给出取消提示，而不是等超时。
+// （系统文件对话框那类按钮——保存为文件、导出/导入备份——自动化点不到，这里不覆盖。）
+func TestCancelSendButton(t *testing.T) {
+	h.clearOverlays(t)
+	typeURL(t, "{{baseUrl}}/slow?ms=3000")
+	h.eval(t, `(() => {
+		document.querySelector('.url-input').dispatchEvent(new Event('blur', { bubbles: true }));
+		const send = [...document.querySelectorAll('button')].find(b => b.textContent.includes('发送'));
+		if (!send) throw new Error('找不到发送按钮');
+		send.click();
+		return true;
+	})()`, nil)
+	h.wait(t, "出现取消按钮", `[...document.querySelectorAll('button')].some(b => b.textContent.includes('取消'))`)
+	h.eval(t, `(() => {
+		const cancel = [...document.querySelectorAll('button')].find(b => b.textContent.includes('取消'));
+		cancel.click();
+		return true;
+	})()`, nil)
+	h.wait(t, "请求已取消", `document.body.textContent.includes('请求已取消')`)
+}
