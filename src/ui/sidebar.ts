@@ -4,6 +4,7 @@ import { el, fill, icon, iconButton, icons } from "./dom";
 import {
   activeTab,
   clearHistory,
+  copyText,
   createCollection,
   createFolder,
   deleteCollection,
@@ -19,6 +20,7 @@ import {
   persist,
   renameCollection,
   renameNode,
+  resolveText,
   state,
   toast,
   toggleFolder,
@@ -26,7 +28,8 @@ import {
   toggleUI,
   type DropMode,
 } from "../store";
-import { emptyRequest } from "../curl";
+import { emptyRequest, toCurl } from "../curl";
+import { openContextMenu } from "./menu";
 import { System } from "../mygo";
 import { askConfirm, askText } from "./prompt";
 import { formatDuration, formatRelative, methodTone } from "../util";
@@ -167,7 +170,8 @@ function collectionNode(col: Collection, filter: string): HTMLElement | null {
   const box = el("div", { class: "tree-group" });
   const row = el("div", { class: "tree-row folder-row root", data: { kind: "collection" } });
   const twisty = el("span", { class: "twisty", html: icon("chevronDown").innerHTML });
-  row.append(twisty, icon("collection", "tree-icon"), el("span", { class: "tree-label", text: col.name }));
+  const label = el("span", { class: "tree-label", text: col.name });
+  row.append(twisty, icon("collection", "tree-icon"), label);
   const count = countRequests(col.items);
   row.append(el("span", { class: "tree-count", text: String(count) }));
   row.append(
@@ -177,9 +181,7 @@ function collectionNode(col: Collection, filter: string): HTMLElement | null {
         toast("已新建请求，编辑后按 Ctrl+S 保存到集合", "info");
       } },
       { icon: "folder", title: "新建文件夹", run: () => createFolder(col.id) },
-      { icon: "settings", title: "重命名集合", run: () => {
-        void renameCollectionPrompt(col.id, col.name);
-      } },
+      { icon: "settings", title: "重命名集合", run: () => inlineRename(label, col.name, (name) => renameCollection(col.id, name)) },
       { icon: "trash", title: "删除集合", run: () => {
         void removeCollection(col.id, col.name, count);
       } },
@@ -213,9 +215,17 @@ function collectionNode(col: Collection, filter: string): HTMLElement | null {
     if (last) moveTreeNode(src, { collectionId: col.id, nodeId: last.id, mode: "after" });
   });
   row.addEventListener("click", () => {
+    if (renaming) return;
     children.classList.toggle("collapsed");
     twisty.classList.toggle("collapsed");
   });
+  row.addEventListener("dblclick", (ev) => {
+    ev.stopPropagation();
+    inlineRename(label, col.name, (name) => renameCollection(col.id, name));
+  });
+  row.addEventListener("contextmenu", (ev) =>
+    openCollectionMenu(ev, col, label, count),
+  );
 
   box.append(row, children);
   return box;
@@ -322,6 +332,123 @@ function hoverActions(actions: { icon: keyof typeof icons; title: string; run: (
   return [wrap];
 }
 
+// ---- 就地重命名 ----
+// 双击或右键「重命名」后，名字直接在树上变成输入框（Enter 确认、Esc 或空名字取消），
+// 比弹对话框顺手，也避免名称改完才发现改错行。
+
+let renaming = false;
+
+function inlineRename(label: HTMLElement, current: string, commit: (name: string) => void): void {
+  if (renaming || !label.parentElement) return;
+  renaming = true;
+  let done = false;
+  const input = el("input", {
+    class: "tree-rename",
+    attr: { type: "text", spellcheck: "false", "aria-label": "名称" },
+  });
+  input.value = current;
+
+  const finish = (save: boolean): void => {
+    if (done) return;
+    done = true;
+    const value = input.value.trim();
+    input.replaceWith(label);
+    renaming = false;
+    if (save && value && value !== current) commit(value);
+  };
+
+  input.addEventListener("keydown", (ev) => {
+    ev.stopPropagation();
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      finish(true);
+    } else if (ev.key === "Escape") {
+      ev.preventDefault();
+      finish(false);
+    }
+  });
+  // 点到别处就按确认处理（和资源管理器一致）；文本框抢走的点击不要再冒泡到行上。
+  input.addEventListener("blur", () => finish(true));
+  for (const type of ["click", "dblclick", "mousedown"] as const) {
+    input.addEventListener(type, (ev) => ev.stopPropagation());
+  }
+
+  label.replaceWith(input);
+  input.focus();
+  input.select();
+}
+
+function newRequestIn(collectionId: string): void {
+  openTab(emptyRequest(), "新请求", { collectionId, nodeId: "" });
+  toast("已新建请求，编辑后按 Ctrl+S 保存到集合", "info");
+}
+
+function renameFolder(collectionId: string, nodeId: string, name: string): void {
+  renameNode(collectionId, nodeId, name);
+}
+
+function openCollectionMenu(ev: MouseEvent, col: Collection, label: HTMLElement, count: number): void {
+  openContextMenu(ev, [
+    { label: "新建请求", run: () => newRequestIn(col.id) },
+    { label: "新建文件夹", run: () => createFolder(col.id) },
+    {
+      label: "重命名",
+      hint: "双击",
+      run: () => inlineRename(label, col.name, (name) => renameCollection(col.id, name)),
+    },
+    { label: "删除集合", danger: true, run: () => void removeCollection(col.id, col.name, count) },
+  ]);
+}
+
+function openFolderMenu(
+  ev: MouseEvent,
+  collectionId: string,
+  folder: FolderNode,
+  label: HTMLElement,
+): void {
+  openContextMenu(ev, [
+    { label: "新建请求", run: () => newRequestIn(collectionId) },
+    { label: "新建子文件夹", run: () => createFolder(collectionId, folder.id) },
+    {
+      label: "重命名",
+      hint: "双击",
+      run: () => inlineRename(label, folder.name, (name) => renameFolder(collectionId, folder.id, name)),
+    },
+    { label: "复制文件夹", run: () => duplicateNode(collectionId, folder.id) },
+    {
+      label: "删除文件夹",
+      danger: true,
+      run: () => void removeFolder(collectionId, folder.id, folder.name),
+    },
+  ]);
+}
+
+function openRequestMenu(
+  ev: MouseEvent,
+  collectionId: string,
+  node: TreeNode,
+  label: HTMLElement,
+  rename: () => void,
+): void {
+  openContextMenu(ev, [
+    { label: "打开", run: () => openNode(collectionId, node.id) },
+    { label: "重命名", hint: "双击", run: rename },
+    { label: "复制请求", run: () => duplicateNode(collectionId, node.id) },
+    {
+      label: "复制为 cURL",
+      run: () => {
+        if (node.type !== "request") return;
+        void copyText(toCurl(node.request, { resolve: resolveText }), "已复制 cURL 命令");
+      },
+    },
+    {
+      label: "删除请求",
+      danger: true,
+      run: () => void removeRequest(collectionId, node.id, node.name),
+    },
+  ]);
+}
+
 function treeItem(collectionId: string, node: TreeNode, depth: number, filter: string): HTMLElement {
   const wrap = el("div", { class: "tree-item" });
   const row = el("div", {
@@ -332,11 +459,14 @@ function treeItem(collectionId: string, node: TreeNode, depth: number, filter: s
   if (node.type === "folder") {
     const folder = node as FolderNode;
     const twisty = el("span", { class: `twisty${folder.open ? "" : " collapsed"}`, html: icon("chevron").innerHTML });
-    row.append(twisty, icon("folder", "tree-icon"), el("span", { class: "tree-label", text: folder.name }));
+    const label = el("span", { class: "tree-label", text: folder.name });
+    row.append(twisty, icon("folder", "tree-icon"), label);
+    const rename = (): void => inlineRename(label, folder.name, (name) => renameFolder(collectionId, folder.id, name));
     row.append(
       ...hoverActions([
-        { icon: "plus", title: "新建请求", run: () => { openTab(emptyRequest(), "新请求", { collectionId, nodeId: "" }); } },
+        { icon: "plus", title: "新建请求", run: () => newRequestIn(collectionId) },
         { icon: "folder", title: "新建子文件夹", run: () => createFolder(collectionId, folder.id) },
+        { icon: "settings", title: "重命名文件夹", run: rename },
         { icon: "copy", title: "复制文件夹", run: () => duplicateNode(collectionId, folder.id) },
         { icon: "trash", title: "删除文件夹", run: () => {
           void removeFolder(collectionId, folder.id, folder.name);
@@ -346,7 +476,15 @@ function treeItem(collectionId: string, node: TreeNode, depth: number, filter: s
     const children = el("div", { class: `tree-children${folder.open ? "" : " collapsed"}` });
     for (const child of folder.items) children.append(treeItem(collectionId, child, depth + 1, filter));
     attachDrag(row, collectionId, folder);
-    row.addEventListener("click", () => toggleFolder(collectionId, folder.id));
+    row.addEventListener("click", () => {
+      if (renaming) return;
+      toggleFolder(collectionId, folder.id);
+    });
+    row.addEventListener("dblclick", (ev) => {
+      ev.stopPropagation();
+      rename();
+    });
+    row.addEventListener("contextmenu", (ev) => openFolderMenu(ev, collectionId, folder, label));
     wrap.append(row, children);
     return wrap;
   }
@@ -358,25 +496,30 @@ function treeItem(collectionId: string, node: TreeNode, depth: number, filter: s
   row.dataset.nodeId = node.id;
   row.dataset.collectionId = collectionId;
   const tone = methodTone(node.request.method);
+  const label = el("span", { class: "tree-label", text: node.name });
+  const rename = (): void => inlineRename(label, node.name, (name) => renameNode(collectionId, node.id, name));
   row.append(
     el("span", { class: "twisty-space" }),
     el("span", { class: `method-tag tone-${tone}`, text: node.request.method }),
-    el("span", { class: "tree-label", text: node.name }),
+    label,
     ...hoverActions([
       { icon: "copy", title: "复制请求", run: () => duplicateNode(collectionId, node.id) },
-      { icon: "settings", title: "重命名", run: () => {
-        void renameRequestPrompt(collectionId, node.id, node.name);
-      } },
+      { icon: "settings", title: "重命名", run: rename }, 
       { icon: "trash", title: "删除请求", run: () => {
         void removeRequest(collectionId, node.id, node.name);
       } },
     ]),
   );
   attachDrag(row, collectionId, node);
-  row.addEventListener("click", () => openNode(collectionId, node.id));
-  row.addEventListener("dblclick", () => {
-    void renameRequestPrompt(collectionId, node.id, node.name);
+  row.addEventListener("click", () => {
+    if (renaming) return;
+    openNode(collectionId, node.id);
   });
+  row.addEventListener("dblclick", (ev) => {
+    ev.stopPropagation();
+    rename();
+  });
+  row.addEventListener("contextmenu", (ev) => openRequestMenu(ev, collectionId, node, label, rename));
   wrap.append(row);
   return wrap;
 }
@@ -487,11 +630,6 @@ export function promptNewCollection(): void {
   })();
 }
 
-async function renameCollectionPrompt(id: string, current: string): Promise<void> {
-  const name = await askText({ title: "重命名集合", label: "名称", value: current });
-  if (name) renameCollection(id, name);
-}
-
 async function removeCollection(id: string, name: string, count: number): Promise<void> {
   const ok = await askConfirm({
     title: "删除集合",
@@ -501,15 +639,6 @@ async function removeCollection(id: string, name: string, count: number): Promis
     danger: true,
   });
   if (ok) deleteCollection(id);
-}
-
-async function renameRequestPrompt(
-  collectionId: string,
-  nodeId: string,
-  current: string,
-): Promise<void> {
-  const name = await askText({ title: "重命名请求", label: "名称", value: current });
-  if (name) renameNode(collectionId, nodeId, name);
 }
 
 async function removeRequest(collectionId: string, nodeId: string, name: string): Promise<void> {

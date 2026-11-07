@@ -375,6 +375,13 @@ func (hb *harness) clearOverlays(t *testing.T) {
 			hb.pressKeys(t, "Escape", false, false)
 		}
 	}
+	// 清掉残留的右键菜单与就地重命名框，免得后续用例点不到底层控件。
+	hb.eval(t, `(() => {
+  document.querySelectorAll('.ctx-menu').forEach(el => el.remove());
+  const box = document.querySelector('.tree-rename');
+  if (box) box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  return true;
+})()`, nil)
 	// 侧边栏切回「集合」：用例若停在「历史」面板，后面的用例全都在历史列表里找请求，
 	// 报「侧边栏里没有名为 XX 的请求」这种看起来毫不相干的错。
 	hb.eval(t, `(() => {

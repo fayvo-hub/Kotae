@@ -1332,6 +1332,21 @@ body.resizing-row * {
   font-size: var(--fs-md);
 }
 
+/* 就地重命名：输入框直接顶替名字，尺寸跟名字一致，行高不跳。 */
+.tree-rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 21px;
+  padding: 0 5px;
+  font-family: inherit;
+  font-size: var(--fs-md);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-xs);
+  outline: none;
+}
+
 .tree-count {
   font-family: var(--mono);
   font-size: var(--fs-2xs);

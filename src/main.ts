@@ -22,6 +22,7 @@ import {
 } from "./ui/overlays";
 import { emptyRequest, parseCurl } from "./curl";
 import { methodTone } from "./util";
+import { closeContextMenu, openContextMenu } from "./ui/menu";
 import {
   DEFAULT_RESPONSE_HEIGHT,
   DEFAULT_SIDEBAR_WIDTH,
@@ -523,48 +524,15 @@ function tabItem(tab: Tab): HTMLElement {
   return item;
 }
 
-let tabMenu: HTMLElement | null = null;
-
-function closeTabMenu(): void {
-  tabMenu?.remove();
-  tabMenu = null;
-}
-
 /** 标签页右键菜单：刷新（重发当前请求）、关闭、关闭其他、关闭全部。 */
 function openTabContextMenu(ev: MouseEvent, tab: Tab): void {
-  closeTabMenu();
-  closeEnvMenu();
   setActiveTab(tab.id);
-
-  const menu = el("div", { class: "env-menu ctx-menu", attr: { role: "menu" } });
-  const item = (label: string, hint: string, run: () => void, danger = false): HTMLElement => {
-    const btn = el("button", {
-      class: `env-menu-item${danger ? " danger" : ""}`,
-      attr: { type: "button", role: "menuitem" },
-      on: {
-        click: () => {
-          closeTabMenu();
-          run();
-        },
-      },
-    });
-    btn.append(el("span", { class: "env-menu-name", text: label }));
-    if (hint) btn.append(el("span", { class: "env-menu-key", text: hint }));
-    return btn;
-  };
-
-  menu.append(
-    item("刷新", "Ctrl+Enter", () => void send()),
-    item("关闭", "Ctrl+W", () => closeTab(tab.id)),
-    item("关闭其他", "", () => closeOtherTabs(tab.id)),
-    item("关闭全部", "", () => closeAllTabs(), true),
-  );
-
-  document.body.append(menu);
-  const box = menu.getBoundingClientRect();
-  menu.style.left = `${Math.max(8, Math.min(ev.clientX, window.innerWidth - box.width - 8))}px`;
-  menu.style.top = `${Math.max(8, Math.min(ev.clientY, window.innerHeight - box.height - 8))}px`;
-  tabMenu = menu;
+  openContextMenu(ev, [
+    { label: "刷新", hint: "Ctrl+Enter", run: () => void send() },
+    { label: "关闭", hint: "Ctrl+W", run: () => closeTab(tab.id) },
+    { label: "关闭其他", run: () => closeOtherTabs(tab.id) },
+    { label: "关闭全部", run: () => closeAllTabs(), danger: true },
+  ]);
 }
 
 function renderRequest(): void {
@@ -874,16 +842,20 @@ function bindEvents(): void {
 
   window.addEventListener("keydown", onKeydown);
 
+  // 右键菜单/环境下拉/浮层之间互斥：菜单打开时先收起其他浮层。
+  window.addEventListener("mygo:close-popovers", () => {
+    closeContextMenu();
+    closeEnvMenu();
+  });
+
   // 环境下拉与标签页右键菜单点外面就收起来（和系统菜单一致的手感）。
   document.addEventListener("click", (ev) => {
     const target = ev.target as Element | null;
-    if (tabMenu && !target?.closest(".ctx-menu")) closeTabMenu();
     if (!envMenuOpen) return;
     if (target?.closest(".env-pill")) return;
     closeEnvMenu();
   });
-  document.addEventListener("scroll", () => closeTabMenu(), true);
-  window.addEventListener("resize", () => closeTabMenu());
+  // 右键菜单收起由 ui/menu.ts 统一处理，这里只管环境下拉。
 }
 
 function onKeydown(ev: KeyboardEvent): void {
@@ -902,10 +874,6 @@ function onKeydown(ev: KeyboardEvent): void {
   }
   if (!mod) {
     if (ev.key === "Escape") {
-      if (tabMenu) {
-        closeTabMenu();
-        return;
-      }
       if (envMenuOpen) {
         closeEnvMenu();
         return;
