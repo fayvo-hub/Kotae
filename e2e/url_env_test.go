@@ -57,6 +57,22 @@ func blurURL(t *testing.T) {
 	time.Sleep(120 * time.Millisecond)
 }
 
+// typeURL 在一个 eval 里写完地址并提交（输入 + blur）。
+// 分两次 RPC 做会偶发丢掉编辑：中间若插入一次重渲染，地址栏被换成 store 的空值，
+// 随后读到的就是空串，发送时提示「请先填写请求地址」。
+func typeURL(t *testing.T, value string) {
+	t.Helper()
+	h.eval(t, fmt.Sprintf(`(() => {
+		const i = document.querySelector('.url-input');
+		i.focus();
+		i.value = %s;
+		i.dispatchEvent(new Event('input', { bubbles: true }));
+		i.dispatchEvent(new Event('blur'));
+		return i.value;
+	})()`, jsString(value)), nil)
+	time.Sleep(120 * time.Millisecond)
+}
+
 // newTab 开一个干净标签页并返回。
 func newTab(t *testing.T) {
 	t.Helper()

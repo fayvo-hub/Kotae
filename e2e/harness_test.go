@@ -407,40 +407,52 @@ func (hb *harness) openRequest(t *testing.T, name string) {
 	hb.wait(t, "请求成为当前标签", fmt.Sprintf(`[...document.querySelectorAll('.tab.active .tab-name')].some(el => (el.textContent || '').trim() === %s)`, jsString(name)))
 }
 
-// send 点发送并等这一次请求结束。最可靠的信号是发送按钮先进入「取消」再复原；
-// 桩服务几十毫秒就返回，观察不到「取消」时退化为「状态条变了之后再等一小会」。
+// send 点发送并等这一次请求结束。
+//
+// 可靠的终点是「响应状态条重新出现」：发送期间响应区被「正在发送请求…」占位替换，
+// `.status-num` 会先消失、结束后再出现。只靠「取消」按钮不行——桩服务几毫秒就返回，
+// 轮询常常错过那一帧；只看状态条文本变化也不行——发送中它变空，容易被误判成已完成。
 func (hb *harness) send(t *testing.T) {
 	t.Helper()
-	before := hb.text(t, ".status-bar")
+	beforeNum := hb.text(t, ".status-num")
+	beforeToasts := hb.text(t, ".toasts")
 	hb.click(t, ".send-btn")
 	start := time.Now()
 	started := false
-	var changedAt time.Time
 	for {
+		status := hb.text(t, ".status-num")
+		bar := hb.text(t, ".status-bar")
 		sending := strings.Contains(hb.text(t, ".send-btn"), "取消")
 		if sending {
 			started = true
 		}
-		after := hb.text(t, ".status-bar")
 		if started && !sending {
+			time.Sleep(60 * time.Millisecond)
 			return
 		}
-		if !started && after != before && changedAt.IsZero() {
-			changedAt = time.Now()
+		if status != "" && !sending {
+			// 未进入发送态就看到了响应：要么本轮极快（可能不到一帧），
+			// 要么结果和上一轮完全相同（同一状态码、同一耗时）。
+			// 两种情况都只要给渲染留一点时间就够了。
+			if !started && time.Since(start) > 300*time.Millisecond {
+				return
+			}
 		}
-		if !changedAt.IsZero() && time.Since(changedAt) > 350*time.Millisecond {
-			return
+		// 被前置校验拦下（未定义变量等）时不会有响应，只会新增一条提示。
+		// 必须比对发送前的提示：上一个用例残留的 toast 会直接把这里骗过去。
+		if !started && !sending && status == "" && time.Since(start) > 300*time.Millisecond {
+			toasts := hb.text(t, ".toasts")
+			if toasts != "" && toasts != beforeToasts {
+				t.Logf("发送被拦下，提示：%s", toasts)
+				return
+			}
 		}
-		if changedAt.IsZero() && !started && time.Since(start) > 1200*time.Millisecond {
-			// 请求被前置校验拦下（如未定义变量）：不会进入发送态，状态条也不变。
-			return
-		}
-		if time.Since(start) > 25*time.Second {
+		if time.Since(start) > 20*time.Second {
 			var url, toasts, scene string
 			hb.eval(t, `(document.querySelector('.url-input') || {}).value || ''`, &url)
 			hb.eval(t, `[...document.querySelectorAll('.toast')].map(n => n.textContent).join(' | ')`, &toasts)
-			hb.eval(t, `JSON.stringify({body: document.body.innerHTML.length, btn: (document.querySelector('.send-btn')||{}).textContent || '', errs: window.__zz || []})`, &scene)
-			t.Fatalf("等请求结束超时\n地址：%s\n状态栏：%s\n提示：%s\n现场：%s\n应用日志：\n%s", url, after, toasts, scene, hb.appLog())
+			hb.eval(t, `JSON.stringify({body: document.body.innerHTML.length, btn: (document.querySelector('.send-btn')||{}).textContent || ''})`, &scene)
+			t.Fatalf("等请求结束超时\n地址：%s\n状态栏：%s\n提示：%s\n上一步状态码：%s\n现场：%s\n应用日志：\n%s", url, bar, toasts, beforeNum, scene, hb.appLog())
 		}
 		time.Sleep(30 * time.Millisecond)
 	}

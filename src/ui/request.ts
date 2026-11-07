@@ -132,11 +132,13 @@ function urlBar(tab: Tab): HTMLElement {
       },
       // 失焦只存原样输入：不自动补协议，也不改写用户写的变量模板。
       // 协议在发送时按解析后的地址兜底（见 util.ensureScheme）。
+      // 必须写回自己的标签：切换标签时旧输入框被移除也会触发一次 blur，
+      // 那时 activeTab 已经是新标签了。
       scroll: () => syncHighlightScroll(),
       blur: () => {
         const raw = urlInput.value;
         if (!raw.trim()) return;
-        applyURL(raw);
+        applyURL(raw, tab.id);
         setUrlInvalid(urlInput, false);
       },
     },

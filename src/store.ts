@@ -416,9 +416,15 @@ export function mutate(mutator: (r: ApiRequest, t: Tab) => void): void {
   emit();
 }
 
-/** 把粘贴进来的 URL 拆成基础地址与查询参数。 */
-export function applyURL(raw: string): void {
-  const tab = activeTab();
+/**
+ * 把粘贴进来的 URL 拆成基础地址与查询参数。
+ *
+ * `tabId` 用于「面板已经被替换」的场景：元素从 DOM 移除时浏览器仍会派发一次
+ * blur，此时当前标签已经是另一个请求，按 activeTab 写回会把上一个请求的地址
+ * 串到新标签上。传入自己的 tab id 才能写对地方。
+ */
+export function applyURL(raw: string, tabId?: string): void {
+  const tab = tabId ? state.tabs.find((t) => t.id === tabId) : activeTab();
   if (!tab) return;
   const { base, params } = splitURL(raw.trim());
   tab.request.url = base;

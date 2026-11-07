@@ -35,8 +35,7 @@ func TestPreScriptSignsRequest(t *testing.T) {
 		`console.log("已签名 ts=" + ts);`,
 	}, "\n")
 	h.typeInto(t, `.script-input[data-phase="pre"]`, script)
-	h.typeInto(t, ".url-input", "{{baseUrl}}/signed")
-	blurURL(t)
+	typeURL(t, "{{baseUrl}}/signed")
 	h.send(t)
 
 	if got := h.status(t); got != "200" {
@@ -59,8 +58,7 @@ func TestPostScriptRewritesBody(t *testing.T) {
 	openScriptPane(t, "post")
 
 	h.typeInto(t, `.script-input[data-phase="post"]`, `pm.response.setBody(pm.utils.base64Decode(pm.response.text()));`)
-	h.typeInto(t, ".url-input", "{{baseUrl}}/b64")
-	blurURL(t)
+	typeURL(t, "{{baseUrl}}/b64")
 	h.send(t)
 
 	if got := h.status(t); got != "200" {
