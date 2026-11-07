@@ -44,6 +44,21 @@ jobs:
       # SmartScreen 提示、macOS 需要右键「打开」。要正式签名按 README「发布与签名」补配置。
       - name: 打包安装包
         run: npx mygo-cli build -platform ${{ matrix.platform }} -skip-notarize
+      # 裸 exe 默认叫「MyGo API.exe」，上传到 Release 会被空格变成点，不好看也不好写文档；
+      # 复制一份带版本号的便携版名字，和安装包一起发。
+      - name: 整理便携版
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $config = Get-Content mygo.config.ts -Raw
+          $version = [regex]::Match($config, 'version:\s*"([^"]+)"').Groups[1].Value
+          if (-not $version) { throw 'mygo.config.ts 里没读到 version' }
+          $exe = Get-ChildItem build -Recurse -Filter '*.exe' | Where-Object { $_.Name -notlike '*setup*' } | Select-Object -First 1
+          if (-not $exe) { throw '没有找到可执行文件' }
+          $target = Join-Path $exe.Directory "mygo-api-$version-portable.exe"
+          Copy-Item $exe.FullName $target -Force
+          Remove-Item $exe.FullName -Force
+          Write-Host "便携版：$target"
       - name: 收集产物
         uses: actions/upload-artifact@v4
         with:
@@ -65,6 +80,14 @@ jobs:
           merge-multiple: true
       - name: 列出待发布文件
         run: ls -lh dist-assets
+      # 重新发同一个 tag 时先删掉旧 Release，避免残留上一个版本命名方式的资产。
+      - name: 清理同名 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}-build{1}', '0.1.0', github.run_number) }}"
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || echo "没有同名 Release"
+          git tag -d "$tag" 2>/dev/null || true
       - uses: softprops/action-gh-release@v2
         with:
           name: MyGo API ${{ github.ref_name }}
@@ -76,7 +99,7 @@ jobs:
           body: |
             ## 下载
 
-            - Windows：`mygo-api-setup-*.exe`（NSIS 安装包，装到 `%LOCALAPPDATA%\Programs\MyGoAPI`）
+            - Windows：`mygo-api-setup-*.exe`（NSIS 安装包，装到 `%LOCALAPPDATA%\Programs\MyGoAPI`）、`mygo-api-*-portable.exe`（免安装单文件）
             - macOS：`mygo-api-*.dmg`（未签名，首次打开请右键 →「打开」）
 
             ## 说明

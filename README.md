@@ -16,7 +16,8 @@
 | 平台 | 产物 | 说明 |
 | --- | --- | --- |
 | Windows 10/11 | `mygo-api-setup-<版本>-amd64.exe` | 按用户安装到 `%LOCALAPPDATA%\Programs\MyGoAPI`，不需要管理员权限；需要 WebView2（Win11 自带） |
-| macOS 12+ | `mygo-api-<版本>-universal.dmg` | Apple Silicon 与 Intel 通用；未做代码签名，首次打开请右键 →「打开」 |
+| Windows 免安装 | `mygo-api-<版本>-portable.exe` | 单文件双击即用，适合放 U 盘或临时机器 |
+| macOS 12+ | `mygo-api-<版本>.dmg` | Apple Silicon 与 Intel 通用；未做代码签名，首次打开请右键 →「打开」 |
 
 安装包没有代码签名：Windows 首次运行会被 SmartScreen 拦一次（「更多信息」→「仍要运行」）。想自己编译见「[打包与安装](#打包与安装)」。
 
