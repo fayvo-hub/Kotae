@@ -244,6 +244,9 @@ func (hb *harness) stop() {
 		killTree(hb.cmd.Process)
 		_, _ = hb.cmd.Process.Wait()
 	}
+	// 兜底：重启过的用例会留下不止一个进程，按可执行文件路径把它们全清掉，
+	// 免得跑完一轮还挂着一个 app.exe 占着内存和全局快捷键。
+	killStrays(hb.bin)
 	if hb.echo != nil {
 		hb.echo.Close()
 	}
@@ -565,4 +568,16 @@ func killTree(p *os.Process) {
 		_ = exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(p.Pid)).Run()
 	}
 	_ = p.Kill()
+}
+
+// killStrays 结束所有从本轮临时目录启动的被测进程（只按完整路径匹配，不会误伤别的程序）。
+func killStrays(bin string) {
+	if bin == "" || runtime.GOOS != "windows" {
+		return
+	}
+	script := fmt.Sprintf(
+		`Get-Process | Where-Object { $_.Path -eq '%s' } | Stop-Process -Force -ErrorAction SilentlyContinue`,
+		strings.ReplaceAll(bin, "'", "''"),
+	)
+	_ = exec.Command("powershell", "-NoProfile", "-Command", script).Run()
 }
