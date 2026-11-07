@@ -84,6 +84,7 @@ function buildShell(): void {
     attr: { type: "button", title: "导入 cURL 命令（Ctrl+I）" },
     on: { click: () => toggleUI("curlOpen", true) },
   });
+  curlBtn.dataset.role = "import-curl";
   curlBtn.append(icon("terminal"), el("span", { text: "导入 cURL" }));
 
   const paletteBtn = iconButton("command", "命令面板（Ctrl+K）", () =>
@@ -100,8 +101,11 @@ function buildShell(): void {
     },
   );
   themeBtn.dataset.role = "theme";
+  paletteBtn.dataset.role = "palette";
   const settingsBtn = iconButton("settings", "设置", () => toggleUI("settingsOpen", true));
+  settingsBtn.dataset.role = "settings";
   const sidebarBtn = iconButton("sidebar", "收起 / 展开侧边栏（Ctrl+B）", () => toggleSidebar());
+  sidebarBtn.dataset.role = "sidebar";
 
   // 环境切换由左上角的环境胶囊负责，这里不再放重复入口。
   actions.append(curlBtn, paletteBtn, themeBtn, settingsBtn, sidebarBtn);

@@ -115,6 +115,7 @@ func openMainWindow() {
 	deskMu.Lock()
 	mainWin = win
 	deskMu.Unlock()
+	placeE2EWindow(win)
 	// 关闭策略只有一处：是否拦下关闭在事件里现读，托盘开关改完立即生效。
 	win.OnClose(func(e *mygo.CloseEvent) {
 		if shouldHideOnClose() {
@@ -442,4 +443,35 @@ func setupAppHooks() {
 			showMainWindow()
 		}
 	})
+}
+
+// e2eAppEnv 标记「这次启动是端到端测试的实例」：改应用名（隔离单实例锁）、
+// 把窗口移出视线。只在测试里由 harness 设置。
+const e2eAppEnv = "MYGO_API_E2E"
+
+// e2eWindowEnv 让端到端测试把主窗口移出视线，跑用例时不打断使用者。
+// 默认（未设置或其它值）：挪到虚拟桌面之外。窗口仍算「可见」，WebView2 照常
+// 渲染（实测 rAF 帧率与可见时一致，capture 也能出图）；最小化会把渲染节流到
+// 几乎停摆（400ms 只剩 4 帧），所以不用。
+// visible：保持原位，用于人工盯屏或需要在真实显示器上截图时；
+// minimize：最小化，只用于验证「最小化后能不能恢复」。
+// 只有 MYGO_API_E2E=1 的测试实例才会动窗口，正式使用完全不受影响。
+const e2eWindowEnv = "MYGO_API_E2E_WINDOW"
+
+// e2eNameEnv 给测试实例一个**每次运行都不同**的应用名：单实例锁按名字区分，
+// 上一次运行如果残留了进程，它不会把这一轮挡在启动阶段（表现为业务用例全红）。
+const e2eNameEnv = "MYGO_API_E2E_NAME"
+
+func placeE2EWindow(win *mygo.Window) {
+	if os.Getenv(e2eAppEnv) != "1" {
+		return
+	}
+	switch strings.TrimSpace(os.Getenv(e2eWindowEnv)) {
+	case "visible":
+		return
+	case "minimize":
+		win.Minimize()
+	default:
+		win.SetPosition(-16000, -16000)
+	}
 }

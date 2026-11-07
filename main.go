@@ -345,8 +345,12 @@ func main() {
 // 跑一份完全隔离的实例，不碰真实数据。
 func applyDataDirOverride() {
 	// 测试实例换一个应用名：单实例锁按名字区分，真实应用开着时也能同时启动。
-	if os.Getenv("MYGO_API_E2E") == "1" {
-		mygo.App.SetName("MyGo API E2E")
+	if os.Getenv(e2eAppEnv) == "1" {
+		name := strings.TrimSpace(os.Getenv(e2eNameEnv))
+		if name == "" {
+			name = "MyGo API E2E"
+		}
+		mygo.App.SetName(name)
 	}
 	dir := strings.TrimSpace(os.Getenv("MYGO_API_USER_DATA"))
 	if dir == "" {

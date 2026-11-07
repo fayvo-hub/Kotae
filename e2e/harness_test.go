@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -133,6 +134,8 @@ func start(root string) (*harness, error) {
 
 	hb.env = append(os.Environ(),
 		"MYGO_API_E2E=1",
+		// 应用名带上本轮标识：单实例锁按名字区分，上一轮残留的进程不会挡住这一轮。
+		"MYGO_API_E2E_NAME=MyGo API E2E "+strconv.FormatInt(time.Now().UnixNano(), 36),
 		"MYGO_API_USER_DATA="+userData,
 		"MYGO_DEV_URL="+hb.web.URL,
 		"NO_COLOR=1",
@@ -238,7 +241,7 @@ func (hb *harness) stop() {
 		_ = hb.client.Close()
 	}
 	if hb.cmd != nil && hb.cmd.Process != nil {
-		_ = hb.cmd.Process.Kill()
+		killTree(hb.cmd.Process)
 		_, _ = hb.cmd.Process.Wait()
 	}
 	if hb.echo != nil {
@@ -369,6 +372,13 @@ func (hb *harness) clearOverlays(t *testing.T) {
 			hb.pressKeys(t, "Escape", false, false)
 		}
 	}
+	// 侧边栏切回「集合」：用例若停在「历史」面板，后面的用例全都在历史列表里找请求，
+	// 报「侧边栏里没有名为 XX 的请求」这种看起来毫不相干的错。
+	hb.eval(t, `(() => {
+  const tab = [...document.querySelectorAll('.sidebar-tab')].find(el => el.textContent.trim().startsWith('集合'));
+  if (tab && !tab.classList.contains('active')) tab.click();
+  return true;
+})()`, nil)
 	// 清掉残留的搜索词：树被过滤后集合数量、请求列表都会对不上。
 	hb.eval(t, `(() => {
   const s = document.querySelector('.search-input');
@@ -543,4 +553,16 @@ func (hb *harness) pressKeysOn(t *testing.T, selector, key string, ctrl, shift b
 func jsString(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+// killTree 结束被测应用整棵树：Windows 上 WebView2 会拉起子进程，
+// 只 Kill 主进程偶尔会留下还在跑的 app.exe，它持有单实例锁，下一轮就跑不起来。
+func killTree(p *os.Process) {
+	if p == nil {
+		return
+	}
+	if runtime.GOOS == "windows" {
+		_ = exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(p.Pid)).Run()
+	}
+	_ = p.Kill()
 }

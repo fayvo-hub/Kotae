@@ -70,7 +70,7 @@ AI 代理修改本仓库时的强制规则。与 `~/.pi/agent/AGENTS.md` 冲突�
 - 界面可以读 `state`、也可以直接改纯 UI 字段，但改完必须触发重绘（`emit()` 或 `window.dispatchEvent(new CustomEvent("mygo:rerender-…"))`）；凡是会落库的字段（`src/db.ts` 里 settings 表登记的那些）必须同时调 `persist()`，否则重启后回到旧值
 - 托盘、深链、拖入文件只发 `desktop:command` 事件，页面复用同一套 store action；不要在 Go 侧复制一份业务逻辑
 - 热点文件（每次改动只做与任务直接相关的局部编辑，新增功能优先落新模块）：
-  `src/store.ts`（1539 行）、`src/ui/overlays.ts`（1274）、`src/main.ts`（1104）、`src/ui/request.ts`（940）、`src/curl.ts`（740）、`src/db.ts`（561）、`src/ui/response.ts`（649）、`src/style.css`（3831）、`desktop.go`（445）
+  `src/store.ts`（1545 行）、`src/ui/overlays.ts`（1274）、`src/main.ts`（1108）、`src/ui/request.ts`（942）、`src/curl.ts`（740）、`src/db.ts`（561）、`src/ui/response.ts`（649）、`src/style.css`（3831）、`desktop.go`（477）
 - 已拆出的独立模块（新增同类能力放这里，别往热点文件里塞）：`src/postman.ts`（Postman Collection / HAR 互转，512 行）、`src/snippets.ts`（fetch / axios / Python / cURL 片段生成，231 行）、`src/script.ts`（前置/后置脚本运行时：`pm` 对象、5 秒超时、HMAC/Base64 工具，345 行）、`src/types.ts`、`src/util.ts`、`src/db.ts`、`src/ui/{dom,icons,kvtable,jsonview,prompt}.ts`
 - 新 TS 模块约 500 行时反思职责，约 800 行必须拆
 - 禁止 `as any` / `@ts-ignore` / `@ts-expect-error`（当前 0 处，保持）；`tsconfig` 是 `strict` + `noUncheckedIndexedAccess`，用真实的类型收窄解决报错
@@ -116,6 +116,7 @@ AI 代理修改本仓库时的强制规则。与 `~/.pi/agent/AGENTS.md` 冲突�
 
 - `npm run e2e` 默认会先 `npm run build:web`；前端没改动时用 `MYGO_E2E_SKIP_BUILD=1 npm run e2e`
 - 排障用 `MYGO_E2E_KEEP=1 npm run e2e`（保留临时目录与应用日志），截图在 `e2e/artifacts/`
+- e2e 启动的窗口默认被挪到屏幕外（`desktop.go` 的 `placeE2EWindow`），不挡使用者；要盯屏跑用 `MYGO_API_E2E_WINDOW=visible`。每次运行的应用名带随机后缀，避免上一轮残留进程占着单实例锁把这一轮挡在启动阶段
 - **未实际执行的验证不得声称通过**；只跑了部分用例就写清跑了哪些
 
 ## 测试纪律

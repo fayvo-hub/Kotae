@@ -100,6 +100,15 @@ type Window struct {
 	URL     string `json:"url"`
 	Focused bool   `json:"focused"`
 	Visible bool   `json:"visible"`
+	Bounds  Rect   `json:"bounds"`
+}
+
+// Rect 是窗口或元素的屏幕矩形（逻辑像素）。
+type Rect struct {
+	X      float64 `json:"x"`
+	Y      float64 `json:"y"`
+	Width  float64 `json:"width"`
+	Height float64 `json:"height"`
 }
 
 // Windows 列出应用当前的窗口。
