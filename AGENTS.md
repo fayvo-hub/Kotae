@@ -70,8 +70,8 @@ AI 代理修改本仓库时的强制规则。与 `~/.pi/agent/AGENTS.md` 冲突�
 - 界面可以读 `state`、也可以直接改纯 UI 字段，但改完必须触发重绘（`emit()` 或 `window.dispatchEvent(new CustomEvent("mygo:rerender-…"))`）；凡是会落库的字段（`src/db.ts` 里 settings 表登记的那些）必须同时调 `persist()`，否则重启后回到旧值
 - 托盘、深链、拖入文件只发 `desktop:command` 事件，页面复用同一套 store action；不要在 Go 侧复制一份业务逻辑
 - 热点文件（每次改动只做与任务直接相关的局部编辑，新增功能优先落新模块）：
-  `src/store.ts`（1927 行，含 SSE / WebSocket 流式连接）、`src/ui/overlays.ts`（1274）、`src/main.ts`（1092）、`src/ui/request.ts`（1001）、`src/curl.ts`（740）、`src/db.ts`（561）、`src/ui/response.ts`（831）、`src/ui/sidebar.ts`（664）、`src/style.css`（4093）、`desktop.go`（477）
-- 已拆出的独立模块（新增同类能力放这里，别往热点文件里塞）：`src/postman.ts`（Postman Collection / HAR 互转，512 行）、`src/snippets.ts`（fetch / axios / Python / cURL 片段生成，231 行）、`src/script.ts`（前置/后置脚本运行时：`pm` 对象、5 秒超时、HMAC/Base64 工具，345 行）、`src/types.ts`、`src/util.ts`、`src/db.ts`、`src/ui/{dom,icons,kvtable,jsonview,prompt,menu}.ts`（`menu.ts` 是集合树与标签页共用的中文右键菜单）
+  `src/store.ts`（2334 行，含 SSE / WebSocket 流式连接、共享认证/变量继承）、`src/ui/overlays.ts`（1608）、`src/ui/request.ts`（1242）、`src/main.ts`（1105）、`src/ui/response.ts`（930）、`src/curl.ts`（797）、`src/ui/sidebar.ts`（678）、`src/db.ts`（638）、`desktop.go`（504）、`src/style.css`（4559）
+- 已拆出的独立模块（新增同类能力放这里，别往热点文件里塞）：`src/postman.ts`（Postman Collection / HAR 互转，512 行）、`src/script.ts`（前置/后置脚本运行时：`pm` 对象、`pm.test` 断言、5 秒超时、HMAC/Base64 工具，373 行）、`src/snippets.ts`（231 行）、`src/shortcuts.ts`（键位表、组合键归一化与录制，140 行）、`src/ui/{dom,icons,kvtable,jsonview,prompt,menu,authEditor,nodeSettings,cookies}.ts`（`menu.ts` 是集合树与标签页共用的中文右键菜单，`authEditor.ts` 是请求与共享设置共用的认证编辑器）、`src/types.ts`、`src/util.ts`、`transport.go`（按内部头选代理与跳过 TLS，114 行）、`trace.go`（重定向逐跳与分阶段耗时，134 行）、`cookies.go`（可枚举的 Cookie 罐，202 行）、`updates.go`（69 行）
 - 新 TS 模块约 500 行时反思职责，约 800 行必须拆
 - 禁止 `as any` / `@ts-ignore` / `@ts-expect-error`（当前 0 处，保持）；`tsconfig` 是 `strict` + `noUncheckedIndexedAccess`，用真实的类型收窄解决报错
 

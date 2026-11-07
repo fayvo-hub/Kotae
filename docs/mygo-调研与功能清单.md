@@ -293,7 +293,7 @@ error: the dev server exited: exit status 1
 
 首版判定口径：**必须** = 第一版硬门槛，缺了不算"能用"；**可选** = 增强项，能实现更好，不影响首版闭环。"首版"列标注该条是否进入第一版交付范围。
 
-> 本章 3.1–3.9 是立项时的规划快照（保留原样以便追溯当时的取舍）。实际交付范围比规划宽：脚本、SSE/WebSocket、Postman 与 HAR 导入、二进制预览等当时标为"不做"的能力已经落地，见 3.11；仍未实现的能力统一记在 3.12。
+> 本章 3.1–3.9 是立项时的规划快照（保留原样以便追溯当时的取舍）。实际交付范围比规划宽：脚本、SSE/WebSocket、Postman 与 HAR 导入、二进制预览等当时标为"不做"的能力已经落地，见 3.11；曾被列为缺口的能力现已全部落地，见 3.12。
 
 ## 3.1 请求构建与发送
 
@@ -400,7 +400,7 @@ error: the dev server exited: exit status 1
 
 ## 3.8 首版明确不做（能力边界）
 
-以下能力在立项时明确排除，避免扩展成重量级测试平台（其中"脚本与断言"里的脚本、"WebSocket"两项后续已实现，见 3.11；断言仍未做，见 3.12）（均与"轻量、纯本地"目标冲突或需大改架构，后续版本若用户明确需要再评估）：
+以下能力在立项时明确排除，避免扩展成重量级测试平台（其中"脚本与断言"里的脚本、"WebSocket"两项后续已实现，见 3.11；断言后来也补上了，见 3.12）（均与"轻量、纯本地"目标冲突或需大改架构，后续版本若用户明确需要再评估）：
 
 - 请求录制代理（挂系统代理抓取其他客户端流量）——需自研，改动大。
 - 脚本与断言（Postman Tests 式前后置脚本与断言）——mygo 无脚本运行时，需自研。
@@ -449,13 +449,15 @@ cURL 解析是首版核心能力，实现归属为"需自研或引入开源库"�
 | 层 | 路径 | 内容 |
 | --- | --- | --- |
 | Go 桌面壳 | `main.go` | 窗口、托盘与全局快捷键、关闭到托盘、单实例与深链（`mygo-api://new` / `settings` / `import?curl=`）、`.har` 文件关联、剪贴板、文件选择与保存、系统通知、Cookie 罐开关、旧 `workspace.json` → `workspace.db` 迁移、打开数据目录、系统标准关于面板；`mygo.Use(fetch.New(...))` 挂 Go 侧 HTTP 客户端（跟随系统代理）、`mygo.Use(sqlite.Plugin)`、`mygo.Use(websocket.New(...))` |
-| 请求与状态层 | `src/store.ts` | 标签页、集合树、历史、环境与全局变量、插值、发送与取消、SSE/WebSocket 流式会话、脚本接线、持久化 |
+| 请求与状态层 | `src/store.ts` | 标签页、集合树、历史、环境与全局变量、插值、发送与取消、SSE/WebSocket 流式会话、脚本接线、集合与文件夹共享认证/变量的继承、界面缩放与代码字号、快捷键覆盖、持久化 |
 | 存储层 | `src/db.ts` | SQLite 建表、整库读回、按差异提交（WAL + 事务）、旧 JSON 一次性迁移 |
 | cURL | `src/curl.ts` | 自研轻量解析器与生成器（3.10 的方案一），覆盖常用参数并对未支持参数给中文提示 |
 | 导入导出 | `src/postman.ts` | Postman Collection v2.0/v2.1 与 HAR 解析、导出 Postman Collection |
-| 脚本 | `src/script.ts` | `pm.*` 运行时（前置/后置、单次 5 秒上限、导入脚本默认不执行需信任） |
+| 脚本 | `src/script.ts` | `pm.*` 运行时（前置/后置、`pm.test` 断言、单次 5 秒上限、导入脚本默认不执行需信任） |
+| Go 网络层 | `transport.go`、`trace.go`、`cookies.go`、`updates.go` | 按内部头选代理与跳过 TLS 的 `RoundTripper`、重定向逐跳与分阶段耗时采集、可枚举的 Cookie 罐、自动更新状态与偏好 |
+| 快捷键 | `src/shortcuts.ts` | 17 个动作的默认键位、组合键归一化、录制与冲突检查 |
 | 界面 | `src/main.ts`、`src/ui/*`、`src/style.css` | 外壳、请求/响应/侧边栏/流式面板、编辑控件、浮层、右键菜单（`src/ui/menu.ts`）、命令面板；视觉规范见 `docs/设计系统.md` |
-| 端到端 | `e2e/` | 真窗口 e2e 65 个用例（含全按钮巡检、右键菜单与就地改名、SSE/WebSocket），SSE 与手写 RFC 6455 的 WebSocket 桩服务，README 截图生成 |
+| 端到端 | `e2e/` | 真窗口 e2e 82 个用例（含全按钮巡检、右键菜单与就地改名、SSE/WebSocket、代理与 TLS、链路与耗时、GraphQL、路径变量、`pm.test`、共享设置继承与持久化、Cookie 管理器），SSE 与手写 RFC 6455 的 WebSocket 桩服务，README 截图生成 |
 
 超出本章规划、现已实现（当时标为"不做"或"首版不做"）：
 
@@ -464,44 +466,33 @@ cURL 解析是首版核心能力，实现归属为"需自研或引入开源库"�
 - 代码片段导出（fetch / axios / Python requests / cURL）；
 - Postman Collection 与 HAR 导入、Postman Collection 导出、`.har` 双击直达导入；
 - 前置与后置脚本（`pm.variables` / `pm.request` / `pm.response` / `pm.utils` / `console`）；
-- SSE 与 WebSocket 调试（协议下拉、流式面板、握手头与子协议、消息收发）。
+- SSE 与 WebSocket 调试（协议下拉、流式面板、握手头与子协议、消息收发）；
+- 二进制文件直传、自定义代理与跳过 TLS 校验、Cookie 管理器；
+- 重定向逐跳链路与分阶段耗时、GraphQL 分栏、路径变量、`pm.test` 断言；
+- 自动更新、界面缩放与代码字号、快捷键自定义、集合与文件夹级共享认证与变量。
 
-验证命令与结果：`npm run typecheck`、`npm run lint:ui`、`npm run build:web`、`go vet ./...`、`npx mygo-cli vet .`、`npx mygo-cli build -skip-installer` 全通过；`go test -tags e2e ./e2e/ -count=1` 65 通过 + 2 按需跳过（打包用例与截图用例）。
+验证命令与结果：`npm run typecheck`、`npm run lint:ui`、`npm run build:web`、`go vet ./...`、`npx mygo-cli vet .`、`npx mygo-cli build -skip-installer` 全通过；`go test -tags e2e ./e2e/ -count=1` 82 通过 + 2 按需跳过（打包用例与截图用例）。
 
-## 3.12 剩余缺口清单
+## 3.12 曾经的三级缺口与落地情况
 
-按"缺了会明显受限"排序，均为纯本地能力，不引入云端或后端。
+3.12 原本是一份按"缺了会明显受限"排序的缺口清单（P1 调试刚需 / P2 观测与效率 / P3 分发与打磨）。这些能力现已全部实现，下表给出当前状态与代码落点；后续若再发现缺口，另起新章节，不要在本章追记历史。
 
-### P1 调试刚需
+| 能力 | 现在的行为 | 代码落点 |
+| --- | --- | --- |
+| 本地文件直传 | 请求体多一种「二进制文件」模式：拖入或选择文件后整份按原始字节发送，默认 `application/octet-stream`；cURL 的 `-T`、`--data-binary @file` 导入后会自动切到该模式并提示补选文件 | `src/ui/request.ts` 的 `binaryBodyPane`、`src/store.ts` 的 `buildBody`、`src/curl.ts` 的 `uploadPath` |
+| 自定义代理与跳过 TLS | 选项页签可填代理地址（`http` / `https` / `socks5`），可勾选跳过证书校验；cURL 的 `-x/--proxy` 与 `-k/--insecure` 双向保留 | `transport.go` 的 `routingTransport`、`src/store.ts` 的 `applyNetworkOptions` |
+| Cookie 管理器 | 能看到 Go 侧 Cookie 罐里的每一条（域名、路径、过期、Secure/HttpOnly），可筛选、单条删除、一键清空 | `cookies.go`、`src/ui/cookies.ts` |
+| 重定向逐跳链路 | 响应区多一个「链路」页签，逐跳列出方法、地址、状态码，标题里带跳数 | `trace.go`、`src/ui/response.ts` 的 `traceView` |
+| 分阶段耗时 | 同一页签下方给出 DNS 解析 / 建立连接 / TLS 握手 / 等待首字节 / 总计的横向条与毫秒数；本机地址没有前几项时说明原因 | `trace.go` 的 `hopTimer` |
+| GraphQL 请求体 | 请求体多一种「GraphQL」模式：查询与变量分栏编辑，变量实时校验 JSON，发送时合成 `{"query","variables"}` 并补 `application/json` | `src/ui/request.ts` 的 `graphqlBodyPane`、`src/store.ts` 的 `buildBody` |
+| 路径变量 | 地址里写 `/users/:id` 时，查询参数页签顶部自动列出路径变量表；没填值时保留占位符，填了才替换进路径（预览与发送一致） | `src/util.ts` 的 `pathVarNames` / `substitutePathVars`、`src/store.ts` 的 `applyURL` |
+| 轻量断言 | 脚本里的 `pm.test(name, fn)` 真的会跑：响应区顶部记录每条断言的通过与失败、汇总「断言 x/y」，失败给出原因；异步断言会等结果再渲染 | `src/script.ts` 的 `test`、`src/ui/response.ts` 的 `scriptLog` |
+| 自动更新 | 配好更新源与签名密钥，设置面板「更新」一节可检查更新、开关后台检查与自动下载，托盘菜单也有「检查更新…」 | `updates.go`、`main.go` 的 `updater.New`、`mygo.config.ts` 的 `updates` |
+| 界面缩放与代码字号 | 设置面板「外观」一节有两档步进器（界面缩放 70%–200%、代码字号 10–20px），快捷键 `Ctrl+=` / `Ctrl+-` / `Ctrl+0`；缩放走 WebView 真实缩放 | `desktop.go` 的 `SetZoomFactor`、`src/store.ts` 的 `applyScale` |
+| 快捷键自定义 | 设置面板「快捷键」一节列出 17 个动作的当前键位，点「修改」后按新组合即生效，冲突会被挡下，可一键恢复默认 | `src/shortcuts.ts`、`src/store.ts` 的 `setShortcut` |
+| 集合与文件夹级共享认证、变量 | 集合与文件夹都能设共享认证与变量并向下继承（请求自己设了就用自己的），请求的认证页签会提示继承来源并可一键跳到共享设置 | `src/store.ts` 的 `inheritedFor` / `authFor`、`src/ui/nodeSettings.ts` |
 
-| 缺口 | 现状与影响 | 代码落点 | 实现路径与体量 |
-| --- | --- | --- | --- |
-| 本地文件直传请求体 | 只能把文件塞进 multipart 表单字段；无法把本地文件当原始体发送，也无法从文件加载请求体。cURL 导入遇到 `-T/--upload-file`、`--data-binary @file` 只给警告 | `BodyMode` 仅 `none/json/text/urlencoded/form`（`src/types.ts:34`）；提示见 `src/curl.ts:592-604` | 新增 `binary` 模式 + 文件选择（Go 侧已有 Open 绑定），发送走 `ArrayBuffer`；小 |
-| 自定义代理与跳过 TLS 校验 | 调内网自签证书接口、或必须走指定代理时无解，只能用系统代理并强校验证书 | `RequestOptions` 只有 `timeoutMs/redirect/keepCookies`（`src/types.ts:63`）；curl 的 `-x/--proxy`、`-k/--insecure` 被丢弃 | Go 侧自建 `RoundTripper`：按内部标记头选 `Proxy` / `TLSClientConfig.InsecureSkipVerify`，发前剥掉标记头；中 |
-| Cookie 管理器 | 只有"保持会话"开关：看不到罐里有哪些 Cookie，不能单条删或清空，登录态串味时只能重启应用 | `main.go` 的 `jar` 没有查看与清理绑定 | 给 jar 加 List/Clear/Delete 绑定 + 一个 Cookie 面板；小 |
-
-### P2 观测与效率
-
-| 缺口 | 现状与影响 | 代码落点 | 实现路径与体量 |
-| --- | --- | --- | --- |
-| 重定向逐跳链路 | 只显示最终地址，看不到 3xx 每一跳的状态码与位置 | 无 | `CheckRedirect` 记录 hops，经内部响应头回传给页面；小 |
-| 分阶段耗时（DNS / 连接 / TLS / 首字节） | 只有总耗时与"等待响应 + 下载正文"两段，定位慢在哪一环靠猜 | 无 httptrace | `httptrace` 挂在自建 Transport 的 context 上，同样经内部响应头回传；中 |
-| GraphQL 请求体 | 只能按纯文本发 JSON，缺 query / variables 分栏，变量要手拼 | `BodyMode` 无 `graphql` | 加模式与两个编辑器，发送时合成 `{"query","variables"}`；小 |
-| 路径变量（`/users/:id`） | 只有 `{{变量}}`，没有 Postman 那种路径参数表格 | 无 | 识别 `:name` 自动生成表格并回写到地址；中 |
-| 轻量断言（`pm.test`） | 脚本里 `pm.test` 被直接跳过，只能 `console.log`，没有通过/失败列表 | `src/script.ts:310` 明确跳过 | 实现 `pm.test(name, fn)` 与最小 `expect` 子集，结果列表放在响应区顶部；小到中 |
-
-### P3 分发与打磨
-
-| 缺口 | 现状与影响 | 代码落点 | 实现路径与体量 |
-| --- | --- | --- | --- |
-| 自动更新 | 装 0.1.0 后只能手动重新下载安装 | `mygo.config.ts:48` 的 `updates` 仍是注释 | `npx mygo-cli keygen` 生成密钥，配 `updates{publicKey, github}` + Updater 插件与"检查更新"入口；中（需要真实密钥与一次演示发版） |
-| 界面缩放与编辑器字号 | 高分屏或投屏演示时无法整体放大 | 设置面板无此项 | 根节点缩放比存库 + 快捷键；小 |
-| 快捷键自定义 | 键位硬编码，改不了 | `src/main.ts` 的 `onKeydown` | 键位表存库 + 设置页录制；中 |
-| 集合与文件夹级共享认证、变量 | 同一组请求要各自粘贴 token，改一次要改 N 处 | 只有环境与全局变量 | 树节点支持 auth/vars 并向下继承；中 |
-
-明确不做（与"轻量、纯本地"冲突）：录制代理、集合运行器与批跑、压测、云同步与团队协作、OpenAPI 生成请求、完整断言框架。
-
-**结论**：首版闭环（3.9 的一句话验收标准）已达成；若要继续投入，按"文件直传 → 代理与 TLS → Cookie 管理器 → 重定向链路与分阶段耗时 → 轻量断言"的顺序收益最高。
+仍然明确不做（与"轻量、纯本地"冲突）：录制代理、集合运行器与批跑、压测、云同步与团队协作、OpenAPI 生成请求、完整断言框架。
 
 ---
 
