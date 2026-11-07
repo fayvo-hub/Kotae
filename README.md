@@ -1,10 +1,46 @@
 # MyGo API
 
+[![CI](https://github.com/fayvo-hub/mygo-api/actions/workflows/ci.yml/badge.svg)](https://github.com/fayvo-hub/mygo-api/actions/workflows/ci.yml)
+[![Release](https://github.com/fayvo-hub/mygo-api/actions/workflows/release.yml/badge.svg)](https://github.com/fayvo-hub/mygo-api/actions/workflows/release.yml)
+
 纯本地的轻量级 Postman：请求构建、发包、响应查看、集合与历史管理全部在这台机器上完成，不连云端、不需要后端服务。界面文案全部中文。
 
 技术形态：Go 写桌面壳（[MyGo](https://mygo.egoist.dev/)）+ 系统 webview 里的 Vite/TypeScript 前端，HTTP 请求由 Go 侧发出（借 MyGo 的 fetch 插件），因此不受浏览器 CORS 限制，可以任意设置请求头与 Cookie。
 
 设计取舍与功能清单见 `docs/mygo-调研与功能清单.md`；**界面规范见 `docs/设计系统.md`**（改 UI 前的权威依据，`npm run lint:ui` 检查硬编码色值/字号/圆角/阴影）。
+
+## 下载
+
+安装包由 GitHub Actions 在打 tag 时构建并挂到 [Releases](https://github.com/fayvo-hub/mygo-api/releases)：
+
+| 平台 | 产物 | 说明 |
+| --- | --- | --- |
+| Windows 10/11 | `mygo-api-setup-<版本>-amd64.exe` | 按用户安装到 `%LOCALAPPDATA%\Programs\MyGoAPI`，不需要管理员权限；需要 WebView2（Win11 自带） |
+| macOS 12+ | `mygo-api-<版本>-universal.dmg` | Apple Silicon 与 Intel 通用；未做代码签名，首次打开请右键 →「打开」 |
+
+安装包没有代码签名：Windows 首次运行会被 SmartScreen 拦一次（「更多信息」→「仍要运行」）。想自己编译见「[打包与安装](#打包与安装)」。
+
+## 界面
+
+![主界面：集合树、请求构建、JSON 结构化响应](docs/screenshots/01-main.png)
+
+| 功能 | 截图 |
+| --- | --- |
+| 结构化响应：默认全展开，可一键收起/展开，左侧竖线标层级 | <img src="docs/screenshots/02-json-tree.png" width="440"> |
+| 请求脚本：前置算 HMAC 签名，响应区顶部显示脚本日志 | <img src="docs/screenshots/03-script.png" width="440"> |
+| 环境变量：多环境、值遮罩、批量粘贴 | <img src="docs/screenshots/04-environment.png" width="440"> |
+| cURL 导入：粘贴命令即出解析预览，可替换当前请求或新开标签 | <img src="docs/screenshots/05-curl-import.png" width="440"> |
+| 导入 Postman Collection / HAR：先预览再合并 | <img src="docs/screenshots/06-import.png" width="440"> |
+| 命令面板：命令、集合里的请求、历史一起搜 | <img src="docs/screenshots/07-palette.png" width="440"> |
+| 设置：外观、全局变量、动态变量、数据备份、桌面开关 | <img src="docs/screenshots/08-settings.png" width="440"> |
+| 历史：状态码与耗时，可重放或删除 | <img src="docs/screenshots/09-history.png" width="440"> |
+| 浅色主题（跟随系统 / 浅色 / 深色三档） | <img src="docs/screenshots/10-light.png" width="440"> |
+
+截图由端到端测试生成，数据是本机桩服务的固定测试数据，不碰你自己的工作区：
+
+```bash
+MYGO_E2E_SCREENSHOTS=1 go test -tags e2e ./e2e/ -run TestScreenshots -count=1
+```
 
 ## 功能
 
@@ -122,12 +158,24 @@ Windows 安装包是 NSIS 做的按用户安装：装到 `%LOCALAPPDATA%\Program
 
 端到端用例没有挂在每次推送里：它要开真实窗口、要 WebView2 与桌面会话，比静态检查慢且更依赖 runner 环境，所以留成手动触发，日常靠本地 `npm run e2e`。
 
+### 发布
+
+`.github/workflows/release.yml` 在推送 `v*` tag（或在 Actions 页面手动触发）时构建两个平台的安装包并挂到 GitHub Release：
+
+```bash
+# 发布 0.1.0：先把 mygo.config.ts 的 version 改成 0.1.0 并提交
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+两个平台并行构建：`windows-latest` 跑 `mygo-cli build -platform windows/amd64`（出 exe 与 NSIS 安装包），`macos-latest` 跑 `-platform darwin/universal`（出 `.app` 与 `.dmg`），最后由 `release` job 汇总上传。没有配签名证书时构建带 `-skip-notarize`，产物能装能跑但需要用户手动放行；接入签名后去掉这个参数，并按上一节补配置。
+
 ### 发布检查清单
 
 1. 改 `mygo.config.ts` 的 `version`（同时更新 README 状态栏截图里的版本文案不必改，它读的是构建配置）。
 2. `npm run typecheck && npm run lint:ui && go vet ./... && npx mygo-cli vet . && npm run e2e`。
 3. `npm run build`，确认 `build/windows-amd64/` 里有 exe、`mygo-sqlite3.dll` 与 setup 安装包。
 4. 装一次安装包（含 `/S` 静默安装）验证快捷方式、卸载项与「数据目录保留」。
-5. 打 tag 后按上一节接入签名与更新通道，再发布。
+5. 打 tag 触发发布流水线：`git tag vX.Y.Z && git push origin vX.Y.Z`；要签名/自动更新的话先按「代码签名与自动更新」补配置，并把 `release.yml` 里的 `-skip-notarize` 去掉。
 
 图标由 `scripts/make-icons.py` 生成（需要 Pillow）：`python scripts/make-icons.py` 会重写 `resources/icon.png`（1024×1024 应用图标）与 `resources/tray.png`（32×32 托盘图标），两者是同一套品牌渐变加 `>_` 字形，改配色只改脚本顶部的两个颜色常量。
