@@ -1,0 +1,22 @@
+# 行尾统一为 LF：仓库里只存 LF，工作区也用 LF。
+# 理由：Go、Node、Prettier、gofmt、VS Code 默认都是 LF；CI 的 macOS job 与 Linux 工具链
+# 不会产生无意义差异。Windows 原生命令脚本是唯一必须 CRLF 的例外，见文件末尾两条。
+* text=auto eol=lf
+
+# 二进制：不要做行尾转换，也不要参与 diff 文本统计。
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.icns binary
+*.gif binary
+*.webp binary
+*.db binary
+*.exe binary
+*.dll binary
+*.dmg binary
+*.zip binary
+
+# Windows 批处理解释器对 LF 不可靠，将来若加脚本固定用 CRLF。
+*.bat text eol=crlf
+*.cmd text eol=crlf
