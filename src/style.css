@@ -3877,6 +3877,17 @@ mark,
    浮层
    ========================================================================== */
 
+/* 启动时的首帧预热（src/ui/paintWarmup.ts）：必须真的被绘制才会编译着色器，
+   所以不能用 display: none / opacity: 0，用 0.01 的透明度保持不可见。 */
+.paint-warmup {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  opacity: 0.01;
+  pointer-events: none;
+  overflow: hidden;
+}
+
 .backdrop {
   position: fixed;
   inset: 0;

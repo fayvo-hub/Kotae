@@ -37,6 +37,14 @@ func TestBoot(t *testing.T) {
 	h.shot(t, "01-boot")
 }
 
+// 启动预热节点必须自己拆干净：它覆盖全屏，留着会挡住点击。
+func TestPaintWarmupCleansUp(t *testing.T) {
+	h.wait(t, "预热节点已移除", `!document.querySelector('.paint-warmup')`)
+	if n := h.count(t, ".paint-warmup"); n != 0 {
+		t.Fatalf("预热节点残留 %d 个，会盖住整个界面", n)
+	}
+}
+
 func TestSendGET(t *testing.T) {
 	h.openRequest(t, "GET 查询参数")
 	// 地址栏保留 {{baseUrl}} 模板，实际地址在参数面板里预览——两者都要对。

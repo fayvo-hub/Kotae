@@ -24,6 +24,7 @@ import {
 import { nodeSettingsDialog } from "./ui/nodeSettings";
 import { cookieDialog } from "./ui/cookies";
 import { scriptsDialog } from "./ui/scriptDialog";
+import { warmUpFirstPaint } from "./ui/paintWarmup";
 import { emptyRequest, parseCurl } from "./curl";
 import { methodTone } from "./util";
 import { closeContextMenu, openContextMenu } from "./ui/menu";
@@ -1028,6 +1029,7 @@ async function boot(): Promise<void> {
   bindEvents();
   await load();
   render();
+  warmUpFirstPaint();
   bindDesktop();
   void System.info()
     .then((info) => {
