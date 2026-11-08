@@ -24,6 +24,7 @@ func appendOrderScript(mark string) string {
 // scriptLogHeads 按顺序读每条脚本记录的表头（脚本名 · 来源 · 阶段）与首行日志。
 func scriptLogHeads(t *testing.T) []string {
 	t.Helper()
+	openConsoleTab(t)
 	var joined string
 	h.eval(t, `[...document.querySelectorAll('.script-log-run')].map(run => {
   const head = (run.querySelector('.script-log-phase') || {}).textContent || '';
@@ -256,6 +257,7 @@ func TestScriptResendAfterLogin(t *testing.T) {
 		t.Fatalf("响应体不是受保护接口的内容：%s", body)
 	}
 	// 两轮发送各有前置 + 后置，脚本记录应当攒成四段。
+	openConsoleTab(t)
 	if got := h.count(t, ".script-log-run"); got != 4 {
 		t.Fatalf("脚本记录应该有 4 段（重发一轮），实际 %d 段：%s", got, h.text(t, ".script-log"))
 	}
@@ -369,86 +371,90 @@ func TestScriptsPersistAcrossRestart(t *testing.T) {
 	deleteCollectionViaMenu(t, colName)
 }
 
-// 脚本日志：页签行钉在响应区顶部，日志多到上限就在自己那一格里滚，不把页签顶下去。
-func TestScriptLogKeepsResponseTabsPinned(t *testing.T) {
+// 脚本输出收在响应区的「控制台」页签里：默认停在响应体，徽标提示有输出，
+// 输出再长也只在自己的滚动区里滚，不挪动页签行。
+func TestScriptConsoleTab(t *testing.T) {
 	cleanupScripts(t)
 	clearGlobalSteps(t)
 	h.clearOverlays(t)
 	newTab(t)
 	typeURL(t, "{{baseUrl}}/json")
-	addRequestStep(t, "pre", "脚本")
-	fillStepSource(t, 1, `for (let i = 0; i < 14; i++) console.log("line " + i);`)
-	h.send(t)
-	h.wait(t, "长日志只有一段", `document.querySelectorAll('.script-log-run').length === 1`)
 
-	// 响应页签行的屏幕纵坐标：这是「吸顶」的判定依据。
+	// 没有脚本时也有这个页签，点开是一句空态，而不是空白。
+	h.send(t)
+	openConsoleTab(t)
+	if text := h.text(t, ".console-view"); !strings.Contains(text, "还没有脚本输出") {
+		t.Fatalf("没有脚本时控制台应当给空态提示，实际 %q", text)
+	}
+	clickIn(t, ".response-subtabs", "响应体")
+	h.wait(t, "回到响应体", `!!document.querySelector('.response-body') && !document.querySelector('.console-view')`)
+
+	openStepsTab(t, "pre")
+	addRequestStep(t, "pre", "脚本")
+	fillStepSource(t, 1, `for (let i = 0; i < 60; i++) console.log("line " + i);`)
+	h.send(t)
+	h.wait(t, "控制台徽标出现", `[...document.querySelectorAll('.response-subtabs .subtab')]
+		.some(el => (el.textContent || '').trim().startsWith('控制台') && !!el.querySelector('.subtab-badge'))`)
+
+	// 发送后仍停在响应体：脚本输出要自己点「控制台」看，不再抢正文的位置。
+	if !h.exists(t, ".response-body") || h.exists(t, ".console-view") {
+		t.Fatalf("发送后应当停在响应体页签，实际区域：%s", h.text(t, ".response-subtabs"))
+	}
+	var badge string
+	h.eval(t, `(() => {
+  const tab = [...document.querySelectorAll('.response-subtabs .subtab')]
+    .find(el => (el.textContent || '').trim().startsWith('控制台'));
+  if (!tab) return 'missing';
+  const b = tab.querySelector('.subtab-badge');
+  return (b ? b.textContent.trim() : '') + '/' + (b ? b.className : '');
+})()`, &badge)
+	if badge != "1/subtab-badge" {
+		t.Fatalf("控制台徽标应当是有 1 段记录的普通徽标，实际 %q", badge)
+	}
+
+	openConsoleTab(t)
+	if got, want := h.count(t, ".script-log-line"), 60; got != want {
+		t.Fatalf("控制台里应有 %d 行日志，实际 %d", want, got)
+	}
+	// 输出区跟着正文区滚：长日志撑满后自己溢出滚动，而不是把响应区顶长。
+	var scrolls bool
+	h.eval(t, `(() => {
+  const box = document.querySelector('.console-view');
+  return box.scrollHeight > box.clientHeight + 4;
+})()`, &scrolls)
+	if !scrolls {
+		t.Fatalf("长日志应当在控制台页签里滚动，实际没有溢出")
+	}
+
+	// 页签行的屏幕纵坐标：切页签时不能上下动。
 	stripTop := func() float64 {
 		t.Helper()
 		var top float64
 		h.eval(t, `document.querySelector('.response-subtabs').getBoundingClientRect().top`, &top)
 		return top
 	}
-	bandHeight := func() float64 {
-		t.Helper()
-		var height float64
-		h.eval(t, `document.querySelector('.script-log').getBoundingClientRect().height`, &height)
-		return height
-	}
-	lineCount := func() int {
-		t.Helper()
-		return h.count(t, ".script-log-line")
-	}
-
-	// 一行日志占十几像素，十几行就该顶到上限、能滚起来。
-	if got := lineCount(); got != 14 {
-		t.Fatalf("日志行数应是 14，实际 %d", got)
-	}
-	tall := bandHeight()
-	if tall < 155 {
-		t.Fatalf("日志带只有 %.0fpx，读不了几行", tall)
-	}
-	var scrolls bool
-	h.eval(t, `(() => {
-  const box = document.querySelector('.script-log');
-  return box.scrollHeight > box.clientHeight + 4;
-})()`, &scrolls)
-	if !scrolls {
-		t.Fatalf("日志超长时应当在自己的格里滚动，实际没有溢出")
-	}
-
 	first := stripTop()
-	pinned := func(what string) {
-		t.Helper()
-		top := stripTop()
-		if top-first > 0.5 || first-top > 0.5 {
-			t.Fatalf("%s后页签行从 %.1f 挪到了 %.1f", what, first, top)
-		}
-	}
-
-	// 切换页签，页签行不能上下动。
-	for _, label := range []string{"响应头", "链路", "请求", "响应体"} {
+	for _, label := range []string{"响应头", "链路", "请求", "响应体", "控制台"} {
 		clickIn(t, ".response-subtabs", label)
 		h.wait(t, "页签生效", fmt.Sprintf(
 			`[...document.querySelectorAll('.response-subtabs .subtab.active')]
 				.some(el => (el.textContent || '').includes(%s))`,
 			jsString(label),
 		))
-		pinned("切到「" + label + "」")
+		if top := stripTop(); top-first > 0.5 || first-top > 0.5 {
+			t.Fatalf("切到「%s」后页签行从 %.1f 挪到了 %.1f", label, first, top)
+		}
 	}
-	h.shot(t, "57-script-log-pinned")
+	h.shot(t, "57-script-console-tab")
 
-	// 日志变少（把长脚本删掉再发一次），页签行仍在原位；日志带跟着输出缩回去，不留死白。
-	stepMenu(t, 1, "删除")
-	h.wait(t, "删除确认框", `!!document.querySelector('.prompt-dialog')`)
-	h.clickContaining(t, ".prompt-dialog .btn", "删除")
-	h.wait(t, "操作行被删掉", `document.querySelectorAll('.step-row').length === 0`)
-	addStep(t, "pre", "脚本")
-	fillStepSource(t, 1, `console.log("短日志");`)
+	// 断言没过时徽标变红，用户扫一眼就知道要去看控制台。
+	openStepsTab(t, "pre")
+	fillStepSource(t, 1, `pm.test("故意失败", () => { throw new Error("预期失败"); });`)
 	h.send(t)
-	h.wait(t, "短日志只有一行", `document.querySelectorAll('.script-log-line').length === 1`)
-	pinned("日志变少")
-	if got, was := bandHeight(), tall; got >= was {
-		t.Fatalf("日志只剩一行时日志带还是 %.0fpx（之前 %.0fpx），应当缩回去", got, was)
+	h.wait(t, "徽标变红", `!!document.querySelector('.response-subtabs .subtab-badge.bad')`)
+	openConsoleTab(t)
+	if text := h.text(t, ".script-test.fail .script-test-error"); !strings.Contains(text, "预期失败") {
+		t.Fatalf("控制台里应该能看到失败原因，实际 %q", text)
 	}
 
 	// 两种主题都要看过：浅色、深色各拍一张，再把主题还给后续用例。
@@ -458,7 +464,7 @@ func TestScriptLogKeepsResponseTabsPinned(t *testing.T) {
 	if !h.exists(t, `html[data-theme="light"]`) {
 		t.Fatalf("没能切到浅色主题")
 	}
-	h.shot(t, "58-script-log-pinned-light")
+	h.shot(t, "58-script-console-tab-light")
 	h.click(t, `[data-role="theme"]`)
 	h.wait(t, "回到深色主题", `document.documentElement.dataset.theme === "dark"`)
 	h.clearToasts(t)

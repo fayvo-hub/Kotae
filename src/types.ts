@@ -367,7 +367,7 @@ export interface Tab {
   stream?: StreamSession;
   sending: boolean;
   /** 响应区分栏当前展示的页签。 */
-  responseTab: "body" | "headers" | "request" | "trace";
+  responseTab: "body" | "headers" | "request" | "trace" | "console";
   /** 响应体展示方式。 */
   bodyView: "pretty" | "raw";
   /** 响应体搜索词。 */

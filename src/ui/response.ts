@@ -35,7 +35,6 @@ export function responsePanel(tab: Tab): HTMLElement {
 
   const res = tab.response;
   const runs = tab.scriptRuns ?? [];
-  const logs = runs.length > 0 ? scriptLog(runs) : null;
 
   if (tab.sending) {
     fill(
@@ -54,7 +53,6 @@ export function responsePanel(tab: Tab): HTMLElement {
   if (!res) {
     fill(
       wrap,
-      logs,
       el(
         "div",
         { class: "response-empty" },
@@ -66,8 +64,29 @@ export function responsePanel(tab: Tab): HTMLElement {
     return wrap;
   }
 
-  fill(wrap, statusBar(tab, res), res.error ? errorPane(res, logs) : resTabs(tab, res, logs));
+  fill(wrap, statusBar(tab, res), resTabs(tab, res, runs));
   return wrap;
+}
+
+/** 「控制台」页签：脚本输出、断言与报错都收在这里，不再占响应区顶上的一条带。 */
+function consoleView(runs: ScriptRun[]): HTMLElement {
+  if (runs.length === 0) {
+    return el(
+      "div",
+      { class: "body-view console-view" },
+      el(
+        "div",
+        { class: "response-empty" },
+        icon("code"),
+        el("p", { text: "还没有脚本输出" }),
+        el("p", {
+          class: "muted",
+          text: "在「前置操作 / 后置操作」里加一步脚本，发送后这里会显示 console 输出、断言结果与耗时。",
+        }),
+      ),
+    );
+  }
+  return el("div", { class: "body-view console-view" }, scriptLog(runs));
 }
 
 /** 脚本执行记录：每条脚本一行摘要，下面跟 console 输出与报错。 */
@@ -342,8 +361,8 @@ function chip(label: string, value: string, title?: string): HTMLElement {
   return c;
 }
 
-function errorPane(res: ResponseRecord, logs: HTMLElement | null): HTMLElement {
-  const wrap = el("div", { class: "response-body" });
+function errorView(res: ResponseRecord): HTMLElement {
+  const wrap = el("div", { class: "body-view error-view" });
   const card = el("div", { class: `error-card tone-${res.errorKind ?? "network"}` });
   card.append(icon("warn"));
   const text = el("div", { class: "error-text" });
@@ -362,22 +381,25 @@ function errorPane(res: ResponseRecord, logs: HTMLElement | null): HTMLElement {
     );
   }
   card.append(text);
-  // 失败前跑过的前置脚本同样要能看到日志，顺序与正文一致：日志在前、错误卡在后。
-  if (logs) wrap.append(logs);
   wrap.append(card);
   return wrap;
 }
 
-function resTabs(tab: Tab, res: ResponseRecord, logs: HTMLElement | null): HTMLElement {
+function resTabs(tab: Tab, res: ResponseRecord, runs: ScriptRun[]): HTMLElement {
   const wrap = el("div", { class: "response-body" });
 
   const strip = el("div", { class: "subtabs response-subtabs" });
-  const tabs: { key: Tab["responseTab"]; label: string; count: number }[] = [
+  const tabs: { key: Tab["responseTab"]; label: string; count: number; bad?: boolean }[] = [
     { key: "body", label: "响应体", count: 0 },
     { key: "headers", label: "响应头", count: res.headers.length },
     { key: "request", label: "请求", count: tab.sent ? tab.sent.headers.length : 0 },
   ];
   if (res.trace) tabs.push({ key: "trace", label: "链路", count: res.trace.hops.length });
+  // 脚本输出收进「控制台」页签：有报错或断言没过时徽标变红，用户不用挨个点开找。
+  const scriptTrouble = runs.some(
+    (run) => Boolean(run.error) || (run.tests ?? []).some((test) => !test.passed),
+  );
+  tabs.push({ key: "console", label: "控制台", count: runs.length, bad: scriptTrouble });
   for (const t of tabs) {
     const active = tab.responseTab === t.key;
     const btn = el("button", {
@@ -391,7 +413,9 @@ function resTabs(tab: Tab, res: ResponseRecord, logs: HTMLElement | null): HTMLE
       },
     });
     btn.append(el("span", { text: t.label }));
-    if (t.count) btn.append(el("span", { class: "subtab-badge", text: String(t.count) }));
+    if (t.count) {
+      btn.append(el("span", { class: `subtab-badge${t.bad ? " bad" : ""}`, text: String(t.count) }));
+    }
     strip.append(btn);
   }
 
@@ -402,11 +426,10 @@ function resTabs(tab: Tab, res: ResponseRecord, logs: HTMLElement | null): HTMLE
   strip.append(el("span", { class: "spacer" }), tools);
 
   wrap.append(strip);
-  // 日志跟在页签行下面：页签行位置固定，日志变多只顶掉正文、不挪页签。
-  if (logs) wrap.append(logs);
-  if (tab.responseTab === "body") wrap.append(bodyView(tab, res));
+  if (tab.responseTab === "body") wrap.append(res.error ? errorView(res) : bodyView(tab, res));
   else if (tab.responseTab === "headers") wrap.append(headersView(tab, res));
   else if (tab.responseTab === "trace" && res.trace) wrap.append(traceView(res.trace));
+  else if (tab.responseTab === "console") wrap.append(consoleView(runs));
   else wrap.append(requestView(tab));
   return wrap;
 }

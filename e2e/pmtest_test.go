@@ -34,6 +34,7 @@ func TestPmTestAssertions(t *testing.T) {
 	pickStepLibrary(t, 1, "断言")
 	h.send(t)
 
+	openConsoleTab(t)
 	h.wait(t, "断言结果", `document.querySelectorAll('.script-test').length === 3`)
 	if badge := h.text(t, ".script-log-tag.bad"); !strings.Contains(badge, "2/3") {
 		t.Fatalf("断言汇总应是 2/3，实际 %q", badge)

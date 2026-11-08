@@ -182,6 +182,15 @@ func stepRows(t *testing.T) []string {
 	return strings.Split(joined, "\n")
 }
 
+// openConsoleTab 切到响应区的「控制台」页签：脚本输出、断言与报错都收在这里。
+func openConsoleTab(t *testing.T) {
+	t.Helper()
+	if !h.exists(t, ".console-view") {
+		clickIn(t, ".response-subtabs", "控制台")
+		h.wait(t, "控制台页签生效", `!!document.querySelector('.console-view')`)
+	}
+}
+
 // 前置脚本算 HMAC 签名：桩服务用同一个密钥验签，验不过会回 401。
 func TestPreScriptSignsRequest(t *testing.T) {
 	cleanupScripts(t)
@@ -203,6 +212,7 @@ func TestPreScriptSignsRequest(t *testing.T) {
 	if body := h.responseText(t); !strings.Contains(body, "verified") {
 		t.Fatalf("响应体里没有验签结果：%s", body)
 	}
+	openConsoleTab(t)
 	if log := h.text(t, ".script-log-line"); !strings.Contains(log, "已签名") {
 		t.Fatalf("前置脚本的 console.log 没显示出来：%q", log)
 	}
@@ -227,6 +237,7 @@ func TestPostScriptRewritesBody(t *testing.T) {
 	if !strings.Contains(body, "解码后的响应体：中文正常。") {
 		t.Fatalf("响应体没有被后置脚本改写：%s", body)
 	}
+	openConsoleTab(t)
 	if tag := h.text(t, ".script-log-tag"); tag != "已改写响应体" {
 		t.Fatalf("没有标记响应体被改写：%q", tag)
 	}
@@ -254,6 +265,7 @@ func TestStepLibraryReference(t *testing.T) {
 	}
 
 	h.send(t)
+	openConsoleTab(t)
 	if logs := h.text(t, ".script-log-line"); !strings.Contains(logs, "来自脚本库") {
 		t.Fatalf("引用的库脚本没执行：%q", logs)
 	}
@@ -262,6 +274,7 @@ func TestStepLibraryReference(t *testing.T) {
 	stepToggles(t, 1)
 	h.wait(t, "行标记为停用", `document.querySelector('.step-row').classList.contains('off')`)
 	h.send(t)
+	openConsoleTab(t)
 	if logs := h.text(t, ".script-log"); strings.Contains(logs, "来自脚本库") {
 		t.Fatalf("停用的操作不该执行：%q", logs)
 	}
@@ -286,6 +299,7 @@ func TestWaitStepDelays(t *testing.T) {
 	if rows := stepRows(t); len(rows) != 3 || rows[1] != "等待时间|300 毫秒" {
 		t.Fatalf("等待行没记住毫秒数：%v", rows)
 	}
+	openConsoleTab(t)
 	var heads string
 	h.eval(t, `[...document.querySelectorAll('.script-log-run')].map(run => {
   const line = ((run.querySelector('.script-log-line') || {}).textContent || '').trim();
@@ -348,6 +362,7 @@ func TestImportedScriptNeedsTrust(t *testing.T) {
 
 	h.openRequest(t, "带前置脚本的请求")
 	h.send(t)
+	openConsoleTab(t)
 	logs := h.text(t, ".script-log")
 	if !strings.Contains(logs, "还没被信任") {
 		t.Fatalf("未信任的脚本应该只提示不执行，日志：%q", logs)
@@ -366,6 +381,7 @@ func TestImportedScriptNeedsTrust(t *testing.T) {
 	h.clearOverlays(t)
 
 	h.send(t)
+	openConsoleTab(t)
 	if logs := h.text(t, ".script-log"); !strings.Contains(logs, "导入的前置脚本跑了") {
 		t.Fatalf("信任之后脚本没执行：%q", logs)
 	}

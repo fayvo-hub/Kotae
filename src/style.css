@@ -2743,18 +2743,12 @@ body.resizing-row * {
   flex: 1 1 auto;
 }
 
-/* 脚本日志：夹在响应页签行与内容之间，高度随输出增长到上限后自己滚。
-   页签行始终钉在上面，日志多少都不会把它顶下去。 */
+/* 脚本日志：响应区「控制台」页签里的运行记录列表，随正文区一起滚。 */
 .script-log {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  flex: 0 1 auto;
-  max-height: clamp(160px, 45%, 360px);
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-2);
-  overflow: auto;
-  overscroll-behavior: contain;
+  padding: 2px 0 8px;
 }
 
 .script-log-run {
@@ -3709,15 +3703,14 @@ textarea.kv-value {
 }
 
 .response-body {
-  /* basis 取 0：正文区只吃日志带与页签行剩下的空间，
-     否则内容一多就会把日志带挤矮，页签行也跟着上下跳。 */
+  /* basis 取 0：正文区只吃页签行剩下的空间，内容再多也不反过来挤压页签行。 */
   flex: 1 1 0;
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
 
-/* 响应区页签行：固定条，脚本日志与正文都在它下面，内容再多也不挪它。 */
+/* 响应区页签行：固定条，各页签正文都在它下面，内容再多也不挪它。 */
 .response-subtabs {
   flex: 0 0 auto;
   min-height: 31px;
@@ -3729,6 +3722,13 @@ textarea.kv-value {
 .response-subtabs .subtab {
   height: 31px;
   font-size: var(--fs-md);
+}
+
+/* 控制台徽标有报错或断言没过时变红。 */
+.subtab-badge.bad,
+.subtab.active .subtab-badge.bad {
+  background: var(--bad-soft);
+  color: var(--bad);
 }
 
 .response-tools {
@@ -3848,7 +3848,8 @@ textarea.kv-value {
 /* ---- 响应体 ---- */
 
 .body-view {
-  flex: 1 1 auto;
+  /* basis 取 0：控制台、链路等页签的正文只吃剩余高度，内容再长也在自己格里滚。 */
+  flex: 1 1 0;
   min-height: 0;
   overflow: auto;
   padding: 0;
