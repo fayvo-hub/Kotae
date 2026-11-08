@@ -117,6 +117,7 @@ AI 代理修改本仓库时的强制规则。与 `~/.pi/agent/AGENTS.md` 冲突�
 - `npm run e2e` 默认会先 `npm run build:web`；前端没改动时用 `MYGO_E2E_SKIP_BUILD=1 npm run e2e`
 - 排障用 `MYGO_E2E_KEEP=1 npm run e2e`（保留临时目录与应用日志），截图在 `e2e/artifacts/`
 - e2e 启动的窗口默认被挪到屏幕外（`desktop.go` 的 `placeE2EWindow`），不挡使用者；要盯屏跑用 `MYGO_E2E_WINDOW=visible`。每次运行的应用名带随机后缀，避免上一轮残留进程占着单实例锁把这一轮挡在启动阶段
+- e2e 每轮都是全新的 userData，WebView2 的 GPU 着色器/栅格缓存是冷的：某个控件类型第一次出现时（如脚本库的源码编辑框）会掉一次 70ms 级长帧，用同一个 userData 重启后同一步骤就只剩 8–14ms。量帧间隔或排查「首次操作卡一下」时别把它当回归（实测 `e2e` 里 `新建脚本` 74ms、重启后无长帧）
 - **未实际执行的验证不得声称通过**；只跑了部分用例就写清跑了哪些
 
 ## 测试纪律
