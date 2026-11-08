@@ -66,7 +66,7 @@ export function responsePanel(tab: Tab): HTMLElement {
     return wrap;
   }
 
-  fill(wrap, statusBar(tab, res), logs, res.error ? errorPane(res) : resTabs(tab, res));
+  fill(wrap, statusBar(tab, res), res.error ? errorPane(res, logs) : resTabs(tab, res, logs));
   return wrap;
 }
 
@@ -342,7 +342,7 @@ function chip(label: string, value: string, title?: string): HTMLElement {
   return c;
 }
 
-function errorPane(res: ResponseRecord): HTMLElement {
+function errorPane(res: ResponseRecord, logs: HTMLElement | null): HTMLElement {
   const wrap = el("div", { class: "response-body" });
   const card = el("div", { class: `error-card tone-${res.errorKind ?? "network"}` });
   card.append(icon("warn"));
@@ -362,11 +362,13 @@ function errorPane(res: ResponseRecord): HTMLElement {
     );
   }
   card.append(text);
+  // 失败前跑过的前置脚本同样要能看到日志，顺序与正文一致：日志在前、错误卡在后。
+  if (logs) wrap.append(logs);
   wrap.append(card);
   return wrap;
 }
 
-function resTabs(tab: Tab, res: ResponseRecord): HTMLElement {
+function resTabs(tab: Tab, res: ResponseRecord, logs: HTMLElement | null): HTMLElement {
   const wrap = el("div", { class: "response-body" });
 
   const strip = el("div", { class: "subtabs response-subtabs" });
@@ -400,6 +402,8 @@ function resTabs(tab: Tab, res: ResponseRecord): HTMLElement {
   strip.append(el("span", { class: "spacer" }), tools);
 
   wrap.append(strip);
+  // 日志跟在页签行下面：页签行位置固定，日志变多只顶掉正文、不挪页签。
+  if (logs) wrap.append(logs);
   if (tab.responseTab === "body") wrap.append(bodyView(tab, res));
   else if (tab.responseTab === "headers") wrap.append(headersView(tab, res));
   else if (tab.responseTab === "trace" && res.trace) wrap.append(traceView(res.trace));

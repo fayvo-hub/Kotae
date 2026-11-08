@@ -368,3 +368,98 @@ func TestScriptsPersistAcrossRestart(t *testing.T) {
 
 	deleteCollectionViaMenu(t, colName)
 }
+
+// 脚本日志：页签行钉在响应区顶部，日志多到上限就在自己那一格里滚，不把页签顶下去。
+func TestScriptLogKeepsResponseTabsPinned(t *testing.T) {
+	cleanupScripts(t)
+	clearGlobalSteps(t)
+	h.clearOverlays(t)
+	newTab(t)
+	typeURL(t, "{{baseUrl}}/json")
+	addRequestStep(t, "pre", "脚本")
+	fillStepSource(t, 1, `for (let i = 0; i < 14; i++) console.log("line " + i);`)
+	h.send(t)
+	h.wait(t, "长日志只有一段", `document.querySelectorAll('.script-log-run').length === 1`)
+
+	// 响应页签行的屏幕纵坐标：这是「吸顶」的判定依据。
+	stripTop := func() float64 {
+		t.Helper()
+		var top float64
+		h.eval(t, `document.querySelector('.response-subtabs').getBoundingClientRect().top`, &top)
+		return top
+	}
+	bandHeight := func() float64 {
+		t.Helper()
+		var height float64
+		h.eval(t, `document.querySelector('.script-log').getBoundingClientRect().height`, &height)
+		return height
+	}
+	lineCount := func() int {
+		t.Helper()
+		return h.count(t, ".script-log-line")
+	}
+
+	// 一行日志占十几像素，十几行就该顶到上限、能滚起来。
+	if got := lineCount(); got != 14 {
+		t.Fatalf("日志行数应是 14，实际 %d", got)
+	}
+	tall := bandHeight()
+	if tall < 155 {
+		t.Fatalf("日志带只有 %.0fpx，读不了几行", tall)
+	}
+	var scrolls bool
+	h.eval(t, `(() => {
+  const box = document.querySelector('.script-log');
+  return box.scrollHeight > box.clientHeight + 4;
+})()`, &scrolls)
+	if !scrolls {
+		t.Fatalf("日志超长时应当在自己的格里滚动，实际没有溢出")
+	}
+
+	first := stripTop()
+	pinned := func(what string) {
+		t.Helper()
+		top := stripTop()
+		if top-first > 0.5 || first-top > 0.5 {
+			t.Fatalf("%s后页签行从 %.1f 挪到了 %.1f", what, first, top)
+		}
+	}
+
+	// 切换页签，页签行不能上下动。
+	for _, label := range []string{"响应头", "链路", "请求", "响应体"} {
+		clickIn(t, ".response-subtabs", label)
+		h.wait(t, "页签生效", fmt.Sprintf(
+			`[...document.querySelectorAll('.response-subtabs .subtab.active')]
+				.some(el => (el.textContent || '').includes(%s))`,
+			jsString(label),
+		))
+		pinned("切到「" + label + "」")
+	}
+	h.shot(t, "57-script-log-pinned")
+
+	// 日志变少（把长脚本删掉再发一次），页签行仍在原位；日志带跟着输出缩回去，不留死白。
+	stepMenu(t, 1, "删除")
+	h.wait(t, "删除确认框", `!!document.querySelector('.prompt-dialog')`)
+	h.clickContaining(t, ".prompt-dialog .btn", "删除")
+	h.wait(t, "操作行被删掉", `document.querySelectorAll('.step-row').length === 0`)
+	addStep(t, "pre", "脚本")
+	fillStepSource(t, 1, `console.log("短日志");`)
+	h.send(t)
+	h.wait(t, "短日志只有一行", `document.querySelectorAll('.script-log-line').length === 1`)
+	pinned("日志变少")
+	if got, was := bandHeight(), tall; got >= was {
+		t.Fatalf("日志只剩一行时日志带还是 %.0fpx（之前 %.0fpx），应当缩回去", got, was)
+	}
+
+	// 两种主题都要看过：浅色、深色各拍一张，再把主题还给后续用例。
+	for i := 0; i < 3 && !h.exists(t, `html[data-theme="light"]`); i++ {
+		h.click(t, `[data-role="theme"]`)
+	}
+	if !h.exists(t, `html[data-theme="light"]`) {
+		t.Fatalf("没能切到浅色主题")
+	}
+	h.shot(t, "58-script-log-pinned-light")
+	h.click(t, `[data-role="theme"]`)
+	h.wait(t, "回到深色主题", `document.documentElement.dataset.theme === "dark"`)
+	h.clearToasts(t)
+}

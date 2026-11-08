@@ -2743,14 +2743,18 @@ body.resizing-row * {
   flex: 1 1 auto;
 }
 
+/* 脚本日志：夹在响应页签行与内容之间，高度随输出增长到上限后自己滚。
+   页签行始终钉在上面，日志多少都不会把它顶下去。 */
 .script-log {
   display: flex;
   flex-direction: column;
   gap: 1px;
+  flex: 0 1 auto;
+  max-height: clamp(160px, 45%, 360px);
   border-bottom: 1px solid var(--border);
   background: var(--surface-2);
-  max-height: 140px;
   overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .script-log-run {
@@ -3705,15 +3709,21 @@ textarea.kv-value {
 }
 
 .response-body {
-  flex: 1 1 auto;
+  /* basis 取 0：正文区只吃日志带与页签行剩下的空间，
+     否则内容一多就会把日志带挤矮，页签行也跟着上下跳。 */
+  flex: 1 1 0;
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
 
+/* 响应区页签行：固定条，脚本日志与正文都在它下面，内容再多也不挪它。 */
 .response-subtabs {
+  flex: 0 0 auto;
   min-height: 31px;
   padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
 }
 
 .response-subtabs .subtab {
