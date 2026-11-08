@@ -139,7 +139,7 @@ MYGO_API_E2E_WINDOW=visible npm run e2e  # 把被测窗口留在原位（默认�
 元数据都在 `mygo.config.ts`：`name`（用户看到的名字，安装包与快捷方式用它）、`slug`（安装包文件名、Debian 包名等纯 ASCII 场景）、`identifier`（系统登记用的反向域名）、`icon`、`windows.displayName` / `windows.installDirName`（Windows 显示名与 `%LOCALAPPDATA%\Programs\MyGoAPI` 目录名）、`linux.*`（Debian 包与 desktop 条目）、`urlSchemes`（深链）。
 
 ```bash
-npm run build                         # build/windows-amd64/：MyGo API.exe + mygo-api-setup-0.1.0-amd64.exe
+npm run build                         # build/windows-amd64/：MyGo API.exe + mygo-api-setup-0.2.0-amd64.exe
 npx mygo-cli build -skip-installer    # 只要可执行文件
 npx mygo-cli build -platform linux/amd64,darwin/universal   # 交叉编译（需要各平台的打包工具）
 ```
@@ -148,11 +148,11 @@ Windows 安装包是 NSIS 做的按用户安装：装到 `%LOCALAPPDATA%\Program
 
 ### 代码签名与自动更新
 
-两者都需要真实证书或密钥，仓库里不存放，所以**当前是未启用状态**——`mygo.config.ts` 里对应块以注释形式写好了字段名，接入时取消注释填入即可。
+两者都需要真实证书或密钥，仓库里不存放。**自动更新已启用**（`updates` 配了 `publicKey` 与 `github`，私钥只在发布机上）；**代码签名仍未启用**，`windows.certificate` / `macos.signingIdentity` 以注释形式写好了字段名，接入时取消注释填入即可。
 
 - Windows 代码签名：配 `windows.certificate`（.pfx 路径）并设置环境变量 `MYGO_WINDOWS_CERTIFICATE_PASSWORD`，时间戳服务用 `windows.timestampUrl`；也可以改用 `windows.signCommand`（`%1` 是待签文件路径）。**没有签名的安装包会被 SmartScreen 拦一次**，属于预期行为。
 - macOS 签名与公证：`macos.signingIdentity` + `macos.notarize.keychainProfile`；未签名时用户要手动「右键 → 打开」。
-- 自动更新：配好 `updates`（`publicKey` + `github`/`url`）后，构建会额外产出签名更新包与 `update-<platform>.json`。密钥对由 `npx mygo-cli keygen` 生成，公钥写进配置、私钥只留在发布机上（`updates.privateKey` 或 CI secret）。
+- 自动更新：`updates` 已配好（`publicKey` + `github: fayvo-hub/mygo-api` + `tagPrefix: v` + `changelog: CHANGELOG.md`）。发布机设好 `MYGO_UPDATER_PRIVATE_KEY` 后，构建会额外产出签名更新包与 `update-<platform>.json`；没有私钥时构建照常出安装包，只是不带更新文件。密钥对由 `npx mygo-cli keygen` 生成，公钥写进配置、私钥不入库。发布说明取自 `CHANGELOG.md` 里 `## <版本>` 那一段，没有这一段打包会报错。
 
 ### 持续集成
 
@@ -171,9 +171,9 @@ Windows 安装包是 NSIS 做的按用户安装：装到 `%LOCALAPPDATA%\Program
 `.github/workflows/release.yml` 在推送 `v*` tag（或在 Actions 页面手动触发）时构建两个平台的安装包并挂到 GitHub Release：
 
 ```bash
-# 发布 0.1.0：先把 mygo.config.ts 的 version 改成 0.1.0 并提交
-git tag v0.1.0
-git push origin v0.1.0
+# 发布 0.2.0：先把 mygo.config.ts 的 version 改成 0.2.0 并提交
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 两个平台并行构建：`windows-latest` 跑 `mygo-cli build -platform windows/amd64`（出 exe、NSIS 安装包，并把裸 exe 改名成 `mygo-api-<版本>-portable.exe`），`macos-latest` 跑 `-platform darwin/universal`（出 `.app` 与 `.dmg`），最后由 `release` job 汇总上传。没有配签名证书时构建带 `-skip-notarize`，产物能装能跑但需要用户手动放行；接入签名后去掉这个参数，并按上一节补配置。
