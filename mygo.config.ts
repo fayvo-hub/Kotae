@@ -40,7 +40,7 @@ export default defineConfig({
   // github 是 GitHub 上的仓库路径，与应用名无关。
   updates: {
     publicKey: "udSJM9PEbjCiDLdSIadYODhlRzSi/UM1sOEutcoc6FU=",
-    github: "fayvo-hub/mygo-api",
+    github: "fayvo-hub/Kotae",
     tagPrefix: "v",
     changelog: "CHANGELOG.md",
   },

@@ -12,7 +12,7 @@ description: 给 MyGo 桌面应用发版：打 tag 触发 GitHub Actions 并行�
 
 | 项 | 值 |
 | --- | --- |
-| 远端 | `origin` = `https://github.com/fayvo-hub/mygo-api.git` |
+| 远端 | `origin` = `https://github.com/fayvo-hub/Kotae.git`（仓库原名 `mygo-api`，GitHub 上 301 重定向，本地 remote 已改到新名） |
 | 版本号唯一真源 | `mygo.config.ts` 的 `version`（`slug` = `kotae` 决定产物名） |
 | 发布流水线 | `.github/workflows/release.yml`（`push: tags: v*` 或手动触发） |
 | 构建矩阵 | Windows `windows/amd64`、macOS `darwin/universal`，`fail-fast: false` |
@@ -81,7 +81,7 @@ git push origin v0.1.1
 
 ```bash
 curl -s --proxy http://127.0.0.1:7897 \
-  "https://github.com/fayvo-hub/mygo-api/releases/expanded_assets/v0.1.1" \
+  "https://github.com/fayvo-hub/Kotae/releases/expanded_assets/v0.1.1" \
   | grep -oE "kotae[a-zA-Z0-9._-]*\.(exe|dmg)" | sort -u
 ```
 

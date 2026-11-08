@@ -1,7 +1,7 @@
 # Kotae
 
-[![CI](https://github.com/fayvo-hub/mygo-api/actions/workflows/ci.yml/badge.svg)](https://github.com/fayvo-hub/mygo-api/actions/workflows/ci.yml)
-[![Release](https://github.com/fayvo-hub/mygo-api/actions/workflows/release.yml/badge.svg)](https://github.com/fayvo-hub/mygo-api/actions/workflows/release.yml)
+[![CI](https://github.com/fayvo-hub/Kotae/actions/workflows/ci.yml/badge.svg)](https://github.com/fayvo-hub/Kotae/actions/workflows/ci.yml)
+[![Release](https://github.com/fayvo-hub/Kotae/actions/workflows/release.yml/badge.svg)](https://github.com/fayvo-hub/Kotae/actions/workflows/release.yml)
 
 纯本地的轻量级 Postman：请求构建、发包、响应查看、集合与历史管理全部在这台机器上完成，不连云端、不需要后端服务。界面文案全部中文。
 
@@ -11,7 +11,7 @@
 
 ## 下载
 
-安装包由 GitHub Actions 在打 tag 时构建并挂到 [Releases](https://github.com/fayvo-hub/mygo-api/releases)：
+安装包由 GitHub Actions 在打 tag 时构建并挂到 [Releases](https://github.com/fayvo-hub/Kotae/releases)：
 
 | 平台 | 产物 | 说明 |
 | --- | --- | --- |
@@ -154,7 +154,7 @@ Windows 安装包是 NSIS 做的按用户安装：装到 `%LOCALAPPDATA%\Program
 
 - Windows 代码签名：配 `windows.certificate`（.pfx 路径）并设置环境变量 `MYGO_WINDOWS_CERTIFICATE_PASSWORD`，时间戳服务用 `windows.timestampUrl`；也可以改用 `windows.signCommand`（`%1` 是待签文件路径）。**没有签名的安装包会被 SmartScreen 拦一次**，属于预期行为。
 - macOS 签名与公证：`macos.signingIdentity` + `macos.notarize.keychainProfile`；未签名时用户要手动「右键 → 打开」。
-- 自动更新：`updates` 已配好（`publicKey` + `github: fayvo-hub/mygo-api` + `tagPrefix: v` + `changelog: CHANGELOG.md`）。发布机设好 `MYGO_UPDATER_PRIVATE_KEY` 后，构建会额外产出签名更新包与 `update-<platform>.json`；没有私钥时构建照常出安装包，只是不带更新文件。密钥对由 `npx mygo-cli keygen` 生成，公钥写进配置、私钥不入库。发布说明取自 `CHANGELOG.md` 里 `## <版本>` 那一段，没有这一段打包会报错。
+- 自动更新：`updates` 已配好（`publicKey` + `github: fayvo-hub/Kotae` + `tagPrefix: v` + `changelog: CHANGELOG.md`）。发布机设好 `MYGO_UPDATER_PRIVATE_KEY` 后，构建会额外产出签名更新包与 `update-<platform>.json`；没有私钥时构建照常出安装包，只是不带更新文件。密钥对由 `npx mygo-cli keygen` 生成，公钥写进配置、私钥不入库。发布说明取自 `CHANGELOG.md` 里 `## <版本>` 那一段，没有这一段打包会报错。
 
 ### 持续集成
 
