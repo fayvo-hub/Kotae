@@ -1,4 +1,4 @@
-# AGENTS.md — MyGo API
+# AGENTS.md — Kotae
 
 纯本地的轻量级 Postman：Go 桌面壳（MyGo）+ 系统 webview 里的 Vite/TypeScript 前端，HTTP 请求由 Go 侧发出。单人维护、单包、Windows 为主，已发 0.2.0。
 
@@ -81,7 +81,7 @@ AI 代理修改本仓库时的强制规则。与 `~/.pi/agent/AGENTS.md` 冲突�
 - `go build` 是 **dev 构建**（会读 `MYGO_DEV_URL` 加载外部前端）；只有 `mygo build` 产出内嵌前端、带 `mygo_noinspector` 的正式产物。验证「前端真的进了二进制」只能用 `MYGO_E2E_PACKAGING=1 npm run e2e`
 - 图标与托盘图标的唯一来源是 `scripts/make-icons.py`：改设计就改脚本再 `python scripts/make-icons.py`，不要手改 `resources/icon.png` / `resources/tray.png`（两处尺寸与视觉要一致）
 - 本机没有 Bun：`devCommand` / `buildCommand` 走 `npm`，不要改回 `bun`
-- Windows 上做过安装/卸载实测：静默安装 `/S`、安装目录 `%LOCALAPPDATA%\Programs\MyGoAPI`、卸载**不会**删 `%APPDATA%\MyGo API`。手动跑真实二进制/安装包验证后，自己产生的 `%APPDATA%\MyGo API` 与 `%APPDATA%\mygo-api Dev` 必须清理干净
+- Windows 上做过安装/卸载实测：静默安装 `/S`、安装目录 `%LOCALAPPDATA%\Programs\Kotae`、卸载**不会**删 `%APPDATA%\Kotae`。手动跑真实二进制/安装包验证后，自己产生的 `%APPDATA%\Kotae` 与 `%APPDATA%\Kotae Dev` 必须清理干净
 - 发版（版本对齐、闸门、打标签、资产核对、重发与排查）走 `.agents/skills/mygo-release/SKILL.md`，不要在对话里临时拼命令
 
 ## 禁止清单
@@ -90,7 +90,7 @@ AI 代理修改本仓库时的强制规则。与 `~/.pi/agent/AGENTS.md` 冲突�
 
 - `git reset --hard` / `git checkout .` / `git clean -fd` / `git stash`
 - `git add .` / `git add -A` / `git commit --no-verify` / 任何 force-push / 任何历史改写
-- 删除或清空 `%APPDATA%\MyGo API`（用户真实数据）、删除 `workspace.db*`
+- 删除或清空 `%APPDATA%\Kotae`（用户真实数据）、删除 `workspace.db*`
 - 在仓库里留下临时文件（`tmp/`、调试用 `e2e/dbg_test.go`、根目录 `.exe`）：用完即删
 - 把临时/调试代码提交入库
 
@@ -116,7 +116,7 @@ AI 代理修改本仓库时的强制规则。与 `~/.pi/agent/AGENTS.md` 冲突�
 
 - `npm run e2e` 默认会先 `npm run build:web`；前端没改动时用 `MYGO_E2E_SKIP_BUILD=1 npm run e2e`
 - 排障用 `MYGO_E2E_KEEP=1 npm run e2e`（保留临时目录与应用日志），截图在 `e2e/artifacts/`
-- e2e 启动的窗口默认被挪到屏幕外（`desktop.go` 的 `placeE2EWindow`），不挡使用者；要盯屏跑用 `MYGO_API_E2E_WINDOW=visible`。每次运行的应用名带随机后缀，避免上一轮残留进程占着单实例锁把这一轮挡在启动阶段
+- e2e 启动的窗口默认被挪到屏幕外（`desktop.go` 的 `placeE2EWindow`），不挡使用者；要盯屏跑用 `MYGO_E2E_WINDOW=visible`。每次运行的应用名带随机后缀，避免上一轮残留进程占着单实例锁把这一轮挡在启动阶段
 - **未实际执行的验证不得声称通过**；只跑了部分用例就写清跑了哪些
 
 ## 测试纪律

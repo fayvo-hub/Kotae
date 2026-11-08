@@ -72,12 +72,12 @@ func repoRoot() (string, error) {
 		return "", err
 	}
 	for {
-		if b, err := os.ReadFile(filepath.Join(dir, "go.mod")); err == nil && strings.Contains(string(b), "module mygo-api") {
+		if b, err := os.ReadFile(filepath.Join(dir, "go.mod")); err == nil && strings.Contains(string(b), "module kotae") {
 			return dir, nil
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", fmt.Errorf("从 %s 往上没有找到 mygo-api 的 go.mod", dir)
+			return "", fmt.Errorf("从 %s 往上没有找到 kotae 的 go.mod", dir)
 		}
 		dir = parent
 	}
@@ -94,7 +94,7 @@ func start(root string) (*harness, error) {
 		return nil, fmt.Errorf("跳过了构建但没有 dist/index.html：%w", err)
 	}
 
-	tmp, err := os.MkdirTemp("", "mygo-api-e2e-")
+	tmp, err := os.MkdirTemp("", "kotae-e2e-")
 	if err != nil {
 		return nil, err
 	}
@@ -133,10 +133,10 @@ func start(root string) (*harness, error) {
 	}
 
 	hb.env = append(os.Environ(),
-		"MYGO_API_E2E=1",
+		"MYGO_E2E=1",
 		// 应用名带上本轮标识：单实例锁按名字区分，上一轮残留的进程不会挡住这一轮。
-		"MYGO_API_E2E_NAME=MyGo API E2E "+strconv.FormatInt(time.Now().UnixNano(), 36),
-		"MYGO_API_USER_DATA="+userData,
+		"MYGO_E2E_NAME=Kotae E2E "+strconv.FormatInt(time.Now().UnixNano(), 36),
+		"MYGO_E2E_USER_DATA="+userData,
 		"MYGO_DEV_URL="+hb.web.URL,
 		"NO_COLOR=1",
 	)

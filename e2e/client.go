@@ -1,4 +1,4 @@
-// Package e2e 是 MyGo API 的端到端测试设施：一个 MyGo Automation 协议客户端，
+// Package e2e 是 Kotae 的端到端测试设施：一个 MyGo Automation 协议客户端，
 // 加上测试用的固定数据与本地桩服务。
 //
 // 应用侧的自动化入口由 `MYGO_AUTOMATION` 环境变量打开（见 automation.go 的

@@ -84,7 +84,7 @@ const statusbar = el("footer", { class: "statusbar" });
 
 function buildShell(): void {
   const brand = el("div", { class: "brand" });
-  brand.append(icon("terminal"), el("span", { class: "brand-name", text: "MyGo API" }));
+  brand.append(icon("terminal"), el("span", { class: "brand-name", text: "Kotae" }));
   brand.append(el("span", { class: "brand-badge", text: "本地" }));
 
   const actions = el("div", { class: "topbar-actions" });
@@ -702,7 +702,7 @@ function welcomeCard(): HTMLElement {
   const head = el("div", { class: "welcome-head" });
   head.append(
     el("span", { class: "welcome-logo", html: icons.terminal }),
-    el("h1", { text: "MyGo API" }),
+    el("h1", { text: "Kotae" }),
   );
   head.append(
     el("p", {

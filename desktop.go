@@ -105,7 +105,7 @@ func showMainWindow() {
 // 这样托盘里的「显示主窗口」还能把它带回来。
 func openMainWindow() {
 	win := mygo.NewWindow(mygo.WindowOptions{
-		Title:           "MyGo API",
+		Title:           "Kotae",
 		Width:           1320,
 		Height:          860,
 		MinWidth:        920,
@@ -299,7 +299,7 @@ func buildTrayMenu() *mygo.Menu {
 		trayItem,
 		shortcutItem,
 		mygo.Separator(),
-		{Label: "退出 MyGo API", Click: func(*mygo.MenuItem, *mygo.Window) { quitApp() }},
+		{Label: "退出 Kotae", Click: func(*mygo.MenuItem, *mygo.Window) { quitApp() }},
 	})
 }
 
@@ -311,7 +311,7 @@ func setupTray() {
 		ID:             "main",
 		Icon:           trayPNG,
 		IconIsTemplate: false,
-		ToolTip:        "MyGo API",
+		ToolTip:        "Kotae",
 		Menu:           buildTrayMenu(),
 	})
 	if err != nil {
@@ -337,14 +337,14 @@ func openDataDir() {
 	}
 }
 
-// parseDeepLink 把 mygo-api:// 深链转成一条页面指令：
+// parseDeepLink 把 kotae:// 深链转成一条页面指令：
 //
-//	mygo-api://import?curl=<URL 编码的 cURL 命令>
-//	mygo-api://new
-//	mygo-api://settings
+//	kotae://import?curl=<URL 编码的 cURL 命令>
+//	kotae://new
+//	kotae://settings
 func parseDeepLink(raw string) (DesktopCommand, bool) {
 	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || !strings.EqualFold(u.Scheme, "mygo-api") {
+	if err != nil || !strings.EqualFold(u.Scheme, "kotae") {
 		return DesktopCommand{}, false
 	}
 	switch strings.ToLower(u.Host) {
@@ -362,7 +362,7 @@ func parseDeepLink(raw string) (DesktopCommand, bool) {
 	return DesktopCommand{}, false
 }
 
-// handleDeepLink 处理从浏览器「用 MyGo API 打开」或第二个实例传来的深链。
+// handleDeepLink 处理从浏览器「用 Kotae 打开」或第二个实例传来的深链。
 func handleDeepLink(raw string) {
 	cmd, ok := parseDeepLink(raw)
 	if !ok {
@@ -474,7 +474,7 @@ func setupAppHooks() {
 
 // e2eAppEnv 标记「这次启动是端到端测试的实例」：改应用名（隔离单实例锁）、
 // 把窗口移出视线。只在测试里由 harness 设置。
-const e2eAppEnv = "MYGO_API_E2E"
+const e2eAppEnv = "MYGO_E2E"
 
 // e2eWindowEnv 让端到端测试把主窗口移出视线，跑用例时不打断使用者。
 // 默认（未设置或其它值）：挪到虚拟桌面之外。窗口仍算「可见」，WebView2 照常
@@ -482,12 +482,12 @@ const e2eAppEnv = "MYGO_API_E2E"
 // 几乎停摆（400ms 只剩 4 帧），所以不用。
 // visible：保持原位，用于人工盯屏或需要在真实显示器上截图时；
 // minimize：最小化，只用于验证「最小化后能不能恢复」。
-// 只有 MYGO_API_E2E=1 的测试实例才会动窗口，正式使用完全不受影响。
-const e2eWindowEnv = "MYGO_API_E2E_WINDOW"
+// 只有 MYGO_E2E=1 的测试实例才会动窗口，正式使用完全不受影响。
+const e2eWindowEnv = "MYGO_E2E_WINDOW"
 
 // e2eNameEnv 给测试实例一个**每次运行都不同**的应用名：单实例锁按名字区分，
 // 上一次运行如果残留了进程，它不会把这一轮挡在启动阶段（表现为业务用例全红）。
-const e2eNameEnv = "MYGO_API_E2E_NAME"
+const e2eNameEnv = "MYGO_E2E_NAME"
 
 func placeE2EWindow(win *mygo.Window) {
 	if os.Getenv(e2eAppEnv) != "1" {

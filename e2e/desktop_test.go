@@ -33,7 +33,7 @@ func (hb *harness) launchSecondInstance(t *testing.T, args ...string) {
 func TestDeepLinkImportFromSecondInstance(t *testing.T) {
 	h.clearOverlays(t)
 	curl := `curl -X POST '{{baseUrl}}/echo' -H 'X-Deep-Link: yes' -d 'a=1'`
-	h.launchSecondInstance(t, "mygo-api://import?curl="+url.QueryEscape(curl))
+	h.launchSecondInstance(t, "kotae://import?curl="+url.QueryEscape(curl))
 	h.wait(t, "深链把命令送进导入浮层", `!!document.querySelector('.curl-input')`)
 	var value string
 	h.eval(t, `document.querySelector('.curl-input').value`, &value)
@@ -79,7 +79,7 @@ func TestCloseToTrayAndRestore(t *testing.T) {
 	}
 
 	// 再从托盘 / 第二个实例把窗口叫回来，隐藏的窗口还能用。
-	h.launchSecondInstance(t, "mygo-api://new")
+	h.launchSecondInstance(t, "kotae://new")
 	shown := false
 	for time.Now().Before(time.Now().Add(15 * time.Second)) {
 		ws, err := h.client.Windows()

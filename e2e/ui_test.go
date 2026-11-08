@@ -13,10 +13,10 @@ import (
 func TestBoot(t *testing.T) {
 	var title string
 	h.eval(t, `document.title`, &title)
-	if !strings.Contains(title, "MyGo API") {
+	if !strings.Contains(title, "Kotae") {
 		t.Fatalf("窗口标题不对：%q", title)
 	}
-	if brand := h.text(t, ".brand-name"); brand != "MyGo API" {
+	if brand := h.text(t, ".brand-name"); brand != "Kotae" {
 		t.Fatalf("品牌名不对：%q", brand)
 	}
 	// 固定数据里的集合、环境都到位了。

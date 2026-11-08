@@ -41,10 +41,10 @@ func TestWelcomeOnboardingButtons(t *testing.T) {
 func withUserData(env []string, dir string) []string {
 	out := make([]string, 0, len(env))
 	for _, kv := range env {
-		if strings.HasPrefix(kv, "MYGO_API_USER_DATA=") {
+		if strings.HasPrefix(kv, "MYGO_E2E_USER_DATA=") {
 			continue
 		}
 		out = append(out, kv)
 	}
-	return append(out, "MYGO_API_USER_DATA="+dir)
+	return append(out, "MYGO_E2E_USER_DATA="+dir)
 }

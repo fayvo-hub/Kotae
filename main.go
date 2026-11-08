@@ -281,7 +281,7 @@ func main() {
 	mygo.App.WhenReady(func() {
 		openMainWindow()
 		setupDesktop()
-		// 冷启动时命令行里就可能带深链（例如从浏览器点「用 MyGo API 打开」）。
+		// 冷启动时命令行里就可能带深链（例如从浏览器点「用 Kotae 打开」）。
 		for _, arg := range os.Args[1:] {
 			handleDeepLink(arg)
 		}
@@ -299,11 +299,11 @@ func applyDataDirOverride() {
 	if os.Getenv(e2eAppEnv) == "1" {
 		name := strings.TrimSpace(os.Getenv(e2eNameEnv))
 		if name == "" {
-			name = "MyGo API E2E"
+			name = "Kotae E2E"
 		}
 		mygo.App.SetName(name)
 	}
-	dir := strings.TrimSpace(os.Getenv("MYGO_API_USER_DATA"))
+	dir := strings.TrimSpace(os.Getenv("MYGO_E2E_USER_DATA"))
 	if dir == "" {
 		return
 	}

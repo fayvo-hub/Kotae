@@ -33,7 +33,7 @@ func TestPackagedBuildLoadsEmbeddedFrontend(t *testing.T) {
 	if b, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("打包失败：%v\n%s", err, tail(string(b), 4000))
 	}
-	exe := filepath.Join(out, "windows-amd64", "MyGo API.exe")
+	exe := filepath.Join(out, "windows-amd64", "Kotae.exe")
 	if _, err := os.Stat(exe); err != nil {
 		t.Fatalf("没找到打包产物：%v", exe)
 	}
@@ -45,8 +45,8 @@ func TestPackagedBuildLoadsEmbeddedFrontend(t *testing.T) {
 		"MYGO_AUTOMATION="+sock,
 		// 与日常开发测试同一套隔离：改名 + 独立数据目录，不然会和
 		// 本机正在运行的正式版撞单实例锁，第二个实例会把参数转交过去然后退出。
-		"MYGO_API_E2E=1",
-		"MYGO_API_USER_DATA="+filepath.Join(t.TempDir(), "userdata"),
+		"MYGO_E2E=1",
+		"MYGO_E2E_USER_DATA="+filepath.Join(t.TempDir(), "userdata"),
 		"NO_COLOR=1",
 	)
 	logPath := filepath.Join(out, "packaged.log")
@@ -98,7 +98,7 @@ func TestPackagedBuildLoadsEmbeddedFrontend(t *testing.T) {
 	if err := client.Eval(win.ID, `document.title`, &title); err != nil {
 		t.Fatalf("读标题失败：%v", err)
 	}
-	if !strings.HasPrefix(title, "MyGo API") {
+	if !strings.HasPrefix(title, "Kotae") {
 		t.Fatalf("界面没跑起来，标题是 %q", title)
 	}
 	t.Logf("打包产物：%s，地址 %s，标题 %q", filepath.Base(exe), href, title)

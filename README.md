@@ -1,4 +1,4 @@
-# MyGo API
+# Kotae
 
 [![CI](https://github.com/fayvo-hub/mygo-api/actions/workflows/ci.yml/badge.svg)](https://github.com/fayvo-hub/mygo-api/actions/workflows/ci.yml)
 [![Release](https://github.com/fayvo-hub/mygo-api/actions/workflows/release.yml/badge.svg)](https://github.com/fayvo-hub/mygo-api/actions/workflows/release.yml)
@@ -15,9 +15,9 @@
 
 | 平台 | 产物 | 说明 |
 | --- | --- | --- |
-| Windows 10/11 | `mygo-api-setup-<版本>-amd64.exe` | 按用户安装到 `%LOCALAPPDATA%\Programs\MyGoAPI`，不需要管理员权限；需要 WebView2（Win11 自带） |
-| Windows 免安装 | `mygo-api-<版本>-portable.exe` | 单文件双击即用，适合放 U 盘或临时机器 |
-| macOS 12+ | `mygo-api-<版本>.dmg` | Apple Silicon 与 Intel 通用；未做代码签名，首次打开请右键 →「打开」 |
+| Windows 10/11 | `kotae-setup-<版本>-amd64.exe` | 按用户安装到 `%LOCALAPPDATA%\Programs\Kotae`，不需要管理员权限；需要 WebView2（Win11 自带） |
+| Windows 免安装 | `kotae-<版本>-portable.exe` | 单文件双击即用，适合放 U 盘或临时机器 |
+| macOS 12+ | `kotae-<版本>.dmg` | Apple Silicon 与 Intel 通用；未做代码签名，首次打开请右键 →「打开」 |
 
 安装包没有代码签名：Windows 首次运行会被 SmartScreen 拦一次（「更多信息」→「仍要运行」）。想自己编译见「[打包与安装](#打包与安装)」。
 
@@ -119,7 +119,7 @@ npm run e2e:verbose                # 带每个用例的输出与截图名称
 MYGO_E2E_SKIP_BUILD=1 npm run e2e  # 前端没改动时跳过 npm run build:web
 MYGO_E2E_KEEP=1 npm run e2e        # 保留临时目录（含应用日志）便于事后排查
 MYGO_E2E_PACKAGING=1 npm run e2e   # 追加验证打包产物：跑一次 mygo build，断言界面来自二进制
-MYGO_API_E2E_WINDOW=visible npm run e2e  # 把被测窗口留在原位（默认挪到屏幕外，不挡你正在做的事）
+MYGO_E2E_WINDOW=visible npm run e2e  # 把被测窗口留在原位（默认挪到屏幕外，不挡你正在做的事）
 ```
 
 覆盖率（默认 84 个用例，`MYGO_E2E_PACKAGING=1` 再跑 1 个打包用例，共 85 个）：首屏与固定数据加载、GET/POST 发送与保真（方法、头、查询串、认证）、重定向、错误状态码、超时中文提示、未定义变量拦截、纯文本与二进制响应、Cookie 罐、cURL 导入与导入后发送、导出 cURL 不丢查询串里的 API Key、保存对话框与新建集合、环境变量面板、环境胶囊下拉与编辑入口、地址栏变量高亮与不自动补协议、命令面板、主题切换、历史记录、结构化视图默认全展开并可一键收起/展开、响应区「请求」页签展示实际发出的请求快照、批量粘贴对话框（多行输入、Enter 换行、点遮罩不关闭、Ctrl+Enter 提交、预填已有行与 `#` 禁用、不改内容时点取消或确定都不改动数据）、表单文件行的删除按钮不与文件按钮重叠、集合树拖拽排序与拖进移出文件夹（拖回原位后整串标签完全一致）、耗时拆分与重定向最终地址提示、代码片段生成与复制、Postman 与 HAR 导入（含认证/请求体/禁用头）与导出入口、图片响应的内联预览与二进制十六进制片段、变量补全在地址栏与请求体里生效、环境变量值遮罩、标签页右键菜单的刷新与三种关闭、前置脚本算 HMAC 签名后服务端验签通过、后置脚本改写响应体、导入脚本默认不执行并需手动信任、全按钮巡检（每个界面的控件都要有名字、有尺寸、中心点真能点中；请求区与响应区每个页签、请求体七种模式、四种认证方式、脚本前后两阶段都要能切过去；顶栏与响应区的按钮都要有实际结果；标签页加号与关闭、清空历史、环境面板的新建/删除环境与加变量行、首次启动引导三个入口、发送中的「取消」真的中断请求并显示「请求已取消」、集合树右键菜单与就地改名、SSE 边收边显示与多行 data 拼接、WebSocket 握手取子协议且收发回显、协议切回 HTTP 后不残留流式面板、统一下拉框（键盘 ↑↓/Enter/Esc、点外部收起）与 `{{` 变量补全重绘后仍可点选、自定义代理真的走代理、跳过 TLS 校验能连自签证书、链路页签的逐跳与耗时拆解、GraphQL 查询与变量的分栏与切换保真、路径变量替换进路径、`pm.test` 断言的通过与失败汇总、Cookie 管理器筛选与删除、集合/文件夹共享认证与变量向下继承并在重启后仍在）、窗口默认挪到屏幕外且渲染没有被节流；存储层：`workspace.json` 一次性迁移成 `workspace.db`、新建集合后连续重启两次数据仍在（证明写的是数据库而不是内存）、侧边栏折叠状态与桌面偏好（关闭到托盘、全局快捷键）跨重启保持；桌面层：深链导入、关闭到托盘后从第二个实例恢复窗口。
@@ -131,20 +131,20 @@ MYGO_API_E2E_WINDOW=visible npm run e2e  # 把被测窗口留在原位（默认�
 - **没有系统菜单栏**：窗口顶部只有应用自己的工具栏。动作都在界面里（顶栏按钮、命令面板、标签页右键菜单）或快捷键里，托盘菜单承担「没有窗口时也能操作」的那部分。窗口更干净，也不用维护两套入口。
 - **分栏**：侧边栏宽度与响应区高度可拖拽，双击分隔条复位到默认值（288px / 340px）；拖拽范围与读回数据库时的钳制范围一致，重启不会把尺寸悄悄改掉。
 - **托盘**：左键单击图标直接显示主窗口；右键弹出菜单（显示主窗口、新建请求、导入 cURL、检查更新、关闭到托盘开关、全局快捷键开关、退出）；`Ctrl+Shift+M` 在应用不在前台时也能显示/隐藏窗口（注册失败只记日志，不影响其它功能），两个开关同样出现在设置面板的「桌面」一节，状态存在数据库里。关闭窗口时按该开关隐藏窗口而不是退出（默认开启），偏好存在数据库的 `settings` 表里，启动时由页面交给 Go 侧。Linux 需要 `libayatana-appindicator3`，未安装时托盘创建失败会被记日志，应用其余部分照常工作。
-- **单实例与深链**：第二次启动不会开新窗口，参数转给已在运行的实例。支持 `mygo-api://new`、`mygo-api://settings`、`mygo-api://import?curl=<URL 编码的 cURL>`，最后一种会直接把命令送进导入浮层并自动解析。双击 `.har` 文件（已关联）会把文件内容读进来直接解析成集合，超过 16 MB 的文件会提示手动选择。
+- **单实例与深链**：第二次启动不会开新窗口，参数转给已在运行的实例。支持 `kotae://new`、`kotae://settings`、`kotae://import?curl=<URL 编码的 cURL>`，最后一种会直接把命令送进导入浮层并自动解析。双击 `.har` 文件（已关联）会把文件内容读进来直接解析成集合，超过 16 MB 的文件会提示手动选择。
 - **关于面板**：走系统标准面板（`ShowAboutPanel`），应用名与版本取自构建时的配置。
 
 ## 打包与安装
 
-元数据都在 `mygo.config.ts`：`name`（用户看到的名字，安装包与快捷方式用它）、`slug`（安装包文件名、Debian 包名等纯 ASCII 场景）、`identifier`（系统登记用的反向域名）、`icon`、`windows.displayName` / `windows.installDirName`（Windows 显示名与 `%LOCALAPPDATA%\Programs\MyGoAPI` 目录名）、`linux.*`（Debian 包与 desktop 条目）、`urlSchemes`（深链）。
+元数据都在 `mygo.config.ts`：`name`（用户看到的名字，安装包与快捷方式用它）、`slug`（安装包文件名、Debian 包名等纯 ASCII 场景）、`identifier`（系统登记用的反向域名）、`icon`、`windows.displayName` / `windows.installDirName`（Windows 显示名与 `%LOCALAPPDATA%\Programs\Kotae` 目录名）、`linux.*`（Debian 包与 desktop 条目）、`urlSchemes`（深链）。
 
 ```bash
-npm run build                         # build/windows-amd64/：MyGo API.exe + mygo-api-setup-0.2.0-amd64.exe
+npm run build                         # build/windows-amd64/：Kotae.exe + kotae-setup-0.2.0-amd64.exe
 npx mygo-cli build -skip-installer    # 只要可执行文件
 npx mygo-cli build -platform linux/amd64,darwin/universal   # 交叉编译（需要各平台的打包工具）
 ```
 
-Windows 安装包是 NSIS 做的按用户安装：装到 `%LOCALAPPDATA%\Programs\MyGoAPI`，建开始菜单快捷方式，完成页可勾选桌面快捷方式，卸载项出现在「设置 → 应用」（显示名、版本、发布者取自上面的配置）。支持 `/S` 静默安装，卸载同样支持 `/S`；卸载会删掉程序目录、快捷方式与卸载注册项，**不会删** userData 里的工作区数据——那是用户资产，需要的话自己删。NSIS 未安装时 mygo 会自己下载一份。SQLite 的原生库（Windows 上是 `mygo-sqlite3.dll`，约 1.4 MB）由 `mygo build` 自动放到可执行文件旁边并一起打进安装包，所以安装后的目录里有它，不用额外装数据库。macOS 出 `.app` 与 `.dmg`，Linux 出可执行文件、`.deb`、`.tar.gz`（含 install.sh）与 PKGBUILD。
+Windows 安装包是 NSIS 做的按用户安装：装到 `%LOCALAPPDATA%\Programs\Kotae`，建开始菜单快捷方式，完成页可勾选桌面快捷方式，卸载项出现在「设置 → 应用」（显示名、版本、发布者取自上面的配置）。支持 `/S` 静默安装，卸载同样支持 `/S`；卸载会删掉程序目录、快捷方式与卸载注册项，**不会删** userData 里的工作区数据——那是用户资产，需要的话自己删。NSIS 未安装时 mygo 会自己下载一份。SQLite 的原生库（Windows 上是 `mygo-sqlite3.dll`，约 1.4 MB）由 `mygo build` 自动放到可执行文件旁边并一起打进安装包，所以安装后的目录里有它，不用额外装数据库。macOS 出 `.app` 与 `.dmg`，Linux 出可执行文件、`.deb`、`.tar.gz`（含 install.sh）与 PKGBUILD。
 
 ### 代码签名与自动更新
 
@@ -176,7 +176,7 @@ git tag v0.2.0
 git push origin v0.2.0
 ```
 
-两个平台并行构建：`windows-latest` 跑 `mygo-cli build -platform windows/amd64`（出 exe、NSIS 安装包，并把裸 exe 改名成 `mygo-api-<版本>-portable.exe`），`macos-latest` 跑 `-platform darwin/universal`（出 `.app` 与 `.dmg`），最后由 `release` job 汇总上传。没有配签名证书时构建带 `-skip-notarize`，产物能装能跑但需要用户手动放行；接入签名后去掉这个参数，并按上一节补配置。
+两个平台并行构建：`windows-latest` 跑 `mygo-cli build -platform windows/amd64`（出 exe、NSIS 安装包，并把裸 exe 改名成 `kotae-<版本>-portable.exe`），`macos-latest` 跑 `-platform darwin/universal`（出 `.app` 与 `.dmg`），最后由 `release` job 汇总上传。没有配签名证书时构建带 `-skip-notarize`，产物能装能跑但需要用户手动放行；接入签名后去掉这个参数，并按上一节补配置。
 
 发完整流程（版本号对齐清单、资产核对命令、重发同一版本、失败排查）见 `.agents/skills/mygo-release/SKILL.md`。
 

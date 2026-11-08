@@ -52,8 +52,8 @@ jobs:
         run: npx mygo-cli build -skip-installer
       - uses: actions/upload-artifact@v4
         with:
-          name: mygo-api-windows
-          path: build/windows-amd64/MyGo API.exe
+          name: kotae-windows
+          path: build/windows-amd64/Kotae.exe
           if-no-files-found: error
 
   e2e:

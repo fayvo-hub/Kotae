@@ -14,7 +14,7 @@ import (
 // 窗口必须真的在屏幕外：可见窗口会盖住用户正在用的东西。
 func TestWindowStaysOffscreen(t *testing.T) {
 	if windowMode() == "visible" {
-		t.Skip("MYGO_API_E2E_WINDOW=visible，本轮刻意让窗口留在原位")
+		t.Skip("MYGO_E2E_WINDOW=visible，本轮刻意让窗口留在原位")
 	}
 	wins, err := h.client.Windows()
 	if err != nil {
@@ -61,7 +61,7 @@ func TestRenderingAliveOffscreen(t *testing.T) {
 	}
 }
 
-// 页面自己看到的可见性，以及当前的 MYGO_API_E2E_WINDOW 取值（空=默认挪出屏幕）。
+// 页面自己看到的可见性，以及当前的 MYGO_E2E_WINDOW 取值（空=默认挪出屏幕）。
 func windowMode() string {
-	return os.Getenv("MYGO_API_E2E_WINDOW")
+	return os.Getenv("MYGO_E2E_WINDOW")
 }

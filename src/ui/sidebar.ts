@@ -107,7 +107,7 @@ function sidebarFooter(): HTMLElement {
 
 async function doExport(): Promise<void> {
   try {
-    const saved = await System.saveText("mygo-api-备份.json", exportBundle());
+    const saved = await System.saveText("kotae-备份.json", exportBundle());
     if (saved) toast(`已导出到 ${saved}`, "success");
   } catch (err) {
     toast(`导出失败：${(err as Error).message}`, "error");

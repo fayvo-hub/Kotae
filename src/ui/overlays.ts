@@ -1065,7 +1065,7 @@ function backupSection(): HTMLElement {
     on: {
       click: async () => {
         try {
-          const saved = await System.saveText("mygo-api-备份.json", exportBundle());
+          const saved = await System.saveText("kotae-备份.json", exportBundle());
           if (saved) toast(`已导出到 ${saved}`, "success");
         } catch (err) {
           toast(`导出失败：${(err as Error).message}`, "error");
@@ -1103,7 +1103,7 @@ function backupSection(): HTMLElement {
       click: async () => {
         try {
           const saved = await System.saveText(
-            "mygo-api-postman.json",
+            "kotae-postman.json",
             toPostmanCollection(state.collections, state.envs),
           );
           if (saved) toast(`已导出到 ${saved}`, "success");

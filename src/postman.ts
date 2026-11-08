@@ -500,7 +500,7 @@ export function toPostmanCollection(collections: Collection[], envs: { name: str
 
   const dump = {
     info: {
-      name: collections.length === 1 ? (collections[0]?.name ?? "MyGo API") : "MyGo API 全部集合",
+      name: collections.length === 1 ? (collections[0]?.name ?? "Kotae") : "Kotae 全部集合",
       schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     },
     item: items,

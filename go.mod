@@ -1,4 +1,4 @@
-module mygo-api
+module kotae
 
 go 1.27.3
 

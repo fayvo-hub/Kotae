@@ -2064,7 +2064,7 @@ export interface WorkspaceBundle {
 
 export function exportBundle(): string {
   const bundle: WorkspaceBundle = {
-    app: "mygo-api",
+    app: "kotae",
     version: STORAGE_VERSION,
     exportedAt: new Date().toISOString(),
     collections: state.collections,
