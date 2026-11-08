@@ -79,6 +79,7 @@ func newTab(t *testing.T) {
 	before := h.count(t, ".tab")
 	h.pressKeys(t, "n", true, false)
 	h.wait(t, "新标签页就绪", fmt.Sprintf(`document.querySelectorAll('.tab').length > %d`, before))
+	h.waitFreshPanel(t)
 }
 
 // 地址栏：不再自动补协议；变量上色、悬停看到解析值、预览实时更新。

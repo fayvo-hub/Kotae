@@ -267,35 +267,175 @@ kbd {
 
 /* ---- SSE / WebSocket ---- */
 
-.protocol-select {
-  appearance: none;
-  height: 32px;
-  padding: 0 22px 0 9px;
+/* ---- 下拉框：协议 / 方法 / 重定向共用一套（src/ui/select.ts） ---- */
+
+.select {
+  position: relative;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.select-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px 0 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
-  background: var(--surface)
-    no-repeat right 6px center/9px 9px
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b93a5' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 8.5 7 7 7-7'/%3E%3C/svg%3E");
-  font-family: var(--mono);
+  background: var(--surface);
+  color: var(--text-2);
   font-size: var(--fs-sm);
   font-weight: 700;
   letter-spacing: 0.03em;
-  color: var(--text-2);
   cursor: pointer;
+  transition: border-color var(--speed), box-shadow var(--speed), background var(--speed);
 }
 
-.protocol-select:focus {
+.select-trigger:hover {
+  background: var(--surface-2);
+}
+
+.select-trigger:focus-visible {
   outline: none;
   border-color: var(--accent);
   box-shadow: var(--ring);
 }
 
-.protocol-select.proto-sse {
+.select.open .select-trigger {
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+
+.select-value {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.select-caret {
+  width: 14px;
+  height: 14px;
+  color: var(--text-3);
+  transition: transform var(--speed);
+}
+
+.select.open .select-caret {
+  transform: rotate(180deg);
+}
+
+.select.disabled .select-trigger {
+  background: var(--surface-2);
+  color: var(--text-3);
+  cursor: not-allowed;
+}
+
+.select.disabled .select-caret {
+  opacity: 0.45;
+}
+
+.select-menu {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px;
+  max-height: 320px;
+  overflow-y: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  box-shadow: var(--shadow-3);
+  animation: pop-in 90ms ease-out;
+}
+
+.select-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-md);
+  text-align: left;
+  cursor: pointer;
+}
+
+.select-option:hover,
+.select-option.active {
+  background: var(--surface-2);
+}
+
+.select-hint {
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.select-check {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+}
+
+/* 地址栏里的两枚：等宽字体 + 按语义着色。 */
+.protocol-select .select-trigger,
+.method-select .select-trigger {
+  font-family: var(--mono);
+}
+
+.protocol-select.proto-sse .select-trigger {
   color: var(--m-put);
 }
 
-.protocol-select.proto-ws {
+.protocol-select.proto-ws .select-trigger {
   color: var(--accent);
+}
+
+.method-select.tone-get .select-trigger {
+  color: var(--m-get);
+}
+.method-select.tone-post .select-trigger {
+  color: var(--m-post);
+}
+.method-select.tone-put .select-trigger {
+  color: var(--m-put);
+}
+.method-select.tone-delete .select-trigger {
+  color: var(--m-delete);
+}
+.method-select.tone-patch .select-trigger,
+.method-select.tone-head .select-trigger,
+.method-select.tone-options .select-trigger {
+  color: var(--m-other);
+}
+
+.method-select .select-trigger {
+  min-width: 84px;
+}
+
+/* 选项页签里的重定向：宽度跟其它输入框对齐。 */
+.redirect-select {
+  width: 100%;
+}
+
+.redirect-select .select-trigger {
+  width: 100%;
+  justify-content: space-between;
+  height: 30px;
+  font-family: inherit;
+  font-weight: 400;
+  letter-spacing: 0;
+  font-size: var(--fs-md);
+  color: var(--text);
 }
 
 .stream-panel {
@@ -712,7 +852,6 @@ kbd {
 }
 
 select.text-input,
-.method-select,
 .env-select {
   appearance: none;
   cursor: pointer;
@@ -1891,46 +2030,6 @@ body.resizing-row * {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-.method-select {
-  appearance: none;
-  height: 32px;
-  padding: 0 22px 0 9px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-strong);
-  background: var(--surface)
-    no-repeat right 6px center/9px 9px
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b93a5' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 8.5 7 7 7-7'/%3E%3C/svg%3E");
-  font-family: var(--mono);
-  font-size: var(--fs-sm);
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  cursor: pointer;
-}
-
-.method-select:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: var(--ring);
-}
-
-.method-select.tone-get {
-  color: var(--m-get);
-}
-.method-select.tone-post {
-  color: var(--m-post);
-}
-.method-select.tone-put {
-  color: var(--m-put);
-}
-.method-select.tone-delete {
-  color: var(--m-delete);
-}
-.method-select.tone-patch,
-.method-select.tone-head,
-.method-select.tone-options {
-  color: var(--m-other);
 }
 
 .url-field {

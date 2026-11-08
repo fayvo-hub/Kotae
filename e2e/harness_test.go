@@ -526,6 +526,45 @@ func (hb *harness) typeInto(t *testing.T, selector, value string) {
 	}
 }
 
+// waitFreshPanel 等新页签的请求面板真的重绘出来。
+// 面板重建走 requestAnimationFrame 批处理，只等「页签数量变多」会在旧面板上继续操作。
+func (hb *harness) waitFreshPanel(t *testing.T) {
+	t.Helper()
+	hb.wait(t, "新页签的请求面板就绪", `(() => {
+	  const url = document.querySelector('.url-input');
+	  if (!url || url.value !== '') return false;
+	  return document.querySelectorAll('.kv-row').length === 0;
+	})()`)
+}
+
+// activateSubtab 切换请求页签，并等它真的渲染出来。
+// 重绘是 requestAnimationFrame 批处理的，「刚建的新页签」上点完立刻断言会读到旧面板。
+func (hb *harness) activateSubtab(t *testing.T, label string) {
+	t.Helper()
+	hb.clickContaining(t, ".subtabs:not(.response-subtabs) .subtab", label)
+	hb.wait(t, "页签切到「"+label+"」", fmt.Sprintf(
+		`[...document.querySelectorAll('.subtabs:not(.response-subtabs) .subtab')].some(n => n.classList.contains('active') && (n.textContent || '').trim().startsWith(%s))`,
+		jsString(label),
+	))
+}
+
+// pickSelect 点开统一下拉框（协议/方法/重定向共用 .select-trigger + .select-option）并选中某一项。
+func (hb *harness) pickSelect(t *testing.T, selector, label string) {
+	t.Helper()
+	hb.click(t, selector+" .select-trigger")
+	hb.wait(t, "下拉框已展开", `!!document.querySelector('.select-menu .select-option')`)
+	hb.clickContaining(t, ".select-menu .select-option", label)
+	hb.wait(t, "下拉框收起", `!document.querySelector('.select-menu')`)
+}
+
+// selectValue 读统一下拉框的当前值（存在根节点的 data-value 上）。
+func (hb *harness) selectValue(t *testing.T, selector string) string {
+	t.Helper()
+	var value string
+	hb.eval(t, fmt.Sprintf(`document.querySelector(%s)?.dataset.value || ''`, jsString(selector)), &value)
+	return value
+}
+
 // pressKeys 在页面里派发一次组合键，走真实快捷键处理路径。
 func (hb *harness) pressKeys(t *testing.T, key string, ctrl, shift bool) {
 	t.Helper()

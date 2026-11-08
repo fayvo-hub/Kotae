@@ -123,7 +123,7 @@ export function curlDialog(): HTMLElement {
     },
   });
   let autoTimer: number | undefined;
-  enableVarAssist(textarea);
+  enableVarAssist(textarea, "curl-input");
 
   const pasteBtn = el("button", {
     class: "btn small",

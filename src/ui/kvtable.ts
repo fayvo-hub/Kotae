@@ -111,10 +111,12 @@ export function kvTable<T extends KVRow>(opts: KVTableOptions<T>): HTMLElement {
           opts.onChange();
         },
         keydown: (ev) => onRowKeydown(ev, row, "key"),
-        focus: () => enableVarAssist(keyInput),
       },
     });
     keyInput.value = row.key;
+    // 补全在创建时就挂上：靠 focus 挂会让「已经被聚焦的输入框」漏掉（重绘后焦点是恢复出来的，
+    // 不会再派发一次 focus）。
+    enableVarAssist(keyInput, `kv:${row.id}:key`);
     if (opts.keyList && opts.keyList.length > 0) {
       const listId = `dl_${newId()}`;
       const dl = el("datalist", { attr: { id: listId } });
@@ -134,7 +136,6 @@ export function kvTable<T extends KVRow>(opts: KVTableOptions<T>): HTMLElement {
               opts.onChange();
             },
             keydown: (ev) => onRowKeydown(ev, row, "value"),
-            focus: () => enableVarAssist(valueInput),
           },
         })
       : el("input", {
@@ -151,10 +152,10 @@ export function kvTable<T extends KVRow>(opts: KVTableOptions<T>): HTMLElement {
               opts.onChange();
             },
             keydown: (ev) => onRowKeydown(ev, row, "value"),
-            focus: () => enableVarAssist(valueInput),
           },
         });
     valueInput.value = row.value;
+    enableVarAssist(valueInput, `kv:${row.id}:value`);
     if (opts.multiline) queueMicrotask(() => autoGrow(valueInput as HTMLTextAreaElement));
 
     line.append(keyInput, valueInput);
@@ -345,6 +346,11 @@ let assistTarget: HTMLInputElement | HTMLTextAreaElement | null = null;
 let assistItems: { name: string; desc: string }[] = [];
 let assistIndex = 0;
 let assistTriggerAt = -1;
+/**
+ * 当前补全所属字段的稳定标识。整块请求面板每次 emit 都会重建，输入框元素会被换掉，
+ * 靠这个 key 在重绘后把补全接回新元素上，否则弹层会因为旧元素失焦而一闪就没。
+ */
+let assistKey = "";
 
 /** 把补全层挂到 body 上，跟随输入框位置。 */
 export function mountAssist(): void {
@@ -357,16 +363,43 @@ const assistBound = new WeakSet<HTMLElement>();
  * 给任意输入框接上 {{变量}} 补全。表格的行内输入框、地址栏、请求体、cURL 导入框
  * 都走这一份实现，行为保持一致。
  */
-export function enableVarAssist(target: HTMLInputElement | HTMLTextAreaElement): void {
+export function enableVarAssist(target: HTMLInputElement | HTMLTextAreaElement, key: string): void {
+  target.dataset.assistKey = key;
   if (assistBound.has(target)) return;
   assistBound.add(target);
-  target.addEventListener("blur", () => window.setTimeout(hideAssist, 120));
+  target.addEventListener("blur", () => {
+    window.setTimeout(() => {
+      // 元素被重绘换掉了（不是用户主动离开）：交给 resumeAssist 接手，不要收起。
+      if (!target.isConnected) return;
+      if (document.activeElement === target) return;
+      hideAssist();
+    }, 120);
+  });
   target.addEventListener("input", () => {
     assistTarget = target;
+    assistKey = target.dataset.assistKey ?? "";
     updateAssist();
   });
   target.addEventListener("keydown", (ev) => handleAssistKey(ev as KeyboardEvent));
   target.addEventListener("scroll", () => hideAssist());
+}
+
+/**
+ * 重绘之后把开着的补全接回新元素：整页重绘会替换输入框，不重接就只能看到弹层闪一下。
+ * 在 render 末尾（焦点与选区都恢复之后）调用。
+ */
+export function resumeAssist(): void {
+  if (!assistHost.classList.contains("open") || !assistKey) return;
+  const node = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+    `[data-assist-key="${assistKey}"]`,
+  );
+  if (!node) {
+    hideAssist();
+    return;
+  }
+  if (node === assistTarget && node.isConnected) return;
+  assistTarget = node;
+  updateAssist();
 }
 
 function updateAssist(): void {
@@ -401,10 +434,9 @@ function renderAssist(): void {
       class: `assist-item${i === assistIndex ? " active" : ""}`,
       attr: { role: "option" },
       on: {
-        mousedown: (ev) => {
-          ev.preventDefault();
-          applyAssist(item.name);
-        },
+        // 按下时挡掉焦点转移，抬起时才应用：输入框的选区要留着才能算出替换范围。
+        mousedown: (ev) => ev.preventDefault(),
+        click: () => applyAssist(item.name),
       },
     });
     row.append(el("code", { text: `{{${item.name}}}` }), el("span", { class: "assist-desc", text: item.desc }));
@@ -470,5 +502,6 @@ export function assistOpen(): boolean {
 
 function hideAssist(): void {
   assistHost.classList.remove("open");
+  assistKey = "";
   fill(assistHost);
 }

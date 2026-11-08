@@ -2,6 +2,7 @@
 
 import { el, fill, icon, iconButton, icons } from "./dom";
 import { assistOpen, enableVarAssist, kvTable } from "./kvtable";
+import { selectBox } from "./select";
 import {
   abortSend,
   activeTab,
@@ -45,10 +46,10 @@ import { authEditor, authLabel } from "./authEditor";
 const FILE_LIMIT = 32 * 1024 * 1024;
 
 /** 请求协议：普通 HTTP、SSE 单向流、WebSocket 双向。 */
-const PROTOCOLS: { key: RequestProtocol; label: string }[] = [
-  { key: "http", label: "HTTP" },
-  { key: "sse", label: "SSE" },
-  { key: "ws", label: "WebSocket" },
+const PROTOCOLS: { key: RequestProtocol; label: string; hint: string }[] = [
+  { key: "http", label: "HTTP", hint: "普通请求，收发一次" },
+  { key: "sse", label: "SSE", hint: "服务端事件流，持续推送" },
+  { key: "ws", label: "WebSocket", hint: "双向长连接，可随时发消息" },
 ];
 
 const COMMON_HEADERS = [
@@ -94,47 +95,40 @@ function urlBar(tab: Tab): HTMLElement {
 
   const protocol: RequestProtocol = tab.request.protocol ?? "http";
 
-  const protocolSelect = el("select", {
-    class: `protocol-select proto-${protocol}`,
-    attr: { "aria-label": "请求协议" },
-    on: {
-      change: () => {
-        const value = protocolSelect.value as RequestProtocol;
-        mutate((r) => {
-          r.protocol = value;
-        });
-        // 换协议时丢掉上一轮的连接记录，避免旧的 SSE 消息留在 WebSocket 面板里。
-        if (!isStreaming(tab)) {
-          tab.stream = undefined;
-          emit();
-        }
-      },
+  const protocolSelect = selectBox({
+    className: `protocol-select proto-${protocol}`,
+    label: "请求协议",
+    value: protocol,
+    menuWidth: 210,
+    options: PROTOCOLS.map((p) => ({ value: p.key, label: p.label, hint: p.hint })),
+    onPick: (value) => {
+      mutate((r) => {
+        r.protocol = value as RequestProtocol;
+      });
+      // 换协议时丢掉上一轮的连接记录，避免旧的 SSE 消息留在 WebSocket 面板里。
+      if (!isStreaming(tab)) {
+        tab.stream = undefined;
+        emit();
+      }
     },
   });
-  for (const p of PROTOCOLS) {
-    protocolSelect.append(el("option", { attr: { value: p.key }, text: p.label }));
-  }
-  protocolSelect.value = protocol;
 
-  const methodSelect = el("select", {
-    class: `method-select tone-${tab.request.method.toLowerCase()}`,
-    attr: { "aria-label": "请求方法" },
-    on: {
-      change: () => {
-        const value = methodSelect.value as HttpMethod;
-        mutate((r) => {
-          r.method = value;
-        });
-      },
+  // WebSocket 握手在 RFC 里是 GET，方法没有意义；SSE 允许 GET/POST，保留可选。
+  const methodLocked = protocol === "ws";
+  const methodSelect = selectBox({
+    className: `method-select tone-${tab.request.method.toLowerCase()}`,
+    label: "请求方法",
+    value: tab.request.method,
+    disabled: methodLocked,
+    title: methodLocked ? "WebSocket 握手固定用 GET" : undefined,
+    menuWidth: 170,
+    options: METHODS.map((m) => ({ value: m, label: m })),
+    onPick: (value) => {
+      mutate((r) => {
+        r.method = value as HttpMethod;
+      });
     },
   });
-  for (const m of METHODS) methodSelect.append(el("option", { attr: { value: m }, text: m }));
-  methodSelect.value = tab.request.method;
-  // WebSocket 握手在 RFC 里是 GET，方法没有意义；SSE 允许 GET/POST，保留可选。
-  if (protocol === "ws") {
-    methodSelect.disabled = true;
-    methodSelect.title = "WebSocket 握手固定用 GET";
-  }
 
   // 变量高亮层：与输入框共用字体与内边距，输入框文字设为透明确保留光标。
   const mirrorInner = el("div", { class: "url-mirror-inner" });
@@ -213,7 +207,7 @@ function urlBar(tab: Tab): HTMLElement {
   });
   urlInput.value = tab.request.url;
   paintHighlight();
-  enableVarAssist(urlInput);
+  enableVarAssist(urlInput, `url:${tab.id}`);
 
   const streaming = isStreaming(tab);
   // 普通请求发送中按钮原地变「取消」，流式连接建立后变「断开」。
@@ -352,7 +346,10 @@ function tabStrip(tab: Tab): HTMLElement {
       attr: { type: "button", role: "tab", "aria-selected": active ? "true" : "false" },
       on: {
         click: () => {
-          tab.requestTab = def.key;
+          // 取当前活动页签而不是闭包里的 tab：emit 批处理期间这块面板可能还属于上一个页签，
+          // 点得快就会把切换写到别的页签上（新页签刚建好时尤其明显）。
+          const current = activeTab() ?? tab;
+          current.requestTab = def.key;
           window.dispatchEvent(new CustomEvent("mygo:rerender-request"));
         },
       },
@@ -788,7 +785,7 @@ function bodyPane(tab: Tab): HTMLElement {
     },
   });
   area.value = tab.request.body;
-  enableVarAssist(area);
+  enableVarAssist(area, `body:${tab.id}`);
 
   const status = el("div", { class: "pane-status" });
   const updateJsonStatus = (value: string): void => {
@@ -836,7 +833,7 @@ function graphqlBodyPane(tab: Tab): HTMLElement {
     },
   });
   query.value = tab.request.body;
-  enableVarAssist(query);
+  enableVarAssist(query, `gql:${tab.id}`);
 
   const vars = el("textarea", {
     class: "code-input graphql-vars",
@@ -1109,25 +1106,22 @@ function optionsPane(tab: Tab): HTMLElement {
   });
   timeout.value = String(Math.round(opt.timeoutMs / 1000));
 
-  const redirect = el("select", {
-    class: "text-input",
-    on: {
-      change: () => {
-        const value = redirect.value as "follow" | "manual" | "error";
-        mutate((r) => {
-          r.options.redirect = value;
-        });
-      },
+  const redirect = selectBox({
+    className: "text-input redirect-select",
+    label: "重定向",
+    value: opt.redirect,
+    menuWidth: 260,
+    options: [
+      { value: "follow", label: "自动跟随", hint: "最多 20 次" },
+      { value: "manual", label: "不跟随", hint: "直接返回 3xx 响应" },
+      { value: "error", label: "遇到重定向就报错" },
+    ],
+    onPick: (value) => {
+      mutate((r) => {
+        r.options.redirect = value as "follow" | "manual" | "error";
+      });
     },
   });
-  for (const item of [
-    { value: "follow", label: "自动跟随（最多 20 次）" },
-    { value: "manual", label: "不跟随，直接返回 3xx 响应" },
-    { value: "error", label: "遇到重定向就报错" },
-  ]) {
-    redirect.append(el("option", { attr: { value: item.value }, text: item.label }));
-  }
-  redirect.value = opt.redirect;
 
   const proxy = el("input", {
     class: "text-input",

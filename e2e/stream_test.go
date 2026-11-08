@@ -12,21 +12,22 @@ import (
 
 // SSE 与 WebSocket：协议下拉、连接/断开、消息面板、WebSocket 发送回显。
 
+// protocolLabel 把协议 key 换下拉框里显示的名字。
+func protocolLabel(protocol string) string {
+	switch protocol {
+	case "sse":
+		return "SSE"
+	case "ws":
+		return "WebSocket"
+	default:
+		return "HTTP"
+	}
+}
+
 // setProtocol 把请求协议下拉切到 http / sse / ws。
 func setProtocol(t *testing.T, protocol string) {
 	t.Helper()
-	script := fmt.Sprintf(`(() => {
-  const sel = document.querySelector('.protocol-select');
-  if (!sel) return false;
-  sel.value = %s;
-  sel.dispatchEvent(new Event('change', { bubbles: true }));
-  return true;
-})()`, jsString(protocol))
-	var ok bool
-	h.eval(t, script, &ok)
-	if !ok {
-		t.Fatalf("页面上没有协议下拉")
-	}
+	h.pickSelect(t, ".protocol-select", protocolLabel(protocol))
 	// 渲染是异步批处理的，等重渲染后的 class（由 state 推导）而不是等 select.value。
 	h.wait(t, "协议切换生效", fmt.Sprintf(`(document.querySelector('.protocol-select')?.className || '').includes('proto-%s')`, protocol))
 }
@@ -65,6 +66,7 @@ func newStreamTab(t *testing.T, protocol, url string) {
 	h.clearOverlays(t)
 	h.pressKeys(t, "n", true, false)
 	h.wait(t, "新标签页打开", `document.querySelectorAll('.tab').length >= 2`)
+	h.waitFreshPanel(t)
 	setProtocol(t, protocol)
 	h.typeInto(t, ".url-input", url)
 	commitURL(t)
@@ -115,7 +117,7 @@ func TestStreamWebSocket(t *testing.T) {
 		t.Fatalf("WebSocket 下发送按钮文案应为「连接」，实际是「%s」", label)
 	}
 	var disabled bool
-	h.eval(t, `!!document.querySelector('.method-select')?.disabled`, &disabled)
+	h.eval(t, `!!document.querySelector('.method-select')?.classList.contains('disabled')`, &disabled)
 	if !disabled {
 		t.Fatalf("WebSocket 下方法下拉应当禁用（握手固定 GET）")
 	}

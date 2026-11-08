@@ -5,7 +5,7 @@
 import { System, events } from "./mygo";
 import type { ApiRequest, Tab } from "./types";
 import { el, fill, icon, iconButton, icons } from "./ui/dom";
-import { mountAssist } from "./ui/kvtable";
+import { mountAssist, resumeAssist } from "./ui/kvtable";
 import { responsePanel } from "./ui/response";
 import { requestPanel } from "./ui/request";
 import { promptNewCollection, sidebar } from "./ui/sidebar";
@@ -318,6 +318,8 @@ function render(): void {
   renderToasts();
   restoreScroll(scrolls);
   restoreFocus(focus);
+  // 变量补全挂在输入框上，请求面板每次重绘都会换掉输入框，这里把开着的补直接回去。
+  resumeAssist();
 }
 
 /** 顶栏环境下拉是否展开（只影响外观，不进存储）。 */

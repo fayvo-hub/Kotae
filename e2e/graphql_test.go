@@ -5,7 +5,6 @@ package e2e
 import (
 	"strings"
 	"testing"
-	"time"
 )
 
 // GraphQL 请求体：query 与 variables 分栏编辑，发送时拼成 {query, variables} 的 JSON。
@@ -15,13 +14,7 @@ func TestGraphQLBody(t *testing.T) {
 	typeURL(t, "{{baseUrl}}/echo")
 
 	// GraphQL 走 POST。
-	h.eval(t, `(() => {
-	  const sel = document.querySelector('.method-select');
-	  sel.value = 'POST';
-	  sel.dispatchEvent(new Event('change', { bubbles: true }));
-	  return true;
-	})()`, nil)
-	time.Sleep(120 * time.Millisecond)
+	h.pickSelect(t, ".method-select", "POST")
 
 	clickIn(t, ".subtabs:not(.response-subtabs)", "请求体")
 	h.wait(t, "请求体面板", `!!document.querySelector('.segmented[aria-label="请求体类型"]')`)

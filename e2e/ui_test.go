@@ -184,7 +184,7 @@ func TestCurlImport(t *testing.T) {
 	h.clickText(t, ".dialog-foot .btn", "替换当前请求")
 	h.wait(t, "浮层关闭", `!document.querySelector('.curl-input')`)
 	var method, url string
-	h.eval(t, `document.querySelector('.method-select').value`, &method)
+	method = h.selectValue(t, ".method-select")
 	h.eval(t, `document.querySelector('.url-input').value`, &url)
 	if method != "PUT" {
 		t.Fatalf("导入后方法应为 PUT，实际 %q", method)

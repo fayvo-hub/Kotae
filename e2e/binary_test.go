@@ -16,12 +16,7 @@ func TestBinaryBodyUpload(t *testing.T) {
 	typeURL(t, "{{baseUrl}}/echo")
 
 	// 方法改成 POST：二进制请求体不会跟在 GET 上。
-	h.eval(t, `(() => {
-	  const sel = document.querySelector('.method-select');
-	  sel.value = 'POST';
-	  sel.dispatchEvent(new Event('change', { bubbles: true }));
-	  return true;
-	})()`, nil)
+	h.pickSelect(t, ".method-select", "POST")
 
 	clickIn(t, ".subtabs:not(.response-subtabs)", "请求体")
 	h.wait(t, "请求体面板", `!!document.querySelector('.segmented[aria-label="请求体类型"]')`)
@@ -82,7 +77,7 @@ func TestCurlBinaryImport(t *testing.T) {
 		t.Fatalf("-T 导入后文件名是 %q，期望 fixture.bin", name)
 	}
 	var method string
-	h.eval(t, `document.querySelector('.method-select').value`, &method)
+	method = h.selectValue(t, ".method-select")
 	if method != "PUT" {
 		t.Fatalf("-T 导入后方法应为 PUT，实际 %q", method)
 	}
