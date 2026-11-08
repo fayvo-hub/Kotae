@@ -30,8 +30,6 @@ func TestPathVariables(t *testing.T) {
 	  return true;
 	})()`, nil)
 
-	h.wait(t, "实际地址已替换", `(document.querySelector('.pane-preview-url') || {}).textContent?.endsWith('/users/42')`)
-
 	h.send(t)
 	if status := h.status(t); status != "200" {
 		t.Fatalf("路径变量请求应返回 200，实际 %q\n%s", status, h.responseText(t))
@@ -40,6 +38,10 @@ func TestPathVariables(t *testing.T) {
 	if !strings.Contains(body, "/users/42") || !strings.Contains(body, "userId") || !strings.Contains(body, `"42"`) {
 		t.Fatalf("桩服务应收到 /users/42，实际：%s", body)
 	}
+
+	// 解析后的地址在响应区「请求」页签里核对（编辑区不再单独预览实际地址）。
+	clickIn(t, ".response-subtabs", "请求")
+	h.wait(t, "实际地址已替换", `(document.querySelector('.sent-url') || {}).textContent?.endsWith('/users/42')`)
 }
 
 // 从 cURL 导入带 `:id` 的地址时，也自动列出路径变量。

@@ -2905,30 +2905,6 @@ body.resizing-row * {
   font-size: var(--fs-sm);
 }
 
-.pane-preview {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  font-size: var(--fs-sm);
-  overflow-x: auto;
-}
-
-.pane-preview-label {
-  flex: 0 0 auto;
-  color: var(--text-3);
-}
-
-.pane-preview code {
-  color: var(--text-2);
-  font-size: var(--fs-sm);
-  white-space: pre;
-  user-select: text;
-}
-
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

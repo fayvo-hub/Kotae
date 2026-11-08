@@ -21,7 +21,7 @@ import {
   toggleUI,
 } from "../store";
 import { System } from "../mygo";
-import { CurlError, buildURL, parseCurl } from "../curl";
+import { CurlError, parseCurl } from "../curl";
 import { scriptStepsPanel } from "./scriptSteps";
 import {
   METHODS,
@@ -33,7 +33,6 @@ import {
   type Tab,
 } from "../types";
 import {
-  ensureScheme,
   formatBytes,
   interpolate,
   lookupVar,
@@ -151,15 +150,6 @@ function urlBar(tab: Tab): HTMLElement {
   const syncHighlightScroll = (): void => {
     mirrorInner.style.transform = `translateX(${-urlInput.scrollLeft}px)`;
   };
-  // 输入过程中就地更新「实际地址」预览，不重渲染整块面板（避免抢焦点）。
-  const paintPreview = (): void => {
-    const node = document.querySelector<HTMLElement>(".pane-preview-url");
-    if (!node) return;
-    const draft: Tab = { ...tab, request: { ...tab.request, url: urlInput.value } };
-    const text = urlInput.value.trim() ? ensureScheme(buildPreview(draft)) : "";
-    node.textContent = text || "（尚未填写地址）";
-  };
-
   const urlInput = el("input", {
     class: "url-input",
     attr: {
@@ -173,7 +163,6 @@ function urlBar(tab: Tab): HTMLElement {
         setUrlInvalid(urlInput, false);
         paintHighlight();
         syncHighlightScroll();
-        paintPreview();
       },
       paste: (ev) => {
         const text = ev.clipboardData?.getData("text") ?? "";
@@ -488,17 +477,8 @@ function paramsPane(tab: Tab): HTMLElement {
     },
     emptyHint: "暂无查询参数",
   });
-  const preview = el("div", { class: "pane-preview" });
-  const url = tab.request.url ? ensureScheme(buildPreview(tab)) : "";
-  preview.append(el("span", { class: "pane-preview-label", text: "实际地址" }));
-  preview.append(el("code", { class: "pane-preview-url", text: url || "（尚未填写地址）" }));
-  fill(host, ...head, hint, table, preview);
+  fill(host, ...head, hint, table);
   return host;
-}
-
-function buildPreview(tab: Tab): string {
-  const resolve = (text: string): string => interpolate(text, storeScope()).text;
-  return buildURL(tab.request, resolve);
 }
 
 function headersPane(tab: Tab): HTMLElement {

@@ -139,15 +139,17 @@ func deleteCollectionViaMenu(t *testing.T, name string) {
 	h.wait(t, "集合已删除", fmt.Sprintf(`![...document.querySelectorAll('.tree-label')].some(el => el.textContent.trim() === %s)`, jsString(name)))
 }
 
-// baseURL 从固定用例里读桩服务地址（去掉后面的路径）。
+// baseURL 从固定用例里读桩服务地址：发一次请求，读「请求」页签里的实际地址。
 func baseURL(t *testing.T) string {
 	t.Helper()
 	h.openRequest(t, "GET 查询参数")
-	clickIn(t, ".subtabs:not(.response-subtabs)", "查询参数")
-	preview := h.text(t, ".pane-preview-url")
-	base := strings.TrimSuffix(preview, "/echo?q=mygo")
-	if base == preview || !strings.HasPrefix(base, "http") {
-		t.Fatalf("读不到桩服务地址：%q", preview)
+	h.send(t)
+	clickIn(t, ".response-subtabs", "请求")
+	h.wait(t, "请求页签渲染", `!!document.querySelector('.sent-url')`)
+	url := h.text(t, ".sent-url")
+	base := strings.TrimSuffix(url, "/echo?q=mygo")
+	if base == url || !strings.HasPrefix(base, "http") {
+		t.Fatalf("读不到桩服务地址：%q", url)
 	}
 	return base
 }
@@ -181,21 +183,19 @@ func TestCollectionSharedSettings(t *testing.T) {
   return !!note && note.textContent.includes(%s) && note.textContent.includes('Bearer Token');
 })()`, jsString(colName)))
 
-	// 地址里的集合变量能解析成真实地址。
-	clickIn(t, ".subtabs:not(.response-subtabs)", "查询参数")
-	h.wait(t, "查询参数面板", `!!document.querySelector('.pane-preview-url')`)
-	if got := h.text(t, ".pane-preview-url"); got != base+"/echo" {
-		t.Fatalf("集合变量没有参与解析：%q，期望 %q", got, base+"/echo")
-	}
-
-	// 真的发出去了：桩服务回显的请求头里带着集合的 Token。
+	// 地址里的集合变量要能解析成真实地址，并且真的发出去：桩服务回显里带着集合的 Token。
 	h.send(t)
 	if got := h.status(t); got != "200" {
-		t.Fatalf("发送失败：状态 %q\n应用日志：\n%s", got, h.appLog())
+		t.Fatalf("集合变量没有参与解析：状态 %q\n应用日志：\n%s", got, h.appLog())
 	}
 	if body := h.responseText(t); !strings.Contains(body, token) {
 		t.Fatalf("服务端没收到集合级认证：%q", body)
 	}
+	clickIn(t, ".response-subtabs", "请求")
+	h.wait(t, "发送地址用上集合变量", fmt.Sprintf(
+		`(document.querySelector('.sent-url') || {}).textContent === %s`,
+		jsString(base+"/echo"),
+	))
 
 	// 清掉集合级设置并删掉这个集合，别影响后面的用例。
 	openSharedSettings(t, colName)
@@ -290,21 +290,16 @@ func TestFolderVarOverridesCollection(t *testing.T) {
 	closeDialog(t)
 
 	h.openRequest(t, reqName)
-	clickIn(t, ".subtabs:not(.response-subtabs)", "查询参数")
-	// 等预览地址真的算出文件夹那一层的值：切换子页签与设置写入都走异步重绘，
-	// 立刻读文本会读到改设置之前那一帧。
-	h.wait(t, "预览地址用上文件夹变量", fmt.Sprintf(
-		`(document.querySelector('.pane-preview-url') || {}).textContent === %s`,
-		jsString(base+"/echo"),
-	))
-	if got := h.text(t, ".pane-preview-url"); got != base+"/echo" {
-		t.Fatalf("文件夹变量没有覆盖集合变量：%q，期望 %q", got, base+"/echo")
-	}
-
 	h.send(t)
 	if got := h.status(t); got != "200" {
-		t.Fatalf("发送失败：状态 %q\n应用日志：\n%s", got, h.appLog())
+		t.Fatalf("文件夹变量没有覆盖集合变量：状态 %q\n应用日志：\n%s", got, h.appLog())
 	}
+	// 设置写入会异步重绘，实际地址要等它算成文件夹那一层的值。
+	clickIn(t, ".response-subtabs", "请求")
+	h.wait(t, "发送地址用上文件夹变量", fmt.Sprintf(
+		`(document.querySelector('.sent-url') || {}).textContent === %s`,
+		jsString(base+"/echo"),
+	))
 
 	deleteCollectionViaMenu(t, colName)
 }
@@ -339,11 +334,15 @@ func TestSharedSettingsPersist(t *testing.T) {
 	h.restart(t)
 
 	h.openRequest(t, reqName)
-	clickIn(t, ".subtabs:not(.response-subtabs)", "查询参数")
-	h.wait(t, "查询参数面板", `!!document.querySelector('.pane-preview-url')`)
-	if got := h.text(t, ".pane-preview-url"); got != base+"/echo" {
-		t.Fatalf("重启后文件夹变量丢了：%q，期望 %q", got, base+"/echo")
+	h.send(t)
+	if got := h.status(t); got != "200" {
+		t.Fatalf("重启后文件夹变量丢了：状态 %q\n应用日志：\n%s", got, h.appLog())
 	}
+	clickIn(t, ".response-subtabs", "请求")
+	h.wait(t, "发送地址用上文件夹变量", fmt.Sprintf(
+		`(document.querySelector('.sent-url') || {}).textContent === %s`,
+		jsString(base+"/echo"),
+	))
 	clickIn(t, ".subtabs:not(.response-subtabs)", "认证")
 	h.wait(t, "认证面板", `!!document.querySelector('.inherit-note')`)
 	if note := h.text(t, ".inherit-note"); !strings.Contains(note, colName) || !strings.Contains(note, "Bearer Token") {

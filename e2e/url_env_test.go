@@ -116,30 +116,29 @@ func TestURLTemplate(t *testing.T) {
 	if !strings.Contains(report, "{{baseUrl}} = http://127.0.0.1:") {
 		t.Fatalf("悬停提示缺解析值：%s", report)
 	}
-	// 输入时预览就跟着更新，不用等失焦。
-	if preview := h.text(t, ".pane-preview"); !strings.Contains(preview, "http://127.0.0.1:") {
-		t.Fatalf("输入过程中预览没有更新：%q", preview)
-	}
 }
 
-// 协议写在变量外面的旧数据：预览与发送都按变量值纠正。
+// 协议写在变量外面的旧数据：发送时按变量值纠正，不拼出双协议。
 func TestURLSchemeFix(t *testing.T) {
 	h.clearOverlays(t)
 	newTab(t)
 
 	h.typeInto(t, ".url-input", "http://{{baseUrl}}/echo")
 	blurURL(t)
-	preview := h.text(t, ".pane-preview")
-	if strings.Contains(preview, "http://http") {
-		t.Fatalf("预览里出现双协议：%q", preview)
-	}
-	if !strings.Contains(preview, "http://127.0.0.1:") {
-		t.Fatalf("预览地址不对：%q", preview)
-	}
 	h.send(t)
 	if got := h.status(t); got != "200" {
 		scene := h.text(t, ".status-bar") + " || " + h.text(t, ".response-panel")
 		t.Fatalf("带变量的地址发送失败：%q\n现场：%s\n应用日志：\n%s", got, scene, h.appLog())
+	}
+	// 实际发出的地址（「请求」页签）不能出现双协议。
+	clickIn(t, ".response-subtabs", "请求")
+	h.wait(t, "请求页签渲染", `!!document.querySelector('.sent-url')`)
+	sent := h.text(t, ".sent-url")
+	if strings.Contains(sent, "http://http") {
+		t.Fatalf("实际地址里出现了双协议：%q", sent)
+	}
+	if !strings.Contains(sent, "http://127.0.0.1:") {
+		t.Fatalf("实际地址不对：%q", sent)
 	}
 }
 

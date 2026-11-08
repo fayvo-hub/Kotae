@@ -152,7 +152,7 @@ func TestScreenshots(t *testing.T) {
 	waitResponse(t, "200")
 	shotTo(t, dir, "02-json-tree")
 
-	// 03 请求脚本：前置脚本算 HMAC 签名，响应下方是脚本日志。
+	// 03 请求脚本：前置脚本算 HMAC 签名，脚本输出收在响应区的「控制台」页签里。
 	newTab(t)
 	openScriptLibrary(t)
 	addLibraryScript(t, "签名", strings.Join([]string{
@@ -168,6 +168,7 @@ func TestScreenshots(t *testing.T) {
 	pickStepLibrary(t, 1, "签名")
 	h.send(t)
 	waitResponse(t, "200")
+	openConsoleTab(t)
 	shotTo(t, dir, "03-script")
 
 	// 13 脚本库：库里只放可复用的代码，不再带阶段与作用范围。

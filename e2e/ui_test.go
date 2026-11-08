@@ -47,15 +47,11 @@ func TestPaintWarmupCleansUp(t *testing.T) {
 
 func TestSendGET(t *testing.T) {
 	h.openRequest(t, "GET 查询参数")
-	// 地址栏保留 {{baseUrl}} 模板，实际地址在参数面板里预览——两者都要对。
+	// 地址栏保留 {{baseUrl}} 模板；解析后的完整地址只在发送后的「请求」页签里看。
 	var url string
 	h.eval(t, `document.querySelector('.url-input').value`, &url)
 	if !strings.Contains(url, "{{baseUrl}}/echo") {
 		t.Fatalf("地址栏应保留变量模板：%q", url)
-	}
-	preview := h.text(t, ".pane-preview")
-	if !strings.Contains(preview, "http://127.0.0.1:") || !strings.Contains(preview, "q=mygo") {
-		t.Fatalf("实际地址预览没有完成插值与查询串拼接：%q", preview)
 	}
 
 	h.send(t)
