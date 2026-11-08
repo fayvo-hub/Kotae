@@ -191,6 +191,8 @@ document.addEventListener(
     // 菜单自己往上挪（把选中项滚进可视区）不算「页面滚了」，否则长列表一展开就自己收起。
     const target = ev.target as Node | null;
     if (target && open.menu.contains(target)) return;
+    // 只有会带着触发器一起滚的滚动才需要收起菜单（标签行之类与下拉无关的滚动不该把菜单顶掉）。
+    if (target && !target.contains(open.trigger)) return;
     closeSelect();
   },
   true,

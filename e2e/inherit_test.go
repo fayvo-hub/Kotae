@@ -10,14 +10,14 @@ import (
 	"time"
 )
 
-// 集合 / 文件夹级共享认证与变量：请求自己没设认证时继承上层的，
+// 集合 / 文件夹级共享设置：请求自己没设认证时继承上层的，
 // 文件夹比集合更近，变量按「环境 > 文件夹 > 集合 > 全局」取值。
 
 // openSharedSettings 右键某个集合 / 文件夹行，点「共享认证与变量…」。
 func openSharedSettings(t *testing.T, label string) {
 	t.Helper()
 	rightClick(t, ".tree-row", label)
-	h.clickText(t, ".env-menu-item", "共享认证与变量…")
+	h.clickText(t, ".env-menu-item", "共享设置…")
 	h.wait(t, "共享设置弹窗", `!!document.querySelector('.dialog .auth-editor')`)
 }
 

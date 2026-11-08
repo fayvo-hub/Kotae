@@ -10,8 +10,8 @@ import (
 	"time"
 )
 
-// 脚本库：多条脚本按列表顺序执行，前置全部跑完再跑后置。
-// 用日志顺序与累加的请求头证明「顺序就是执行顺序」，并验证上移能改掉它。
+// 分层操作列表：同一个阶段里按 全局 → 集合 → 文件夹 → 请求 的顺序执行，
+// 后置反着来（请求 → 文件夹 → 集合 → 全局）；层内按行的顺序。
 
 // appendOrderScript 生成一段往 X-Order 头里追加标记的前置脚本，并打一条日志。
 func appendOrderScript(mark string) string {
@@ -21,7 +21,7 @@ func appendOrderScript(mark string) string {
 	}, "\n")
 }
 
-// scriptLogHeads 按顺序读每条脚本记录的表头（脚本名 · 来源 · 阶段）。
+// scriptLogHeads 按顺序读每条脚本记录的表头（脚本名 · 来源 · 阶段）与首行日志。
 func scriptLogHeads(t *testing.T) []string {
 	t.Helper()
 	var joined string
@@ -36,12 +36,106 @@ func scriptLogHeads(t *testing.T) []string {
 	return strings.Split(joined, "\n")
 }
 
-func TestScriptLibraryOrder(t *testing.T) {
+// openGlobalSettings 打开设置弹窗。
+func openGlobalSettings(t *testing.T) {
+	t.Helper()
+	h.clearOverlays(t)
+	h.click(t, `[data-role="settings"]`)
+	h.wait(t, "设置弹窗打开", `!!document.querySelector('.settings-section')`)
+}
+
+// openStepsPane 在当前可见的对话框里切到某一阶段的操作列表。
+// 设置弹窗里两段是并排的（各带自己的标题），共享设置弹窗同理，按阶段标题定位。
+func openStepsPane(t *testing.T, phase string) {
+	t.Helper()
+	title := "前置操作"
+	if phase == "post" {
+		title = "后置操作"
+	}
+	h.wait(t, "操作面板就绪", fmt.Sprintf(
+		`[...document.querySelectorAll('.settings-sub')].some(sub => (sub.querySelector('h4') || {}).textContent === %s && !!sub.querySelector('.step-panel'))`,
+		jsString(title),
+	))
+}
+
+// addPaneStep 在对话框里某一阶段的列表末尾加一步（块作用域按阶段标题定位）。
+func addPaneStep(t *testing.T, phase, kind string) {
+	t.Helper()
+	title := "前置操作"
+	if phase == "post" {
+		title = "后置操作"
+	}
+	before := h.count(t, ".step-row")
+	script := fmt.Sprintf(`(() => {
+  const sub = [...document.querySelectorAll('.settings-sub')].find(node => (node.querySelector('h4') || {}).textContent === %s);
+  const btn = sub && sub.querySelector('.step-add');
+  if (!btn) return false;
+  btn.click();
+  return true;
+})()`, jsString(title))
+	var ok bool
+	h.eval(t, script, &ok)
+	if !ok {
+		t.Fatalf("找不到「%s」的添加按钮", title)
+	}
+	h.wait(t, "添加操作菜单展开", `!!document.querySelector('.ctx-menu')`)
+	clickMenuItem(t, kind)
+	h.wait(t, "操作行出现", fmt.Sprintf(`document.querySelectorAll('.step-row').length === %d`, before+1))
+}
+
+// fillPaneSource 往对话框里某一阶段第 n 行（从 1 开始）写源码。
+func fillPaneSource(t *testing.T, phase string, index int, code string) {
+	t.Helper()
+	title := "前置操作"
+	if phase == "post" {
+		title = "后置操作"
+	}
+	script := fmt.Sprintf(`(() => {
+  const sub = [...document.querySelectorAll('.settings-sub')].find(node => (node.querySelector('h4') || {}).textContent === %s);
+  const area = sub && sub.querySelectorAll('.step-row')[%d]?.querySelector('.script-input');
+  if (!area) return false;
+  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(area, %s);
+  area.dispatchEvent(new Event('input', { bubbles: true }));
+  return true;
+})()`, jsString(title), index-1, jsString(code))
+	var ok bool
+	h.eval(t, script, &ok)
+	if !ok {
+		t.Fatalf("找不到「%s」的第 %d 行代码框", title, index)
+	}
+}
+
+// clearGlobalSteps 清掉设置里「全局操作」的所有行。
+// 全局操作对所有请求生效：本用例建的必须自己删干净，否则会污染后面每个用例的发送。
+func clearGlobalSteps(t *testing.T) {
+	t.Cleanup(func() {
+		openGlobalSettings(t)
+		for i := 0; i < 40; i++ {
+			before := h.count(t, ".settings-sub .step-row")
+			if before == 0 {
+				break
+			}
+			h.click(t, ".settings-sub .step-row .step-more")
+			h.wait(t, "行菜单展开", `!!document.querySelector('.ctx-menu')`)
+			clickMenuItem(t, "删除")
+			if h.exists(t, ".prompt-dialog") {
+				h.clickContaining(t, ".prompt-dialog .btn", "删除")
+			}
+			h.wait(t, "全局操作行被删掉", fmt.Sprintf(
+				`document.querySelectorAll('.settings-sub .step-row').length === %d`, before-1,
+			))
+		}
+		h.clearOverlays(t)
+	})
+}
+
+func TestScriptStepOrderAcrossLayers(t *testing.T) {
 	const (
-		colName = "脚本库集合"
-		reqName = "脚本库请求"
+		colName = "分层脚本集合"
+		reqName = "分层脚本请求"
 	)
 	cleanupScripts(t)
+	clearGlobalSteps(t)
 	h.clearOverlays(t)
 	newCollection(t, colName)
 	newRequestVia(t, colName)
@@ -49,60 +143,76 @@ func TestScriptLibraryOrder(t *testing.T) {
 	saveTabInto(t, reqName, colName, "")
 	h.openRequest(t, reqName)
 
-	colScope := "集合「" + colName + "」"
-	reqScope := "请求「" + reqName + "」"
-	globalScope := "全局（所有请求）"
-
-	openScriptLibrary(t)
-	addLibraryScript(t, "全局签名", "pre", globalScope, appendOrderScript("g"))
-	addLibraryScript(t, "集合标记", "pre", colScope, appendOrderScript("c"))
-	addLibraryScript(t, "本请求标记", "pre", reqScope, appendOrderScript("r"))
-	addLibraryScript(t, "全局收尾", "post", globalScope, `console.log("g-post");`)
-	addLibraryScript(t, "集合收尾", "post", colScope, `console.log("c-post");`)
-	addLibraryScript(t, "本请求收尾", "post", reqScope, `console.log("r-post");`)
-	if names := libraryScriptNames(t); len(names) != 6 {
-		t.Fatalf("脚本库里应有 6 条脚本，实际 %v", names)
-	}
+	// 全局：设置 → 全局操作 → 前置一步。
+	openGlobalSettings(t)
+	openStepsPane(t, "pre")
+	addPaneStep(t, "pre", "脚本")
+	fillPaneSource(t, "pre", 1, appendOrderScript("g"))
 	h.clearOverlays(t)
+
+	// 集合：共享设置 → 前置一步。
+	openSharedSettings(t, colName)
+	openStepsPane(t, "pre")
+	addPaneStep(t, "pre", "脚本")
+	fillPaneSource(t, "pre", 1, appendOrderScript("c"))
+	h.clearOverlays(t)
+
+	// 请求：前置两步（r1、r2），用来验证层内顺序与上移。
+	addRequestStep(t, "pre", "脚本")
+	fillStepSource(t, 1, appendOrderScript("r1"))
+	addStep(t, "pre", "脚本")
+	fillStepSource(t, 2, appendOrderScript("r2"))
 
 	h.send(t)
 	if got := h.status(t); got != "200" {
 		t.Fatalf("发送失败：状态 %q，提示：%s\n应用日志：\n%s", got, h.text(t, ".toasts"), h.appLog())
 	}
-
-	// 三条前置按库里的顺序追加 g → c → r。
-	if body := h.responseText(t); !strings.Contains(body, "g,c,r") {
-		t.Fatalf("前置脚本的执行顺序不对，桩服务收到的 X-Order 不是 g,c,r：%s", body)
+	// 前置按 全局 → 集合 → 请求(1,2) 追加。
+	if body := h.responseText(t); !strings.Contains(body, "g,c,r1,r2") {
+		t.Fatalf("前置的执行顺序不对，桩服务收到的 X-Order 不是 g,c,r1,r2：%s", body)
 	}
 
+	// 上移请求层的第二行：层内顺序变成 r2 → r1。
+	stepMenu(t, 2, "上移")
+	if rows := stepRows(t); strings.Join(rows, ",") != "脚本|console.log(\"r2-pre\");,脚本|console.log(\"r1-pre\");" {
+		t.Fatalf("上移之后请求层顺序不对：%v", rows)
+	}
+	h.send(t)
+	if body := h.responseText(t); !strings.Contains(body, "g,c,r2,r1") {
+		t.Fatalf("上移之后执行顺序没变：%s", body)
+	}
+
+	// 后置反着来：先建三层，再发一次。
+	openGlobalSettings(t)
+	openStepsPane(t, "post")
+	addPaneStep(t, "post", "脚本")
+	fillPaneSource(t, "post", 1, `console.log("g-post");`)
+	h.clearOverlays(t)
+	openSharedSettings(t, colName)
+	openStepsPane(t, "post")
+	addPaneStep(t, "post", "脚本")
+	fillPaneSource(t, "post", 1, `console.log("c-post");`)
+	h.clearOverlays(t)
+	openStepsTab(t, "post")
+	addStep(t, "post", "脚本")
+	fillStepSource(t, 1, `console.log("r-post");`)
+
+	h.clearToasts(t)
+	h.send(t)
 	want := strings.Join([]string{
-		"全局签名 · 前置脚本|g-pre",
-		"集合标记 · " + colName + " · 前置脚本|c-pre",
-		"本请求标记 · " + reqName + " · 前置脚本|r-pre",
-		"全局收尾 · 后置脚本|g-post",
-		"集合收尾 · " + colName + " · 后置脚本|c-post",
-		"本请求收尾 · " + reqName + " · 后置脚本|r-post",
+		"内联脚本 · 前置脚本|g-pre",
+		"内联脚本 · " + colName + " · 前置脚本|c-pre",
+		"内联脚本 · " + reqName + " · 前置脚本|r2-pre",
+		"内联脚本 · " + reqName + " · 前置脚本|r1-pre",
+		"内联脚本 · " + reqName + " · 后置脚本|r-post",
+		"内联脚本 · " + colName + " · 后置脚本|c-post",
+		"内联脚本 · 后置脚本|g-post",
 	}, "\n")
 	if got := strings.Join(scriptLogHeads(t), "\n"); got != want {
 		t.Fatalf("脚本执行顺序不对：\n实际：\n%s\n期望：\n%s", got, want)
 	}
-
-	// 上移「本请求标记」：顺序变成 全局 → 本请求 → 集合，桩服务收到的头也跟着变。
-	openScriptLibrary(t)
-	selectLibraryScript(t, "本请求标记")
-	h.clickContaining(t, ".script-lib-side .tools-row .btn", "上移")
-	wantOrder := []string{"全局签名", "本请求标记", "集合标记", "全局收尾", "集合收尾", "本请求收尾"}
-	if names := libraryScriptNames(t); strings.Join(names, ",") != strings.Join(wantOrder, ",") {
-		t.Fatalf("上移之后列表顺序不对：%v", names)
-	}
-	h.clearOverlays(t)
-
-	h.send(t)
-	if body := h.responseText(t); !strings.Contains(body, "g,r,c") {
-		t.Fatalf("上移之后执行顺序没变，X-Order 不是 g,r,c：%s", body)
-	}
 	h.clearToasts(t)
-	h.shot(t, "54-script-library-order")
+	h.shot(t, "54-script-step-order")
 
 	deleteCollectionViaMenu(t, colName)
 }
@@ -112,12 +222,12 @@ func TestScriptResendAfterLogin(t *testing.T) {
 	cleanupScripts(t)
 	h.clearOverlays(t)
 	openScriptLibrary(t)
-	addLibraryScript(t, "带 token", "pre", "全局（所有请求）", strings.Join([]string{
+	addLibraryScript(t, "带 token", strings.Join([]string{
 		`const tok = pm.environment.get("e2eToken");`,
 		`if (tok) pm.request.headers.upsert("Authorization", "Bearer " + tok);`,
 		`console.log(tok ? "带上已有 token" : "还没有 token");`,
 	}, "\n"))
-	addLibraryScript(t, "登录后重发", "post", "全局（所有请求）", strings.Join([]string{
+	addLibraryScript(t, "登录后重发", strings.Join([]string{
 		`console.log("响应码 " + pm.response.code);`,
 		`if (pm.response.code === 401) {`,
 		`  const login = await pm.sendRequest({ url: "{{baseUrl}}/login", method: "GET" });`,
@@ -130,6 +240,12 @@ func TestScriptResendAfterLogin(t *testing.T) {
 
 	newTab(t)
 	typeURL(t, "{{baseUrl}}/protected")
+	addRequestStep(t, "pre", "脚本库")
+	pickStepLibrary(t, 1, "带 token")
+	openStepsTab(t, "post")
+	addStep(t, "post", "脚本库")
+	pickStepLibrary(t, 1, "登录后重发")
+
 	h.send(t)
 
 	if got := h.status(t); got != "200" {
@@ -154,13 +270,15 @@ func TestScriptResendAfterLogin(t *testing.T) {
 	h.shot(t, "53-script-resend")
 }
 
-// 脚本库要跨重启保留：全局脚本、集合脚本都在 settings 表的 scripts 里。
+// 脚本库与分层操作要跨重启保留：库在 settings 的 scriptLibrary，
+// 全局操作在 globalScripts，请求自己的操作随 request 一起存。
 func TestScriptsPersistAcrossRestart(t *testing.T) {
 	const (
 		colName = "持久脚本集合"
 		reqName = "持久脚本请求"
 	)
 	cleanupScripts(t)
+	clearGlobalSteps(t)
 	h.clearOverlays(t)
 	newCollection(t, colName)
 	newRequestVia(t, colName)
@@ -168,30 +286,85 @@ func TestScriptsPersistAcrossRestart(t *testing.T) {
 	saveTabInto(t, reqName, colName, "")
 
 	openScriptLibrary(t)
-	addLibraryScript(t, "持久全局", "pre", "全局（所有请求）", `console.log("persist-global");`)
-	addLibraryScript(t, "持久集合", "pre", "集合「"+colName+"」", `console.log("persist-collection");`)
+	addLibraryScript(t, "持久库脚本", `console.log("persist-library");`)
 	h.clearOverlays(t)
+	h.openRequest(t, reqName)
+
+	openGlobalSettings(t)
+	openGlobalSettings(t)
+	openStepsPane(t, "pre")
+	addPaneStep(t, "pre", "脚本库")
+	h.wait(t, "全局脚本库行就绪", `!!document.querySelector('.settings-sub .step-picker .select')`)
+	var picked bool
+	h.eval(t, `(() => {
+  const row = document.querySelector('.settings-sub .step-picker .select');
+  const trigger = row && row.querySelector('.select-trigger');
+  if (!trigger) return false;
+  trigger.click();
+  return true;
+})()`, &picked)
+	if !picked {
+		t.Fatal("全局操作的脚本库下拉没有触发器")
+	}
+	h.wait(t, "下拉展开", `!!document.querySelector('.select-menu .select-option')`)
+	h.clickContaining(t, ".select-menu .select-option", "持久库脚本")
+	h.wait(t, "下拉收起", `!document.querySelector('.select-menu')`)
+	h.clearOverlays(t)
+
+	// 集合层的操作写在库里的 settings 列，也要跟着重启活下来。
+	openSharedSettings(t, colName)
+	openStepsPane(t, "pre")
+	addPaneStep(t, "pre", "脚本")
+	fillPaneSource(t, "pre", 1, `console.log("persist-collection");`)
+	h.clearOverlays(t)
+
+	openStepsTab(t, "pre")
+	addStep(t, "pre", "脚本")
+	fillStepSource(t, 1, `console.log("persist-request");`)
+	// 保存过的请求，改动要按 Ctrl+S 写回集合树才会落库。
+	saveTabInto(t, reqName, colName, "")
 
 	waitForCommit(t, filepath.Join(h.userData, "workspace.db"), time.Now())
 	h.restart(t)
 
 	openScriptLibrary(t)
 	names := strings.Join(libraryScriptNames(t), ",")
-	if !strings.Contains(names, "持久全局") || !strings.Contains(names, "持久集合") {
+	if !strings.Contains(names, "持久库脚本") {
 		t.Fatalf("重启后脚本库丢了：%q", names)
 	}
-	selectLibraryScript(t, "持久集合")
+	selectLibraryScript(t, "持久库脚本")
 	var source string
 	h.eval(t, `(document.querySelector('.script-lib-editor .script-input') || {}).value || ''`, &source)
-	if !strings.Contains(source, "persist-collection") {
-		t.Fatalf("重启后集合脚本的源码丢了：%q", source)
-	}
-	selectLibraryScript(t, "持久全局")
-	h.eval(t, `(document.querySelector('.script-lib-editor .script-input') || {}).value || ''`, &source)
-	if !strings.Contains(source, "persist-global") {
-		t.Fatalf("重启后全局脚本的源码丢了：%q", source)
+	if !strings.Contains(source, "persist-library") {
+		t.Fatalf("重启后脚本源码丢了：%q", source)
 	}
 	h.clearOverlays(t)
+
+	h.openRequest(t, reqName)
+	openGlobalSettings(t)
+	openStepsPane(t, "pre")
+	var globalRows string
+	h.eval(t, `[...document.querySelectorAll('.settings-sub .step-row')].map(row => (row.querySelector('.step-hint') || {}).textContent || '').join('|')`, &globalRows)
+	if !strings.Contains(globalRows, "持久库脚本") {
+		t.Fatalf("重启后全局的前置操作丢了：%q", globalRows)
+	}
+	h.clearOverlays(t)
+
+	openSharedSettings(t, colName)
+	openStepsPane(t, "pre")
+	var colRows string
+	h.eval(t, `[...document.querySelectorAll('.settings-sub .step-row')].map(row => (row.querySelector('.step-hint') || {}).textContent || '').join('|')`, &colRows)
+	if !strings.Contains(colRows, "persist-collection") {
+		t.Fatalf("重启后集合的前置操作丢了：%q", colRows)
+	}
+	h.clearOverlays(t)
+
+	// 重启后默认激活的是第一个标签页，先切回要检查的那个请求。
+	h.openRequest(t, reqName)
+	openStepsTab(t, "pre")
+	if rows := stepRows(t); len(rows) != 1 || !strings.Contains(rows[0], "persist-request") {
+		t.Fatalf("重启后请求自己的前置操作丢了：%v", rows)
+	}
 
 	deleteCollectionViaMenu(t, colName)
 }

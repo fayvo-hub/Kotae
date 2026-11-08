@@ -8,6 +8,8 @@ import (
 	"testing"
 )
 
+// ---- 脚本库浮层 ----
+
 // openScriptLibrary 打开脚本库浮层。
 func openScriptLibrary(t *testing.T) {
 	t.Helper()
@@ -16,57 +18,23 @@ func openScriptLibrary(t *testing.T) {
 	h.wait(t, "脚本库打开", `!!document.querySelector('.script-lib')`)
 }
 
-// pickLibrarySelect 点开脚本库里的下拉框并选中某一项。
-// 等的是「目标选项出现」而不是「菜单出现」：菜单可能是上一次操作留下的，
-// 只等菜单会点到过期的选项。
-func pickLibrarySelect(t *testing.T, trigger, label string) {
-	t.Helper()
-	h.click(t, trigger+" .select-trigger")
-	want := fmt.Sprintf(
-		`[...document.querySelectorAll('.select-menu .select-option')].some(o => (o.textContent || '').includes(%s))`,
-		jsString(label),
-	)
-	h.wait(t, "下拉框里出现「"+label+"」", want)
-	h.clickContaining(t, ".select-menu .select-option", label)
-	h.wait(t, "下拉框收起", `!document.querySelector('.select-menu')`)
-}
-
-// addLibraryScript 在脚本库里新建一条脚本并填好名字、阶段、作用范围与源码。
-// phase 为空表示用默认的前置；scopeLabel 为空表示用默认作用范围。
-func addLibraryScript(t *testing.T, name, phase, scopeLabel, source string) {
+// addLibraryScript 在脚本库里新建一条脚本并填好名字与源码。
+// 脚本库只存「可复用的代码」，它在哪一层、哪个阶段跑由引用它的那一行决定。
+func addLibraryScript(t *testing.T, name, source string) {
 	t.Helper()
 	before := h.count(t, ".script-lib-item")
-	h.clickContaining(t, ".script-lib-side .tools-row .btn", "新建")
+	h.click(t, `[data-role="script-new"]`)
 	h.wait(t, "新建的脚本出现在列表", fmt.Sprintf(
 		`document.querySelectorAll('.script-lib-item').length === %d`, before+1,
 	))
-
-	const nameSel = ".script-lib-editor .text-input"
-	h.wait(t, "脚本编辑框就绪", fmt.Sprintf(`!!document.querySelector(%s)`, jsString(nameSel)))
-	h.typeInto(t, nameSel, name)
-
-	if phase != "" {
-		label := "前置脚本"
-		if phase == "post" {
-			label = "后置脚本"
-		}
-		pickLibrarySelect(t, ".script-lib-editor .form-grid > .field:nth-child(1) .select", label)
-	}
-	if scopeLabel != "" {
-		pickLibrarySelect(t, ".script-lib-editor .form-grid > .field:nth-child(2) .select", scopeLabel)
-	}
+	h.typeInto(t, `.script-lib-editor [data-field="name"]`, name)
 	if source != "" {
-		sel := fmt.Sprintf(`.script-lib-editor .script-input[data-phase="%s"]`, phaseOrDefault(phase))
-		h.wait(t, "脚本源码框就绪", fmt.Sprintf(`!!document.querySelector(%s)`, jsString(sel)))
-		h.typeInto(t, sel, source)
+		h.typeInto(t, ".script-lib-editor .script-input", source)
 	}
-}
-
-func phaseOrDefault(phase string) string {
-	if phase == "post" {
-		return "post"
-	}
-	return "pre"
+	h.wait(t, "脚本名写进列表", fmt.Sprintf(
+		`[...document.querySelectorAll('.script-lib-item .script-lib-name')].some(n => (n.textContent || '').trim() === %s)`,
+		jsString(name),
+	))
 }
 
 // selectLibraryScript 在列表里点中某一条脚本。
@@ -85,7 +53,7 @@ func selectLibraryScript(t *testing.T, name string) {
 	}
 }
 
-// libraryScriptNames 读列表里的脚本名，顺序即执行顺序。
+// libraryScriptNames 读列表里的脚本名。
 func libraryScriptNames(t *testing.T) []string {
 	t.Helper()
 	var joined string
@@ -108,7 +76,7 @@ func cleanupScripts(t *testing.T) {
 				break
 			}
 			h.click(t, ".script-lib-item")
-			h.clickContaining(t, ".script-lib-side .tools-row .btn", "删除")
+			h.click(t, `[data-role="script-delete"]`)
 			h.wait(t, "删除确认框出现", `!!document.querySelector('.prompt-dialog')`)
 			h.clickContaining(t, ".prompt-dialog .btn", "删除")
 			h.wait(t, "脚本被删掉", fmt.Sprintf(
@@ -119,20 +87,114 @@ func cleanupScripts(t *testing.T) {
 	})
 }
 
+// ---- 前置 / 后置操作 ----
+
+// openStepsTab 切到请求页签的「前置操作 / 后置操作」。
+func openStepsTab(t *testing.T, phase string) {
+	t.Helper()
+	label := "前置操作"
+	if phase == "post" {
+		label = "后置操作"
+	}
+	h.activateSubtab(t, label)
+	h.wait(t, "操作列表就绪", `!!document.querySelector('.step-panel')`)
+}
+
+// clickMenuItem 点开着的菜单里文字完全匹配的那一项。
+func clickMenuItem(t *testing.T, label string) {
+	t.Helper()
+	script := fmt.Sprintf(`(() => {
+  const el = [...document.querySelectorAll('.ctx-menu .env-menu-item')].find(
+    node => ((node.querySelector('.env-menu-name') || {}).textContent || '').trim() === %s,
+  );
+  if (!el) return false;
+  el.click();
+  return true;
+})()`, jsString(label))
+	var ok bool
+	h.eval(t, script, &ok)
+	if !ok {
+		t.Fatalf("菜单里没有「%s」这一项：%s", label, h.text(t, ".ctx-menu"))
+	}
+}
+
+// addStep 在某一阶段末尾加一步操作（脚本 / 脚本库 / 等待时间）。
+// 返回加完之后的行数。
+func addStep(t *testing.T, phase, kind string) int {
+	t.Helper()
+	before := h.count(t, ".step-row")
+	h.click(t, ".step-add")
+	h.wait(t, "添加操作菜单展开", `!!document.querySelector('.ctx-menu')`)
+	clickMenuItem(t, kind)
+	h.wait(t, "操作行出现", fmt.Sprintf(`document.querySelectorAll('.step-row').length === %d`, before+1))
+	return before + 1
+}
+
+// addRequestStep 在请求页签的某一阶段加一步操作并等它就地展开。
+func addRequestStep(t *testing.T, phase, kind string) int {
+	t.Helper()
+	openStepsTab(t, phase)
+	return addStep(t, phase, kind)
+}
+
+// fillStepSource 往第 index 行（从 1 开始）的代码框里写源码。
+func fillStepSource(t *testing.T, index int, code string) {
+	t.Helper()
+	sel := fmt.Sprintf(".step-row:nth-child(%d) .script-input", index)
+	h.wait(t, "代码框就绪", fmt.Sprintf(`!!document.querySelector(%s)`, jsString(sel)))
+	h.typeInto(t, sel, code)
+}
+
+// pickStepLibrary 在第 index 行里选中脚本库中的某条脚本。
+func pickStepLibrary(t *testing.T, index int, name string) {
+	t.Helper()
+	sel := fmt.Sprintf(".step-row:nth-child(%d) .step-picker .select", index)
+	h.wait(t, "脚本库下拉就绪", fmt.Sprintf(`!!document.querySelector(%s)`, jsString(sel)))
+	h.pickSelect(t, sel, name)
+}
+
+// stepToggles 关掉 / 打开第 index 行（从 1 开始）。
+func stepToggles(t *testing.T, index int) {
+	t.Helper()
+	h.click(t, fmt.Sprintf(".step-row:nth-child(%d) .step-switch", index))
+}
+
+// stepMenu 对第 index 行选「上移 / 下移 / 复制一份 / 删除」。
+func stepMenu(t *testing.T, index int, label string) {
+	t.Helper()
+	h.click(t, fmt.Sprintf(".step-row:nth-child(%d) .step-more", index))
+	h.wait(t, "行菜单展开", `!!document.querySelector('.ctx-menu')`)
+	clickMenuItem(t, label)
+}
+
+// stepRows 读每行的「类型|摘要」，用来断言顺序与内容。
+func stepRows(t *testing.T) []string {
+	t.Helper()
+	var joined string
+	h.eval(t, `[...document.querySelectorAll('.step-row')].map(row => {
+  const kind = ((row.querySelector('.step-kind') || {}).textContent || '').trim();
+  const hint = ((row.querySelector('.step-hint') || {}).textContent || '').trim();
+  return kind + '|' + hint;
+}).join('\n')`, &joined)
+	if joined == "" {
+		return nil
+	}
+	return strings.Split(joined, "\n")
+}
+
 // 前置脚本算 HMAC 签名：桩服务用同一个密钥验签，验不过会回 401。
 func TestPreScriptSignsRequest(t *testing.T) {
 	cleanupScripts(t)
-	openScriptLibrary(t)
-	addLibraryScript(t, "签名", "pre", "全局（所有请求）", strings.Join([]string{
+	h.clearOverlays(t)
+	newTab(t)
+	typeURL(t, "{{baseUrl}}/signed")
+	addRequestStep(t, "pre", "脚本")
+	fillStepSource(t, 1, strings.Join([]string{
 		`const ts = String(pm.utils.now());`,
 		`pm.request.headers.upsert("X-Ts", ts);`,
 		`pm.request.headers.upsert("X-Sign", await pm.utils.hmacSha256("e2e-secret", "/signed|" + ts));`,
 		`console.log("已签名 ts=" + ts);`,
 	}, "\n"))
-	h.clearOverlays(t)
-
-	newTab(t)
-	typeURL(t, "{{baseUrl}}/signed")
 	h.send(t)
 
 	if got := h.status(t); got != "200" {
@@ -151,13 +213,11 @@ func TestPreScriptSignsRequest(t *testing.T) {
 // 后置脚本把 base64 响应体解成中文，响应区要显示改写后的内容。
 func TestPostScriptRewritesBody(t *testing.T) {
 	cleanupScripts(t)
-	openScriptLibrary(t)
-	addLibraryScript(t, "解码响应", "post", "全局（所有请求）",
-		`pm.response.setBody(pm.utils.base64Decode(pm.response.text()));`)
 	h.clearOverlays(t)
-
 	newTab(t)
 	typeURL(t, "{{baseUrl}}/b64")
+	addRequestStep(t, "post", "脚本")
+	fillStepSource(t, 1, `pm.response.setBody(pm.utils.base64Decode(pm.response.text()));`)
 	h.send(t)
 
 	if got := h.status(t); got != "200" {
@@ -172,6 +232,77 @@ func TestPostScriptRewritesBody(t *testing.T) {
 	}
 	h.clearToasts(t)
 	h.shot(t, "51-post-script-body")
+}
+
+// 脚本库引用：同一段代码被引用后能跑，关掉开关就不跑。
+func TestStepLibraryReference(t *testing.T) {
+	cleanupScripts(t)
+	h.clearOverlays(t)
+	openScriptLibrary(t)
+	addLibraryScript(t, "库里的标记", `console.log("来自脚本库");`)
+	h.clearOverlays(t)
+
+	newTab(t)
+	typeURL(t, "{{baseUrl}}/json")
+	addRequestStep(t, "pre", "脚本库")
+	if rows := stepRows(t); len(rows) != 1 || rows[0] != "脚本库|请选择" {
+		t.Fatalf("新加的脚本库行应当是空的待选状态：%v", rows)
+	}
+	pickStepLibrary(t, 1, "库里的标记")
+	if rows := stepRows(t); len(rows) != 1 || rows[0] != "脚本库|库里的标记" {
+		t.Fatalf("选中之后行摘要应当是脚本名：%v", rows)
+	}
+
+	h.send(t)
+	if logs := h.text(t, ".script-log-line"); !strings.Contains(logs, "来自脚本库") {
+		t.Fatalf("引用的库脚本没执行：%q", logs)
+	}
+
+	// 关掉这一行：引用还在，但这次发送不该跑它。
+	stepToggles(t, 1)
+	h.wait(t, "行标记为停用", `document.querySelector('.step-row').classList.contains('off')`)
+	h.send(t)
+	if logs := h.text(t, ".script-log"); strings.Contains(logs, "来自脚本库") {
+		t.Fatalf("停用的操作不该执行：%q", logs)
+	}
+	h.clearToasts(t)
+	h.shot(t, "55-script-step-library")
+}
+
+// 等待时间：一步步停顿再继续，日志里的顺序与耗时都要对得上。
+func TestWaitStepDelays(t *testing.T) {
+	cleanupScripts(t)
+	h.clearOverlays(t)
+	newTab(t)
+	typeURL(t, "{{baseUrl}}/json")
+	addRequestStep(t, "pre", "脚本")
+	fillStepSource(t, 1, `console.log("第一步");`)
+	addStep(t, "pre", "等待时间")
+	h.typeInto(t, ".step-row:nth-child(2) .wait-input", "300")
+	addStep(t, "pre", "脚本")
+	fillStepSource(t, 3, `console.log("第三步");`)
+
+	h.send(t)
+	if rows := stepRows(t); len(rows) != 3 || rows[1] != "等待时间|300 毫秒" {
+		t.Fatalf("等待行没记住毫秒数：%v", rows)
+	}
+	var heads string
+	h.eval(t, `[...document.querySelectorAll('.script-log-run')].map(run => {
+  const line = ((run.querySelector('.script-log-line') || {}).textContent || '').trim();
+  const ms = ((run.querySelector('.script-log-ms') || {}).textContent || '').trim();
+  return ms + '|' + line;
+}).join('\n')`, &heads)
+	if !strings.Contains(heads, "第一步") || !strings.Contains(heads, "第三步") {
+		t.Fatalf("三段操作的日志不全：%q", heads)
+	}
+	if strings.Index(heads, "第一步") > strings.Index(heads, "等待") || strings.Index(heads, "等待") > strings.Index(heads, "第三步") {
+		t.Fatalf("日志顺序应当是 脚本 → 等待 → 脚本：%q", heads)
+	}
+	if !strings.Contains(heads, "300 ms|") {
+		t.Fatalf("等待那一步应当记下 300 ms：%q", heads)
+	}
+	h.clearToasts(t)
+	h.shot(t, "56-script-wait-step")
 }
 
 // 导入来的脚本进脚本库但不执行，点「信任并启用」之后才跑。
@@ -209,6 +340,7 @@ func TestImportedScriptNeedsTrust(t *testing.T) {
 	if len(names) != 1 || !strings.Contains(names[0], "带前置脚本的请求") {
 		t.Fatalf("导入的脚本没有进脚本库：%v", names)
 	}
+	selectLibraryScript(t, names[0])
 	if meta := h.text(t, ".script-lib-item .script-lib-meta"); !strings.Contains(meta, "未信任") {
 		t.Fatalf("导入的脚本应当标成未信任：%q", meta)
 	}

@@ -10,7 +10,7 @@
 // 所以用 `.paint-warmup` 的 opacity 0.01（肉眼不可见）+ pointer-events: none。
 // 实测：冷缓存下「新建脚本」首帧长帧 74ms，预热后 0ms。
 
-import { el } from "./dom";
+import { el, icon } from "./dom";
 import { selectBox } from "./select";
 import { scriptApiDetails, scriptSourceField } from "./scriptEditor";
 
@@ -46,6 +46,51 @@ export function warmUpFirstPaint(): void {
         }),
       ),
       el("label", { class: "field checkbox-field" }, el("input", { attr: { type: "checkbox" } })),
+      // 前置 / 后置操作的行：序号 + 类型 + 摘要 + 开关 + 两枚小图标按钮，展开体里是代码区与片段栏。
+      el(
+        "div",
+        { class: "step-panel" },
+        el(
+          "div",
+          { class: "step-list" },
+          el(
+            "div",
+            { class: "step-row open" },
+            el(
+              "div",
+              { class: "step-head" },
+              el("span", { class: "step-index", text: "1" }),
+              el("span", { class: "step-kind", text: "脚本" }),
+              el("span", { class: "step-hint", text: "预热" }),
+              el("span", { class: "spacer" }),
+              el("span", { class: "step-switch" }, el("input", { attr: { type: "checkbox" } })),
+              el("button", { class: "icon-btn mini step-more", attr: { type: "button" } }, icon("dot")),
+              el("button", { class: "icon-btn mini step-expand open", attr: { type: "button" } }, icon("chevron")),
+            ),
+            el(
+              "div",
+              { class: "step-body" },
+              el(
+                "div",
+                { class: "script-code" },
+                el("textarea", { class: "code-input script-input", attr: { spellcheck: "false", "aria-label": "预热" } }),
+                el(
+                  "div",
+                  { class: "script-rail" },
+                  el("span", { class: "script-rail-title", text: "代码片段" }),
+                  el(
+                    "div",
+                    { class: "script-rail-group" },
+                    el("span", { class: "script-rail-head", text: "变量" }),
+                    el("button", { class: "script-rail-item", attr: { type: "button" }, text: "获取环境变量" }),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        el("button", { class: "step-add", attr: { type: "button" } }, el("span", { text: "添加前置操作" }), icon("chevronDown")),
+      ),
     ),
     el("div", { class: "dialog-foot" }),
   );

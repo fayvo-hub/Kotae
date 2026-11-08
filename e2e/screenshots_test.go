@@ -155,7 +155,7 @@ func TestScreenshots(t *testing.T) {
 	// 03 请求脚本：前置脚本算 HMAC 签名，响应下方是脚本日志。
 	newTab(t)
 	openScriptLibrary(t)
-	addLibraryScript(t, "签名", "pre", "全局（所有请求）", strings.Join([]string{
+	addLibraryScript(t, "签名", strings.Join([]string{
 		`const ts = String(pm.utils.now());`,
 		`pm.request.headers.upsert("X-Ts", ts);`,
 		`pm.request.headers.upsert("X-Sign", await pm.utils.hmacSha256("e2e-secret", "/signed|" + ts));`,
@@ -164,11 +164,13 @@ func TestScreenshots(t *testing.T) {
 	h.clearOverlays(t)
 	h.typeInto(t, ".url-input", "{{baseUrl}}/signed")
 	blurURL(t)
+	addRequestStep(t, "pre", "脚本库")
+	pickStepLibrary(t, 1, "签名")
 	h.send(t)
 	waitResponse(t, "200")
 	shotTo(t, dir, "03-script")
 
-	// 13 脚本库：多条脚本排成一列，列表顺序就是执行顺序。
+	// 13 脚本库：库里只放可复用的代码，不再带阶段与作用范围。
 	openScriptLibrary(t)
 	selectLibraryScript(t, "签名")
 	shotTo(t, dir, "13-script-library")

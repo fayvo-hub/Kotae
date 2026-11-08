@@ -1,4 +1,4 @@
-// 请求编辑区：方法 + URL + 发送 + cURL 导入导出 + 参数/头/体/认证/选项 五个子页签。
+// 请求编辑区：方法 + URL + 发送 + cURL 导入导出 + 参数/头/体/认证/前置/后置/选项 七个子页签。
 
 import { el, fill, icon, iconButton, icons } from "./dom";
 import { assistOpen, enableVarAssist, kvTable } from "./kvtable";
@@ -9,24 +9,27 @@ import {
   applyURL,
   closeStream,
   emit,
+  enabledStepCount,
   isStreaming,
   mutate,
   scriptLayers,
-  scriptScopeLabel,
   send,
   setPendingCurl,
+  setTabSteps,
+  stepsOf,
   toast,
   toggleUI,
 } from "../store";
 import { System } from "../mygo";
 import { CurlError, buildURL, parseCurl } from "../curl";
-import { scriptPhaseLabel } from "../script";
+import { scriptStepsPanel } from "./scriptSteps";
 import {
   METHODS,
   type BodyMode,
   type HttpMethod,
   type KV,
   type RequestProtocol,
+  type ScriptPhase,
   type Tab,
 } from "../types";
 import {
@@ -325,12 +328,15 @@ function unresolvedBadge(tab: Tab): HTMLElement {
 
 function tabStrip(tab: Tab): HTMLElement {
   const strip = el("div", { class: "subtabs", attr: { role: "tablist" } });
+  const own = stepsOf(tab.request);
+  // 徽标只算这条请求自己的操作：集合与全局的继承条数写在面板顶部，不挤在页签上。
   const counts = {
     params: tab.request.params.filter((p) => p.enabled && p.key).length,
     headers: tab.request.headers.filter((h) => h.enabled && h.key).length,
     body: 0,
     auth: tab.request.auth.type === "none" ? 0 : 1,
-    script: scriptLayers(tab).length,
+    pre: enabledStepCount(own, "pre"),
+    post: enabledStepCount(own, "post"),
     options: 0,
   };
   const defs: { key: Tab["requestTab"]; label: string; icon: keyof typeof icons }[] = [
@@ -338,7 +344,8 @@ function tabStrip(tab: Tab): HTMLElement {
     { key: "headers", label: "请求头", icon: "table" },
     { key: "body", label: "请求体", icon: "terminal" },
     { key: "auth", label: "认证", icon: "lock" },
-    { key: "script", label: "脚本", icon: "code" },
+    { key: "pre", label: "前置操作", icon: "code" },
+    { key: "post", label: "后置操作", icon: "code" },
     { key: "options", label: "选项", icon: "sliders" },
   ];
   for (const def of defs) {
@@ -365,49 +372,48 @@ function tabStrip(tab: Tab): HTMLElement {
 }
 
 /**
- * 脚本页不在这里编辑：脚本统一放「脚本库」，列表顺序就是执行顺序。
- * 这里只回答一个问题——这次发送会跑哪几条脚本。
+ * 前置 / 后置操作页：就地增删改、开关、展开、排序。
+ * 顶部先交代「这一层之外还有谁会跑」，免得用户以为请求页签里看到的就是全部。
  */
-function scriptPane(tab: Tab): HTMLElement {
-  const host = el("div", { class: "pane script-pane" });
-  const list = scriptLayers(tab);
-
+function stepsPane(tab: Tab, phase: ScriptPhase): HTMLElement {
+  const host = el("div", { class: "pane step-pane" });
   host.append(
     el("p", {
       class: "pane-hint",
-      text: "脚本在「脚本库」里统一管理，列表顺序就是执行顺序；这里只列出本次发送会跑的那几条。",
+      text:
+        phase === "pre"
+          ? "发送前按顺序执行，能改请求头、地址与请求体；这里只放这条请求自己的操作。"
+          : "拿到响应后按顺序执行，能改写响应体、写变量，也能让同一个请求再发一次。",
     }),
   );
-
-  if (list.length === 0) {
-    host.append(el("p", { class: "muted small", text: "这次发送没有会执行的脚本。" }));
-  } else {
-    const runs = el("div", { class: "stack-tight" });
-    for (const entry of list) {
-      const box = el("div", { class: "script-block" });
-      const head = el("div", { class: "script-block-head" });
-      head.append(
-        el("span", { class: "script-block-title", text: entry.name.trim() || "未命名脚本" }),
-        el("span", {
-          class: "script-block-hint",
-          text: `${scriptPhaseLabel(entry.phase)}脚本 · ${scriptScopeLabel(entry)}`,
-        }),
-      );
-      box.append(head);
-      runs.append(box);
-    }
-    host.append(runs);
-  }
-
-  const openBtn = el("button", {
-    class: "btn small",
-    attr: { type: "button" },
-    on: { click: () => toggleUI("scriptsOpen", true) },
-  });
-  openBtn.append(icon("code"), el("span", { text: "打开脚本库" }));
-  host.append(el("div", { class: "tools-row" }, openBtn));
-
+  const inherited = inheritedNote(tab, phase);
+  if (inherited) host.append(el("p", { class: "inherit-note", text: inherited }));
+  host.append(
+    scriptStepsPanel({
+      phase,
+      steps: () => stepsOf(tab.request),
+      onChange: (next, quiet) => setTabSteps(tab, next, quiet),
+    }),
+  );
   return host;
+}
+
+/** 继承来的操作都是谁在跑：按执行顺序列出还有内容的那几层。 */
+function inheritedNote(tab: Tab, phase: ScriptPhase): string {
+  const layers = scriptLayers(tab).filter((layer) => layer.scope !== "request");
+  const ordered = phase === "post" ? [...layers].reverse() : layers;
+  const parts: string[] = [];
+  for (const layer of ordered) {
+    const count = enabledStepCount(layer.steps, phase);
+    if (count === 0) continue;
+    const where =
+      layer.scope === "global"
+        ? "全局"
+        : `${layer.scope === "folder" ? "文件夹" : "集合"}「${layer.scopeName ?? ""}」`;
+    parts.push(`${where} ${count} 条`);
+  }
+  if (parts.length === 0) return "";
+  return `${phase === "pre" ? "这次发送前" : "这次响应后"}还会按顺序执行：${parts.join(" → ")}`;
 }
 
 function tabBody(tab: Tab): HTMLElement {
@@ -425,8 +431,11 @@ function tabBody(tab: Tab): HTMLElement {
     case "auth":
       fill(host, authPane(tab));
       break;
-    case "script":
-      fill(host, scriptPane(tab));
+    case "pre":
+      fill(host, stepsPane(tab, "pre"));
+      break;
+    case "post":
+      fill(host, stepsPane(tab, "post"));
       break;
     case "options":
       fill(host, optionsPane(tab));

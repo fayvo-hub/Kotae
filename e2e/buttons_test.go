@@ -139,7 +139,8 @@ func TestControlsUsable(t *testing.T) {
 		{"请求头", func() { clickIn(t, ".subtabs:not(.response-subtabs)", "请求头") }, "", 20},
 		{"请求体", func() { clickIn(t, ".subtabs:not(.response-subtabs)", "请求体") }, "", 24},
 		{"认证", func() { clickIn(t, ".subtabs:not(.response-subtabs)", "认证") }, "", 24},
-		{"脚本", func() { clickIn(t, ".subtabs:not(.response-subtabs)", "脚本") }, "", 20},
+		{"前置操作", func() { clickIn(t, ".subtabs:not(.response-subtabs)", "前置操作") }, "", 16},
+		{"后置操作", func() { clickIn(t, ".subtabs:not(.response-subtabs)", "后置操作") }, "", 16},
 		{"选项", func() { clickIn(t, ".subtabs:not(.response-subtabs)", "选项") }, "", 18},
 		{"导入 cURL", func() { h.pressKeys(t, "i", true, false) }, ".dialog", 4},
 		{"导入集合", func() { h.pressKeys(t, "i", true, true) }, ".dialog", 4},
@@ -184,7 +185,7 @@ func scopeOrRoot(scope string) string {
 func TestAllSubtabsSwitchable(t *testing.T) {
 	h.clearOverlays(t)
 
-	for _, label := range []string{"查询参数", "请求头", "请求体", "认证", "脚本", "选项"} {
+	for _, label := range []string{"查询参数", "请求头", "请求体", "认证", "前置操作", "后置操作", "选项"} {
 		clickIn(t, ".subtabs:not(.response-subtabs)", label)
 		h.wait(t, "请求区页签 "+label, fmt.Sprintf(
 			`[...document.querySelectorAll('.subtabs:not(.response-subtabs) .subtab.active')].some(el => el.textContent.startsWith(%s))`,
@@ -202,7 +203,7 @@ func TestAllSubtabsSwitchable(t *testing.T) {
 	}
 }
 
-// 请求体的五种模式、认证的四种方式：每组都要能切过去；脚本页是只读列表 + 脚本库入口。
+// 请求体的五种模式、认证的四种方式、前置 / 后置操作：每组都要能切过去。
 func TestAllSegmentsSwitchable(t *testing.T) {
 	h.clearOverlays(t)
 
@@ -224,10 +225,11 @@ func TestAllSegmentsSwitchable(t *testing.T) {
 			jsString(label)))
 	}
 
-	// 脚本页只读：列出本次发送会跑的那几条，编辑入口是「打开脚本库」。
-	clickIn(t, ".subtabs:not(.response-subtabs)", "脚本")
-	h.wait(t, "脚本页签", `!!document.querySelector('.script-pane')`)
-	h.wait(t, "脚本页有打开脚本库的入口", `[...document.querySelectorAll('.script-pane .btn')].some(b => (b.textContent || '').includes('打开脚本库'))`)
+	// 前置 / 后置操作：切过去是一串可就地编辑的操作行，底部有添加入口。
+	for _, label := range []string{"前置操作", "后置操作"} {
+		clickIn(t, ".subtabs:not(.response-subtabs)", label)
+		h.wait(t, label+"页签", `!!document.querySelector('.step-panel .step-add')`)
+	}
 }
 
 // 顶栏与侧边栏的按钮逐个按一遍，每个都要有可见结果。

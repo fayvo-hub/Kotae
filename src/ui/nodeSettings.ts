@@ -1,11 +1,12 @@
-// 集合 / 文件夹的共享设置：认证与变量。子请求没自己设时自动继承。
+// 集合 / 文件夹的共享设置：认证、变量与前置 / 后置操作。子请求没自己设时自动继承。
 
 import { el, fill } from "./dom";
 import { authEditor } from "./authEditor";
 import { kvTable } from "./kvtable";
 import { closeAll, modal } from "./overlays";
-import { emptyAuth, findNode, setNodeSettings, state } from "../store";
-import type { Collection, FolderNode, KV } from "../types";
+import { scriptStepsPanel } from "./scriptSteps";
+import { emptyAuth, findNode, nodeSteps, setNodeSettings, setNodeSteps, state } from "../store";
+import type { Collection, FolderNode, KV, ScriptPhase } from "../types";
 
 export function nodeSettingsDialog(): HTMLElement {
   const target = state.nodeSettings;
@@ -67,6 +68,31 @@ export function nodeSettingsDialog(): HTMLElement {
   body.append(
     section("变量", "发送请求时按「环境 > 文件夹 > 集合 > 全局」的顺序取值，同名变量深层优先。", table),
   );
+
+  // ---- 前置 / 后置操作 ----
+  // 这一层的操作对所有子请求生效：前置在请求自己的之前跑，后置在之后跑。
+  const scopeId = node === collection ? undefined : node.id;
+  for (const phase of ["pre", "post"] as const satisfies readonly ScriptPhase[]) {
+    body.append(
+      el(
+        "div",
+        { class: "settings-sub" },
+        el("h4", { text: phase === "pre" ? "前置操作" : "后置操作" }),
+        el("p", {
+          class: "muted small",
+          text:
+            phase === "pre"
+              ? "这一层里的请求发送前按顺序执行，排在请求自己的前置操作之前。"
+              : "这一层里的请求拿到响应后按顺序执行，排在请求自己的后置操作之后。",
+        }),
+        scriptStepsPanel({
+          phase,
+          steps: () => nodeSteps(target.collectionId, scopeId),
+          onChange: (next, quiet) => setNodeSteps(target.collectionId, scopeId, next, quiet),
+        }),
+      ),
+    );
+  }
 
   const footer = el("div", { class: "dialog-foot" });
   footer.append(

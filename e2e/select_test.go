@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -119,19 +120,29 @@ func TestSelectStaysOpenForLongList(t *testing.T) {
 	saveTabInto(t, reqName, colName, "")
 	h.openRequest(t, reqName)
 
-	// 新建的脚本默认挂在这个请求上，作用范围下拉框的选中项因此排在集合与请求之后。
+	// 脚本库塞满选项，用操作行里的「脚本库」下拉框来验证：
+	// 选中项排在列表靠下时，菜单展开会先把它滚进可视区，那次滚动不能把菜单收起来。
 	openScriptLibrary(t)
-	h.clickContaining(t, ".script-lib-side .tools-row .btn", "新建")
-	h.wait(t, "新建出一条脚本", `document.querySelectorAll('.script-lib-item').length === 1`)
-	h.click(t, `.script-lib-editor .form-grid > .field:nth-child(2) .select .select-trigger`)
-	h.wait(t, "作用范围下拉框展开", `!!document.querySelector('.select-menu')`)
+	for i := 1; i <= 14; i++ {
+		addLibraryScript(t, fmt.Sprintf("脚本 %02d", i), fmt.Sprintf(`console.log("lib-%d");`, i))
+	}
+	h.clearOverlays(t)
+
+	openStepsTab(t, "pre")
+	addStep(t, "pre", "脚本库")
+	h.pickSelect(t, ".step-row:nth-child(1) .step-picker .select", "脚本 14")
+	h.wait(t, "选中靠下的脚本", `[...document.querySelectorAll('.step-row .step-hint')].some(n => (n.textContent || '').trim() === '脚本 14')`)
+
+	// 再展开一次：这次选中项在最底下，菜单会先滚动到它。
+	h.click(t, ".step-row:nth-child(1) .step-picker .select .select-trigger")
+	h.wait(t, "脚本库下拉框展开", `!!document.querySelector('.select-menu')`)
 	time.Sleep(400 * time.Millisecond)
 	if !h.exists(t, ".select-menu") {
 		t.Fatalf("选项列表很长时下拉框也不该自己收起")
 	}
-	// 点选靠下的选项：菜单已展开，直接点，别再用触发器切一次。
-	h.clickContaining(t, ".select-menu .select-option", "全局（所有请求）")
-	h.wait(t, "作用范围改到全局", `document.querySelector('.script-lib-editor .form-grid > .field:nth-child(2) .select')?.dataset.value === 'global'`)
+	// 点选靠上的选项：菜单已展开，直接点，别再用触发器切一次。
+	h.clickContaining(t, ".select-menu .select-option", "脚本 01")
+	h.wait(t, "改选到列表顶部的脚本", `[...document.querySelectorAll('.step-row .step-hint')].some(n => (n.textContent || '').trim() === '脚本 01')`)
 	h.clearOverlays(t)
 	deleteCollectionViaMenu(t, colName)
 }

@@ -17,11 +17,13 @@ import {
   openTab,
   pasteText,
   renameEnv,
+  globalSteps,
   saveRequestTo,
   saveTab,
   persist,
   saveTabAs,
   scope,
+  setGlobalSteps,
   setSnippetLang,
   setEnv,
   setPendingCurl,
@@ -50,6 +52,7 @@ import type { ApiRequest } from "../types";
 import { System } from "../mygo";
 import { formatBytes } from "../util";
 import { askConfirm, askText } from "./prompt";
+import { scriptStepsPanel } from "./scriptSteps";
 import {
   SHORTCUT_ACTIONS,
   beginShortcutCapture,
@@ -633,6 +636,33 @@ export function globalsSection(): HTMLElement {
   });
 }
 
+/** 设置里的「全局操作」：所有请求发送前 / 拿到响应后都会跑的那两串。 */
+function globalScriptsSection(): HTMLElement {
+  const box = el("div", { class: "stack" });
+  for (const phase of ["pre", "post"] as const) {
+    box.append(
+      el(
+        "div",
+        { class: "settings-sub" },
+        el("h4", { text: phase === "pre" ? "前置操作" : "后置操作" }),
+        el("p", {
+          class: "muted small",
+          text:
+            phase === "pre"
+              ? "所有请求发送前按顺序执行，比如统一加签名头、取时间戳。"
+              : "所有请求拿到响应后按顺序执行，比如统一记录日志、刷新 token。",
+        }),
+        scriptStepsPanel({
+          phase,
+          steps: () => globalSteps(),
+          onChange: (next, quiet) => setGlobalSteps(next, quiet),
+        }),
+      ),
+    );
+  }
+  return box;
+}
+
 // ---- 设置 ----
 
 /**
@@ -990,6 +1020,7 @@ export function settingsDialog(): HTMLElement {
     section("快捷键", shortcutsSection()),
     section("桌面", desktopSection()),
     section("全局变量", globalsSection()),
+    section("全局操作", globalScriptsSection()),
     section("内置动态变量", varList),
     section("数据与备份", backupSection()),
     section("更新", updateSection()),
@@ -1105,7 +1136,7 @@ function backupSection(): HTMLElement {
         try {
           const saved = await System.saveText(
             "kotae-postman.json",
-            toPostmanCollection(state.collections, state.envs, state.scripts),
+            toPostmanCollection(state.collections, state.envs, state.scriptLibrary),
           );
           if (saved) toast(`已导出到 ${saved}`, "success");
         } catch (err) {

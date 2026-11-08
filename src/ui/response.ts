@@ -14,7 +14,7 @@ import type {
   StreamState,
   Tab,
 } from "../types";
-import { copyText, clearStreamMessages, sendStreamMessage, scriptScopeLabel, toast } from "../store";
+import { clearStreamMessages, copyText, sendStreamMessage, toast } from "../store";
 import { scriptPhaseLabel } from "../script";
 import { formatBytes, formatDuration } from "../util";
 import { prettyJSON } from "../util";

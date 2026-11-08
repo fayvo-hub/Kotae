@@ -26,10 +26,12 @@ func TestPmTestAssertions(t *testing.T) {
 		`});`,
 	}, "\n")
 	openScriptLibrary(t)
-	addLibraryScript(t, "断言", "post", "全局（所有请求）", script)
+	addLibraryScript(t, "断言", script)
 	h.clearOverlays(t)
 
 	typeURL(t, "{{baseUrl}}/json")
+	addRequestStep(t, "post", "脚本库")
+	pickStepLibrary(t, 1, "断言")
 	h.send(t)
 
 	h.wait(t, "断言结果", `document.querySelectorAll('.script-test').length === 3`)

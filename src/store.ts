@@ -16,11 +16,14 @@ import type {
   RequestNode,
   RequestOptions,
   ResponseRecord,
+  LibraryScript,
   ResponseTrace,
-  ScriptEntry,
   ScriptPhase,
   ScriptRun,
   ScriptScopeKind,
+  ScriptStep,
+  ScriptStepKind,
+  ScriptSteps,
   SentBody,
   SentFile,
   SentRecord,
@@ -33,6 +36,14 @@ import type {
 } from "./types";
 import type { WebSocket as GoWebSocket } from "@mygo-plugins/websocket";
 import { init as openStorage, load as readStorage, save as writeStorage } from "./db";
+import {
+  emptySteps,
+  normalizeScriptLibrary,
+  normalizeSteps,
+  parseLegacyScripts,
+  splitLegacyScripts,
+  stepsSource,
+} from "./scriptData";
 import { buildURL, cloneRequest, emptyRequest, toCurl } from "./curl";
 import { snippetText, type SnippetLang } from "./snippets";
 import {
@@ -67,8 +78,10 @@ export interface State {
   envs: Env[];
   activeEnvId: string;
   globals: KV[];
-  /** 脚本库，数组顺序就是执行顺序。 */
-  scripts: ScriptEntry[];
+  /** 脚本库：各处的前置 / 后置操作按 id 引用这里的脚本。 */
+  scriptLibrary: LibraryScript[];
+  /** 全局的前置 / 后置操作，所有请求发送时都会跑。 */
+  globalScripts: ScriptSteps;
   tabs: Tab[];
   activeTabId: string | null;
   theme: ThemeMode;
@@ -136,7 +149,8 @@ function blankState(): State {
     envs: [],
     activeEnvId: "",
     globals: [],
-    scripts: [],
+    scriptLibrary: [],
+    globalScripts: emptySteps(),
     tabs: [],
     activeTabId: null,
     theme: "auto",
@@ -202,7 +216,8 @@ function snapshot(): PersistedWorkspace {
     envs: state.envs,
     activeEnvId: state.activeEnvId,
     globals: state.globals,
-    scripts: state.scripts,
+    scriptLibrary: state.scriptLibrary,
+    globalScripts: state.globalScripts,
     tabs: state.tabs.map((t) => ({
       id: t.id,
       name: t.name,
@@ -279,14 +294,8 @@ function applyPersisted(p: Partial<PersistedWorkspace>): void {
   state.history = Array.isArray(p.history) ? p.history : [];
   state.envs = Array.isArray(p.envs) ? p.envs : [];
   state.globals = Array.isArray(p.globals) ? p.globals : [];
-  state.scripts = Array.isArray(p.scripts)
-    ? p.scripts.map((entry) => ({
-        ...entry,
-        source: entry.source ?? "",
-        enabled: entry.enabled !== false,
-        trusted: entry.trusted !== false,
-      }))
-    : [];
+  state.scriptLibrary = normalizeScriptLibrary(p.scriptLibrary);
+  state.globalScripts = normalizeSteps(p.globalScripts);
   state.activeEnvId = typeof p.activeEnvId === "string" ? p.activeEnvId : "";
   state.theme = p.theme === "dark" || p.theme === "light" ? p.theme : "auto";
   // 上下限与拖拽时一致：拖到边缘再重启，尺寸不该被悄悄改掉。
@@ -350,6 +359,8 @@ function normalizeRequest(r: Partial<ApiRequest> | undefined): ApiRequest {
       insecureTLS: r.options?.insecureTLS ?? false,
     },
     importScript: r.importScript,
+    // 重启恢复标签页时也要带上前置 / 后置操作，否则改动过的请求「看起来」丢了。
+    scripts: r.scripts ? normalizeSteps(r.scripts) : undefined,
   };
 }
 
@@ -482,7 +493,8 @@ export function emptyAuth(): AuthConfig {
 export function setNodeSettings(
   collectionId: string,
   nodeId: string | undefined,
-  patch: { auth?: AuthConfig; vars?: KV[] },
+  patch: { auth?: AuthConfig; vars?: KV[]; scripts?: ScriptSteps },
+  quiet = false,
 ): void {
   const collection = state.collections.find((c) => c.id === collectionId);
   if (!collection) return;
@@ -502,111 +514,252 @@ export function setNodeSettings(
     if (patch.vars) target.vars = patch.vars;
     else delete target.vars;
   }
+  if ("scripts" in patch) {
+    const steps = patch.scripts;
+    // 两串都空就不占库：共享设置 JSON 里不写这个字段，读回来一样是空。
+    if (steps && (steps.pre.length > 0 || steps.post.length > 0)) target.scripts = steps;
+    else delete target.scripts;
+  }
   persist();
-  emit();
+  if (!quiet) emit();
 }
 
 // ---- 脚本库 ----
 
-/** 新建一条脚本并返回它的 id；scope 为 request 时必须带请求节点 id。 */
-export function createScript(scope: ScriptScopeKind, scopeId?: string, phase: ScriptPhase = "pre"): string {
-  const entry: ScriptEntry = {
-    id: uid("script"),
-    name: "新建脚本",
-    phase,
-    scope,
-    ...(scope !== "global" && scopeId ? { scopeId } : {}),
-    source: "",
-    enabled: true,
-    trusted: true,
+/** 脚本库里的全部脚本（脚本库浮层用）。 */
+export function libraryScripts(): LibraryScript[] {
+  return state.scriptLibrary;
+}
+
+export function findLibraryScript(id: string): LibraryScript | undefined {
+  return state.scriptLibrary.find((s) => s.id === id);
+}
+
+/** 新建一条库脚本并返回 id。 */
+export function createLibraryScript(
+  seed: { name?: string; source?: string; description?: string; trusted?: boolean } = {},
+): string {
+  const entry: LibraryScript = {
+    id: uid("lib"),
+    name: seed.name?.trim() || "新建脚本",
+    description: seed.description ?? "",
+    source: seed.source ?? "",
+    trusted: seed.trusted !== false,
   };
-  state.scripts.push(entry);
+  state.scriptLibrary.push(entry);
   persist();
   emit();
   return entry.id;
 }
 
-/**
- * 改一条脚本。改源码用的是 `quiet`：编辑时每敲一个字都重绘主界面太浪费，
- * 结构性的改动（名字、阶段、范围、开关）才需要重绘。
- */
-export function updateScript(id: string, patch: Partial<Omit<ScriptEntry, "id">>, quiet = false): void {
-  const entry = state.scripts.find((s) => s.id === id);
+/** 改库脚本。改源码 / 说明用 `quiet`：每敲一个字都重绘主界面太浪费。 */
+export function updateLibraryScript(
+  id: string,
+  patch: Partial<Omit<LibraryScript, "id">>,
+  quiet = false,
+): void {
+  const entry = findLibraryScript(id);
   if (!entry) return;
   Object.assign(entry, patch);
   persist();
   if (!quiet) emit();
 }
 
-export function deleteScript(id: string): void {
-  const at = state.scripts.findIndex((s) => s.id === id);
+/** 删库脚本：引用它的步骤一起删掉，免得留下指向空处的步骤。 */
+export function deleteLibraryScript(id: string): void {
+  const at = state.scriptLibrary.findIndex((s) => s.id === id);
   if (at < 0) return;
-  state.scripts.splice(at, 1);
-  persist();
-  emit();
-}
-
-/** 在库里上移 / 下移一位：库的顺序就是执行顺序。 */
-export function moveScript(id: string, delta: number): void {
-  const at = state.scripts.findIndex((s) => s.id === id);
-  const to = at + delta;
-  if (at < 0 || to < 0 || to >= state.scripts.length) return;
-  const [entry] = state.scripts.splice(at, 1);
-  if (!entry) return;
-  state.scripts.splice(to, 0, entry);
-  persist();
-  emit();
-}
-
-/** 脚本来源的中文写法：全局 / 集合「用户」/ 请求「登录」。 */
-export function scriptScopeLabel(entry: ScriptEntry): string {
-  switch (entry.scope) {
-    case "global":
-      return "全局";
-    case "collection": {
-      const name = state.collections.find((c) => c.id === entry.scopeId)?.name;
-      return name ? `集合「${name}」` : "集合（已删除）";
-    }
-    default: {
-      const name = entry.scopeId ? requestName(entry.scopeId) : undefined;
-      return name ? `请求「${name}」` : "请求（已删除）";
-    }
-  }
-}
-
-/** 作用范围里那个集合 / 请求的名字，响应区日志用它标注来源。 */
-function scriptScopeName(entry: ScriptEntry): string | undefined {
-  if (entry.scope === "collection") return state.collections.find((c) => c.id === entry.scopeId)?.name;
-  if (entry.scope === "request") return entry.scopeId ? requestName(entry.scopeId) : undefined;
-  return undefined;
-}
-
-/** 在所有集合里按节点 id 找请求名。 */
-function requestName(nodeId: string): string | undefined {
+  state.scriptLibrary.splice(at, 1);
+  dropLibraryStep(state.globalScripts, id);
   for (const collection of state.collections) {
-    const hit = findNode(collection.id, nodeId)?.node;
-    if (hit && hit.type === "request") return hit.name;
+    dropLibraryStep(collection.scripts, id);
+    eachNode(collection.items, (node) => {
+      dropLibraryStep(node.type === "folder" ? node.scripts : node.request.scripts, id);
+    });
   }
-  return undefined;
+  for (const tab of state.tabs) dropLibraryStep(tab.request.scripts, id);
+  persist();
+  emit();
+}
+
+// ---- 前置 / 后置操作 ----
+
+/** 某一层现在的操作列表；没配过就是两个空数组（新对象，调用方随便改）。 */
+export function stepsOf(request: { scripts?: ScriptSteps } | undefined): ScriptSteps {
+  return request?.scripts ?? emptySteps();
+}
+
+/** 全局层的操作列表。 */
+export function globalSteps(): ScriptSteps {
+  return state.globalScripts;
+}
+
+/** 写全局层的操作列表；quiet 用于编辑源码时不重绘。 */
+export function setGlobalSteps(next: ScriptSteps, quiet = false): void {
+  state.globalScripts = next;
+  persist();
+  if (!quiet) emit();
+}
+
+/** 集合（nodeId 为空）或文件夹的操作列表。 */
+export function nodeSteps(collectionId: string, nodeId?: string): ScriptSteps {
+  if (!nodeId) return stepsOf(state.collections.find((c) => c.id === collectionId));
+  const hit = findNode(collectionId, nodeId)?.node;
+  return stepsOf(hit && hit.type === "folder" ? hit : undefined);
+}
+
+/** 写集合 / 文件夹的操作列表。 */
+export function setNodeSteps(
+  collectionId: string,
+  nodeId: string | undefined,
+  next: ScriptSteps,
+  quiet = false,
+): void {
+  setNodeSettings(collectionId, nodeId, { scripts: next }, quiet);
+}
+
+/** 写某个标签页请求的操作列表（请求页签里改的就是它）。 */
+export function setTabSteps(tab: Tab | null, next: ScriptSteps, quiet = false): void {
+  if (!tab) return;
+  tab.request.scripts = next;
+  tab.dirty = true;
+  persist();
+  if (!quiet) emit();
+}
+
+/** 这一层某一阶段有几条会执行的步骤，子页签徽标用它。 */
+export function enabledStepCount(steps: ScriptSteps, phase: ScriptPhase): number {
+  return steps[phase].filter((step) => step.enabled && stepStepHasBody(step)).length;
+}
+
+/** 步骤有没有内容：关掉的空步骤不占徽标，也不在日志里冒一条空记录。 */
+function stepStepHasBody(step: ScriptStep): boolean {
+  if (step.kind === "script") return Boolean(step.source?.trim());
+  if (step.kind === "library") return Boolean(step.libraryId);
+  return (step.ms ?? 0) > 0;
+}
+
+/** 一层操作列表的来源说明，日志与面板顶部都用它。 */
+interface StepLayer {
+  steps: ScriptSteps;
+  scope: ScriptScopeKind;
+  scopeName?: string;
+}
+
+/** 文件夹链：从集合往下到这条请求所在的文件夹，外层在前。 */
+function folderChain(collectionId: string, nodeId: string | undefined): FolderNode[] {
+  const collection = state.collections.find((c) => c.id === collectionId);
+  if (!collection || !nodeId) return [];
+  const out: FolderNode[] = [];
+  const walk = (items: TreeNode[], trail: FolderNode[]): boolean => {
+    for (const node of items) {
+      if (node.type === "folder") {
+        if (walk(node.items, [...trail, node])) return true;
+        continue;
+      }
+      if (node.id !== nodeId) continue;
+      out.push(...trail);
+      return true;
+    }
+    return false;
+  };
+  walk(collection.items, []);
+  return out;
 }
 
 /**
- * 当前标签页会执行的脚本，按库里的顺序（也就是用户排的顺序）：
- * 全局的全跑；集合脚本只在请求属于该集合时跑；请求脚本只在就是这条请求时跑。
+ * 这次发送会经过的所有层，外层在前：全局 → 集合 → 文件夹（外→内）→ 请求。
+ * 后置用的时候把它反过来跑，就是请求自己最先生效。
  */
-export function scriptLayers(tab: Tab | null = activeTab() ?? null): ScriptEntry[] {
-  return state.scripts.filter((entry) => {
-    if (!entry.enabled || !entry.source.trim()) return false;
-    if (entry.scope === "global") return true;
-    if (!entry.scopeId) return false;
-    if (entry.scope === "collection") return tab?.origin?.collectionId === entry.scopeId;
-    return tab?.origin?.nodeId === entry.scopeId;
-  });
+export function scriptLayers(tab: Tab | null = activeTab() ?? null): StepLayer[] {
+  const layers: StepLayer[] = [{ steps: state.globalScripts, scope: "global" }];
+  const origin = tab?.origin;
+  if (tab && origin) {
+    const collection = state.collections.find((c) => c.id === origin.collectionId);
+    if (collection?.scripts) {
+      layers.push({ steps: collection.scripts, scope: "collection", scopeName: collection.name });
+    }
+    for (const folder of folderChain(origin.collectionId, origin.nodeId)) {
+      if (folder.scripts) layers.push({ steps: folder.scripts, scope: "folder", scopeName: folder.name });
+    }
+  }
+  // 请求层用的是标签页里的工作副本：用户刚在请求页签里改完就该按改后的跑。
+  if (tab?.request.scripts) {
+    layers.push({ steps: tab.request.scripts, scope: "request", scopeName: tab.name });
+  }
+  return layers;
 }
 
-/** 库里全部脚本（脚本库浮层用），不做可用性过滤。 */
-export function allScripts(): ScriptEntry[] {
-  return state.scripts;
+/** 一步在执行时定下来的一切（引用的库脚本已经解析好，缺的标记出来）。 */
+export interface PlannedStep {
+  phase: ScriptPhase;
+  kind: ScriptStepKind;
+  /** 日志里显示的步骤名。 */
+  name: string;
+  scope: ScriptScopeKind;
+  scopeName?: string;
+  source?: string;
+  ms?: number;
+  /** 引用的库脚本已经被删掉了。 */
+  missing?: boolean;
+  /** 引用的库脚本来自导入，还没被信任。 */
+  untrusted?: boolean;
+  step: ScriptStep;
+}
+
+/** 某一阶段真正会跑的步骤：层内按顺序，跳过关掉的与空的。 */
+export function scriptPlan(tab: Tab | null, phase: ScriptPhase): PlannedStep[] {
+  const layers = scriptLayers(tab);
+  const ordered = phase === "post" ? [...layers].reverse() : layers;
+  const out: PlannedStep[] = [];
+  for (const layer of ordered) {
+    for (const step of layer.steps[phase]) {
+      if (!step.enabled) continue;
+      const base = {
+        phase,
+        kind: step.kind,
+        scope: layer.scope,
+        ...(layer.scopeName ? { scopeName: layer.scopeName } : {}),
+        step,
+      };
+      if (step.kind === "script") {
+        if (!step.source?.trim()) continue;
+        out.push({ ...base, name: step.note?.trim() || "内联脚本", source: step.source });
+        continue;
+      }
+      if (step.kind === "library") {
+        const lib = findLibraryScript(step.libraryId ?? "");
+        if (!lib) {
+          out.push({ ...base, name: "引用的脚本已删除", missing: true });
+          continue;
+        }
+        out.push({
+          ...base,
+          name: lib.name,
+          source: lib.source,
+          ...(lib.trusted === false ? { untrusted: true } : {}),
+        });
+        continue;
+      }
+      out.push({ ...base, name: `等待 ${step.ms ?? 0} 毫秒`, ms: step.ms ?? 0 });
+    }
+  }
+  return out;
+}
+
+/** 删掉一层里引用了某条库脚本的步骤。 */
+function dropLibraryStep(steps: ScriptSteps | undefined, libraryId: string): void {
+  if (!steps) return;
+  const keep = (step: ScriptStep): boolean => step.kind !== "library" || step.libraryId !== libraryId;
+  steps.pre = steps.pre.filter(keep);
+  steps.post = steps.post.filter(keep);
+}
+
+function eachNode(items: TreeNode[], visit: (node: TreeNode) => void): void {
+  for (const node of items) {
+    visit(node);
+    if (node.type === "folder") eachNode(node.items, visit);
+  }
 }
 
 /**
@@ -1031,6 +1184,18 @@ async function scriptHttp(req: ScriptHttpRequest): Promise<ScriptHttpResponse> {
 /** 一次点击最多自动重发 3 次：两个脚本互相触发时不能把应用打死。 */
 const MAX_SCRIPT_RESEND = 3;
 
+/** 「等待」步骤的上限：填错一位数也不该把应用卡死一分钟以上。 */
+const MAX_WAIT_MS = 60000;
+
+const UNTRUSTED_HINT = "脚本来自导入文件，还没被信任，本次不执行（在「脚本库」里点「信任并启用」）";
+
+/** 跑「等待」步骤，返回实际等了多久。 */
+async function waitStep(ms: number | undefined): Promise<number> {
+  const actual = Math.max(0, Math.min(Math.floor(ms ?? 0), MAX_WAIT_MS));
+  if (actual > 0) await new Promise<void>((resolve) => window.setTimeout(resolve, actual));
+  return actual;
+}
+
 export async function send(): Promise<void> {
   const tab = activeTab();
   if (!tab || tab.sending) return;
@@ -1103,9 +1268,19 @@ async function sendAttempt(tab: Tab, scriptRuns: ScriptRun[]): Promise<boolean> 
   tab.sending = true;
   emit();
 
-  // 前置脚本：按脚本库里的顺序跑，拿到的就是「马上要发出去」的请求。
-  const layers = scriptLayers(tab);
-  const phaseScripts = (phase: ScriptPhase): ScriptEntry[] => layers.filter((entry) => entry.phase === phase);
+  // 前置操作：全局 → 集合 → 文件夹 → 请求，每层按用户排的顺序跑，
+  // 拿到的就是「马上要发出去」的请求。
+  const pushRun = (plan: PlannedStep, extra: Partial<ScriptRun>): void => {
+    scriptRuns.push({
+      phase: plan.phase,
+      name: plan.name,
+      scope: plan.scope,
+      ...(plan.scopeName ? { scopeName: plan.scopeName } : {}),
+      logs: [],
+      ms: 0,
+      ...extra,
+    });
+  };
   let scriptVars: Record<string, string> = {};
   const scriptRequestState = () => ({
     method: methodUpper,
@@ -1122,25 +1297,23 @@ async function sendAttempt(tab: Tab, scriptRuns: ScriptRun[]): Promise<boolean> 
     http: scriptHttp,
     resolve: (text: string) => resolveText(text),
   });
-  for (const entry of phaseScripts("pre")) {
-    if (!entry.trusted) {
-      scriptRuns.push({
-        phase: "pre",
-        name: entry.name,
-        scope: entry.scope,
-        scopeName: scriptScopeName(entry),
-        logs: [{ level: "warn", text: `脚本来自导入文件，还没被信任，本次不执行（在「脚本库」里点「信任并启用」）` }],
-        ms: 0,
-      });
+  for (const plan of scriptPlan(tab, "pre")) {
+    if (plan.missing) {
+      pushRun(plan, { logs: [{ level: "warn", text: "引用的库脚本已被删除，这一步跳过" }] });
       continue;
     }
-    const pre = await runScript("pre", entry.source, scriptContext(), scriptVars);
+    if (plan.untrusted) {
+      pushRun(plan, { logs: [{ level: "warn", text: UNTRUSTED_HINT }] });
+      continue;
+    }
+    if (plan.kind === "wait") {
+      const ms = await waitStep(plan.ms);
+      pushRun(plan, { logs: [{ level: "log", text: `等待 ${ms} 毫秒` }], ms });
+      continue;
+    }
+    const pre = await runScript("pre", plan.source ?? "", scriptContext(), scriptVars);
     scriptVars = pre.vars;
-    scriptRuns.push({
-      phase: "pre",
-      name: entry.name,
-      scope: entry.scope,
-      scopeName: scriptScopeName(entry),
+    pushRun(plan, {
       logs: pre.logs,
       error: pre.error,
       ms: pre.ms,
@@ -1149,7 +1322,7 @@ async function sendAttempt(tab: Tab, scriptRuns: ScriptRun[]): Promise<boolean> 
     if (pre.error) {
       tab.sending = false;
       emit();
-      toast(`脚本「${entry.name}」出错，请求已取消：${pre.error}`, "error");
+      toast(`脚本「${plan.name}」出错，请求已取消：${pre.error}`, "error");
       return false;
     }
     url = pre.request.url;
@@ -1203,24 +1376,26 @@ async function sendAttempt(tab: Tab, scriptRuns: ScriptRun[]): Promise<boolean> 
     });
     const record = await readResponse(res, started, performance.now() - started);
 
-    // 后置脚本：同样按库里的顺序跑（改响应体、写变量），顺序完全由用户在库里排。
-    // 任何一条调了 pm.execution.resend()，本次响应处理完就把请求再发一遍。
+    // 后置操作：层序反过来（请求 → 文件夹 → 集合 → 全局），每层仍按用户排的顺序，
+    // 改响应体、写变量；任何一步调了 pm.execution.resend() 就把请求再发一遍。
     let wantsResend = false;
-    for (const entry of phaseScripts("post")) {
-      if (!entry.trusted) {
-        scriptRuns.push({
-          phase: "post",
-          name: entry.name,
-          scope: entry.scope,
-          scopeName: scriptScopeName(entry),
-          logs: [{ level: "warn", text: `脚本来自导入文件，还没被信任，本次不执行（在「脚本库」里点「信任并启用」）` }],
-          ms: 0,
-        });
+    for (const plan of scriptPlan(tab, "post")) {
+      if (plan.missing) {
+        pushRun(plan, { logs: [{ level: "warn", text: "引用的库脚本已被删除，这一步跳过" }] });
+        continue;
+      }
+      if (plan.untrusted) {
+        pushRun(plan, { logs: [{ level: "warn", text: UNTRUSTED_HINT }] });
+        continue;
+      }
+      if (plan.kind === "wait") {
+        const ms = await waitStep(plan.ms);
+        pushRun(plan, { logs: [{ level: "log", text: `等待 ${ms} 毫秒` }], ms });
         continue;
       }
       const post = await runScript(
         "post",
-        entry.source,
+        plan.source ?? "",
         scriptContext({
           code: record.status,
           status: record.statusText,
@@ -1236,11 +1411,7 @@ async function sendAttempt(tab: Tab, scriptRuns: ScriptRun[]): Promise<boolean> 
         record.base64 = undefined;
         record.truncated = false;
       }
-      scriptRuns.push({
-        phase: "post",
-        name: entry.name,
-        scope: entry.scope,
-        scopeName: scriptScopeName(entry),
+      pushRun(plan, {
         logs: post.logs,
         error: post.error,
         ms: post.ms,
@@ -2264,7 +2435,9 @@ export interface WorkspaceBundle {
   collections: Collection[];
   envs: Env[];
   globals: KV[];
-  scripts: ScriptEntry[];
+  /** 脚本库；集合 / 请求 / 全局的操作列表跟着各自的对象一起走。 */
+  scriptLibrary: LibraryScript[];
+  globalScripts: ScriptSteps;
 }
 
 export function exportBundle(): string {
@@ -2275,18 +2448,22 @@ export function exportBundle(): string {
     collections: state.collections,
     envs: state.envs,
     globals: state.globals,
-    scripts: state.scripts,
+    scriptLibrary: state.scriptLibrary,
+    globalScripts: state.globalScripts,
   };
   return JSON.stringify(bundle, null, 2);
 }
 
-/** 重新分配 id 时记下新旧对应关系，脚本库里的范围引用要跟着改。 */
+/** 重新分配 id 时记下新旧对应关系，脚本库里的引用要跟着改。 */
 interface IdMap {
   collections: Map<string, string>;
   nodes: Map<string, string>;
 }
 
-/** 导入备份：合并到现有数据（id 冲突时整体换新 id）。 */
+/**
+ * 导入备份：合并到现有数据（id 冲突时整体换新 id）。
+ * 脚本库的条目一律换新 id，层里引用它们的步骤同步改成新 id。
+ */
 export function importBundle(raw: string): { collections: number; envs: number } {
   const parsed = JSON.parse(raw) as Partial<WorkspaceBundle>;
   const collections = Array.isArray(parsed.collections) ? parsed.collections : [];
@@ -2304,20 +2481,71 @@ export function importBundle(raw: string): { collections: number; envs: number }
   if (Array.isArray(parsed.globals)) {
     for (const g of parsed.globals) state.globals.push({ ...g, id: uid("kv") });
   }
-  // 脚本跟着集合一起搬家：范围指向的集合 / 请求换成新 id，找不到的条目不导。
-  if (Array.isArray(parsed.scripts)) {
-    for (const entry of parsed.scripts) {
-      const scopeId =
+
+  // 新格式：库条目换新 id 后，层里的引用同步换过去。
+  const libMap = new Map<string, string>();
+  for (const lib of normalizeScriptLibrary(parsed.scriptLibrary)) {
+    const copy: LibraryScript = { ...lib, id: uid("lib") };
+    libMap.set(lib.id, copy.id);
+    state.scriptLibrary.push(copy);
+  }
+  const remapLibrary = (steps: ScriptSteps | undefined): void => {
+    if (!steps) return;
+    for (const phase of ["pre", "post"] as const) {
+      for (const step of steps[phase]) {
+        if (step.kind !== "library" || !step.libraryId) continue;
+        step.libraryId = libMap.get(step.libraryId) ?? step.libraryId;
+      }
+    }
+  };
+  const incomingGlobal = normalizeSteps(parsed.globalScripts);
+  remapLibrary(incomingGlobal);
+  state.globalScripts = {
+    pre: state.globalScripts.pre.concat(incomingGlobal.pre),
+    post: state.globalScripts.post.concat(incomingGlobal.post),
+  };
+  for (const collection of collections) {
+    remapLibrary(collection.scripts);
+    eachNode(collection.items, (node) => {
+      if (node.type === "folder") remapLibrary(node.scripts);
+      else remapLibrary(node.request.scripts);
+    });
+  }
+
+  // 0.2.x 的备份：脚本是一个全局有序列表，按旧 id 拆到各层后再搬过来。
+  const legacyRaw = (parsed as { scripts?: unknown }).scripts;
+  const legacy = Array.isArray(legacyRaw) ? parseLegacyScripts(JSON.stringify(legacyRaw)) : [];
+  if (legacy.length > 0) {
+    const known = { collections: new Set<string>(), requests: new Set<string>() };
+    for (const collection of collections) {
+      known.collections.add(collection.id);
+      eachNode(collection.items, (node) => {
+        if (node.type === "request") known.requests.add(node.id);
+      });
+    }
+    const remapped = legacy.map((entry) => ({
+      ...entry,
+      scopeId:
         entry.scope === "collection"
           ? map.collections.get(entry.scopeId ?? "")
           : entry.scope === "request"
             ? map.nodes.get(entry.scopeId ?? "")
-            : undefined;
-      if (entry.scope !== "global" && !scopeId) continue;
-      const copy: ScriptEntry = { ...entry, id: uid("script") };
-      if (scopeId) copy.scopeId = scopeId;
-      else delete copy.scopeId;
-      state.scripts.push(copy);
+            : undefined,
+    }));
+    const split = splitLegacyScripts(remapped, known);
+    state.scriptLibrary.push(...split.library);
+    state.globalScripts = {
+      pre: state.globalScripts.pre.concat(split.global.pre),
+      post: state.globalScripts.post.concat(split.global.post),
+    };
+    for (const collection of collections) {
+      const own = split.collections.get(collection.id);
+      if (own) collection.scripts = own;
+      eachNode(collection.items, (node) => {
+        if (node.type !== "request") return;
+        const steps = split.requests.get(node.id);
+        if (steps) node.request.scripts = steps;
+      });
     }
   }
   persist();
@@ -2356,20 +2584,21 @@ function adoptImportedScripts(nodes: TreeNode[]): void {
     const imported = node.request.importScript;
     if (!imported) continue;
     delete node.request.importScript;
+    const steps = normalizeSteps(node.request.scripts);
     for (const phase of ["pre", "post"] as const) {
       const source = phase === "pre" ? imported.pre : imported.post;
       if (!source.trim()) continue;
-      state.scripts.push({
-        id: uid("script"),
+      const lib: LibraryScript = {
+        id: uid("lib"),
         name: `${node.name} · ${phase === "pre" ? "前置" : "后置"}`,
-        phase,
-        scope: "request",
-        scopeId: node.id,
+        description: "从 Postman 导入",
         source,
-        enabled: true,
-        trusted: false,
-      });
+        trusted: imported.trusted !== false,
+      };
+      state.scriptLibrary.push(lib);
+      steps[phase].push({ id: uid("step"), kind: "library", enabled: true, libraryId: lib.id });
     }
+    if (steps.pre.length > 0 || steps.post.length > 0) node.request.scripts = steps;
   }
 }
 

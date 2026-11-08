@@ -2,6 +2,7 @@
 // 只负责渲染与事件转发，脚本存在哪、什么时候落库由调用方决定。
 
 import { el } from "./dom";
+import { snippetRail } from "./scriptSnippets";
 import type { ScriptPhase } from "../script";
 
 export interface ScriptSourceSpec {
@@ -39,7 +40,23 @@ export function scriptPhaseHint(phase: ScriptPhase): string {
   return HINTS[phase];
 }
 
-/** 一条脚本的源码编辑框：标题 + 等宽文本域。 */
+/** 源码框 + 右侧片段栏：片段点一下插到光标处。 */
+function codeArea(spec: ScriptSourceSpec): HTMLElement {
+  const area = el("textarea", {
+    class: "code-input script-input",
+    attr: {
+      spellcheck: "false",
+      placeholder: PLACEHOLDERS[spec.phase],
+      "aria-label": spec.label,
+      "data-phase": spec.phase,
+    },
+    on: { input: () => spec.onInput(area.value) },
+  });
+  area.value = spec.source;
+  return el("div", { class: "script-code" }, area, snippetRail(spec.phase, () => area));
+}
+
+/** 一条脚本的源码编辑框：标题 + 带片段栏的等宽文本域（脚本库与全局脚本用它）。 */
 export function scriptSourceField(spec: ScriptSourceSpec): HTMLElement {
   const box = el("section", { class: "script-block" });
   const head = el("div", { class: "script-block-head" });
@@ -53,19 +70,13 @@ export function scriptSourceField(spec: ScriptSourceSpec): HTMLElement {
       text: spec.phase === "pre" ? "发送前执行" : "拿到响应后执行",
     }),
   );
-  const area = el("textarea", {
-    class: "code-input script-input",
-    attr: {
-      spellcheck: "false",
-      placeholder: PLACEHOLDERS[spec.phase],
-      "aria-label": spec.label,
-      "data-phase": spec.phase,
-    },
-    on: { input: () => spec.onInput(area.value) },
-  });
-  area.value = spec.source;
-  box.append(head, area);
+  box.append(head, codeArea(spec));
   return box;
+}
+
+/** 只要代码区与片段栏，不要标题：请求页签里就地展开的操作行用它。 */
+export function scriptCodeArea(spec: ScriptSourceSpec): HTMLElement {
+  return codeArea(spec);
 }
 
 /** 默认折叠：对话框高度有限，先把编辑器露出来，需要查 API 时再展开。 */

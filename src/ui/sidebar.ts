@@ -383,7 +383,7 @@ function inlineRename(label: HTMLElement, current: string, commit: (name: string
 }
 
 // folderId 只是「这个标签页挂在哪个文件夹下」的标记：保存前就靠它继承
-// 文件夹的共享认证与变量，否则从文件夹里新建的请求要等重新打开才生效。
+// 文件夹的共享设置（认证、变量、前置 / 后置操作），从文件夹里新建的请求要等重新打开才生效。
 function newRequestIn(collectionId: string, folderId = ""): void {
   openTab(emptyRequest(), "新请求", { collectionId, nodeId: folderId });
   toast("已新建请求，编辑后按 Ctrl+S 保存到集合", "info");
@@ -398,7 +398,7 @@ function openCollectionMenu(ev: MouseEvent, col: Collection, label: HTMLElement,
     { label: "新建请求", run: () => newRequestIn(col.id) },
     { label: "新建文件夹", run: () => createFolder(col.id) },
     {
-      label: "共享认证与变量…",
+      label: "共享设置…",
       run: () => openNodeSettings(col.id, undefined, col.name),
     },
     {
@@ -420,7 +420,7 @@ function openFolderMenu(
     { label: "新建请求", run: () => newRequestIn(collectionId, folder.id) },
     { label: "新建子文件夹", run: () => createFolder(collectionId, folder.id) },
     {
-      label: "共享认证与变量…",
+      label: "共享设置…",
       run: () => openNodeSettings(collectionId, folder.id, folder.name),
     },
     {

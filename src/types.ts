@@ -82,28 +82,48 @@ export interface RequestOptions {
   insecureTLS: boolean;
 }
 
-/** 脚本在库里是前置还是后置。 */
+/** 操作列表属于前置还是后置。 */
 export type ScriptPhase = "pre" | "post";
 
-/** 脚本的作用范围：所有请求、某个集合（含其中的文件夹与请求）、某个请求。 */
-export type ScriptScopeKind = "global" | "collection" | "request";
+/** 步骤挂在哪一层：全局、集合、文件夹、单个请求。 */
+export type ScriptScopeKind = "global" | "collection" | "folder" | "request";
+
+/** 一步操作的种类：就地写脚本、引用脚本库里的脚本、纯等待。 */
+export type ScriptStepKind = "script" | "library" | "wait";
 
 /**
- * 脚本库里的一个脚本。库里是一个有序列表，发送时按这份顺序执行：
- * 前置只跑 phase 为 pre 的，后置只跑 phase 为 post 的，顺序即用户排的顺序。
- * trusted 只对导入来的脚本有意义：false 时不会执行，直到用户在库里点「信任并启用」。
+ * 前置 / 后置操作列表里的一步。层内按数组顺序执行，关掉的步骤保留内容但不跑。
  */
-export interface ScriptEntry {
+export interface ScriptStep {
+  id: string;
+  kind: ScriptStepKind;
+  /** 关掉就跳过这一步。 */
+  enabled: boolean;
+  /** kind 为 script 时的源码。 */
+  source?: string;
+  /** 行标题右侧的一句话说明（Apifox 里「脚本 console.log(1);」那一段）。 */
+  note?: string;
+  /** kind 为 library 时引用的库脚本 id。 */
+  libraryId?: string;
+  /** kind 为 wait 时等待的毫秒数。 */
+  ms?: number;
+}
+
+/** 一层上挂的两串操作：前置与后置各自有序。 */
+export interface ScriptSteps {
+  pre: ScriptStep[];
+  post: ScriptStep[];
+}
+
+/**
+ * 脚本库里的一条脚本：只有名字、说明与源码，用 id 被各处的前置 / 后置操作引用。
+ * trusted 只对导入来的脚本有意义：false 时引用它的步骤不会执行，直到用户在库里点「信任并启用」。
+ */
+export interface LibraryScript {
   id: string;
   name: string;
-  phase: ScriptPhase;
-  /** 作用范围；不匹配当前请求的脚本不会执行。 */
-  scope: ScriptScopeKind;
-  /** scope 为 collection 时是集合 id，为 request 时是请求节点 id；global 不用。 */
-  scopeId?: string;
+  description: string;
   source: string;
-  /** 关掉就跳过，但脚本仍留在库里。 */
-  enabled: boolean;
   trusted: boolean;
 }
 
@@ -130,14 +150,14 @@ export interface ScriptTest {
   error?: string;
 }
 
-/** 一次脚本执行的记录，每条跑过的脚本一条。 */
+/** 一次脚本执行的记录，每个跑过的步骤一条。 */
 export interface ScriptRun {
   phase: ScriptPhase;
-  /** 库里的脚本名，响应区按它标注这次跑的是哪个脚本。 */
+  /** 这一步的名字（库脚本名 / 内联脚本的说明 / 等待时长），响应区按它标注。 */
   name?: string;
   /** 这条脚本的作用范围；响应区用它标注来源。 */
   scope?: ScriptScopeKind;
-  /** 集合 / 请求的名字，配合 scope 显示成「集合「用户」」。 */
+  /** 集合 / 文件夹 / 请求的名字，配合 scope 显示成「集合「用户」」。 */
   scopeName?: string;
   logs: ScriptLog[];
   error?: string;
@@ -173,6 +193,8 @@ export interface ApiRequest {
   options: RequestOptions;
   /** 只由 Postman 导入临时携带，导入时拆成库里的脚本并清掉；不要持久化。 */
   importScript?: RequestScript;
+  /** 请求自己的前置 / 后置操作；没配就是空。 */
+  scripts?: ScriptSteps;
 }
 
 export interface RequestNode {
@@ -192,6 +214,8 @@ export interface FolderNode {
   auth?: AuthConfig;
   /** 文件夹级变量：子请求插值时优先于环境变量之外的集合与全局。 */
   vars?: KV[];
+  /** 文件夹自己的前置 / 后置操作，子请求发送时一并执行。 */
+  scripts?: ScriptSteps;
 }
 
 export type TreeNode = RequestNode | FolderNode;
@@ -204,6 +228,8 @@ export interface Collection {
   auth?: AuthConfig;
   /** 集合级变量：文件夹与请求之外的一层，优先级低于文件夹。 */
   vars?: KV[];
+  /** 集合自己的前置 / 后置操作，整棵树里的请求发送时最先 / 最后执行。 */
+  scripts?: ScriptSteps;
 }
 
 /** 一跳：这次用了什么方法、打到哪个地址、返回什么状态码。 */
@@ -347,7 +373,7 @@ export interface Tab {
   /** 响应体搜索词。 */
   search: string;
   /** 请求编辑区的当前子页签。 */
-  requestTab: "params" | "headers" | "body" | "auth" | "options" | "script";
+  requestTab: "params" | "headers" | "body" | "auth" | "pre" | "post" | "options";
 }
 
 export interface HistoryEntry {
@@ -375,8 +401,10 @@ export interface PersistedWorkspace {
   envs: Env[];
   activeEnvId: string;
   globals: KV[];
-  /** 脚本库，数组顺序就是执行顺序。 */
-  scripts?: ScriptEntry[];
+  /** 脚本库：被各处的前置 / 后置操作按 id 引用。 */
+  scriptLibrary?: LibraryScript[];
+  /** 全局的前置 / 后置操作，所有请求发送时都会执行。 */
+  globalScripts?: ScriptSteps;
   tabs: PersistedTab[];
   activeTabId: string | null;
   theme: ThemeMode;

@@ -3,7 +3,19 @@
 // 属于 Postman 的重型能力，本工具不做，导入时以 warnings 的形式说明被忽略的部分。
 
 import { emptyRequest } from "./curl";
-import type { ApiRequest, AuthConfig, Collection, FormField, KV, ScriptEntry, TreeNode } from "./types";
+import type {
+  ApiRequest,
+  AuthConfig,
+  Collection,
+  FormField,
+  KV,
+  LibraryScript,
+  ScriptPhase,
+  ScriptStep,
+  ScriptSteps,
+  TreeNode,
+} from "./types";
+import { stepsSource } from "./scriptData";
 import { uid } from "./util";
 
 export type ImportKind = "postman" | "har";
@@ -437,7 +449,7 @@ function toPMBody(req: ApiRequest): Record<string, unknown> | undefined {
   return undefined;
 }
 
-function toPMRequest(req: ApiRequest, script?: { pre: string; post: string }): Record<string, unknown> {
+function toPMRequest(req: ApiRequest): Record<string, unknown> {
   const query = req.params.map((p) => ({ key: p.key, value: p.value, disabled: !p.enabled }));
   const suffix = query
     .filter((p) => !p.disabled && p.key)
@@ -474,18 +486,38 @@ function toPMEvents(script: { pre: string; post: string } | undefined): Record<s
   return events.length > 0 ? events : undefined;
 }
 
-/** 某个请求在脚本库里挂着的脚本，按阶段拼成 Postman 的前置 / 后置两段。 */
-type ScriptLookup = (nodeId: string) => { pre: string; post: string } | undefined;
+/** 一步操作在导出时的源码：内联取自己的，库引用取库里的，等待步骤没法表达就跳过。 */
+function stepSource(step: ScriptStep, library: LibraryScript[]): string | undefined {
+  if (step.kind === "script") return step.source;
+  if (step.kind === "library") return library.find((s) => s.id === step.libraryId)?.source;
+  return undefined;
+}
 
-function toPMItems(nodes: TreeNode[], prefix: string, scriptOf: ScriptLookup): Record<string, unknown>[] {
+/** 一层的前置 / 后置操作拼成 Postman 的两段脚本；都没内容时返回 undefined。 */
+function stepsToScript(steps: ScriptSteps | undefined, library: LibraryScript[]): { pre: string; post: string } | undefined {
+  if (!steps) return undefined;
+  const join = (phase: ScriptPhase): string => stepsSource(steps[phase], (step) => stepSource(step, library));
+  const pre = join("pre");
+  const post = join("post");
+  return pre || post ? { pre, post } : undefined;
+}
+
+/** 导出时把某一层的操作挂成 Postman 的 event 数组。 */
+function eventsOf(steps: ScriptSteps | undefined, library: LibraryScript[]): Record<string, unknown>[] | undefined {
+  return toPMEvents(stepsToScript(steps, library));
+}
+
+function toPMItems(nodes: TreeNode[], prefix: string, library: LibraryScript[]): Record<string, unknown>[] {
   return nodes.map((node, i) => {
     const name = node.name || `${prefix}${i + 1}`;
     if (node.type === "folder") {
-      return { name, item: toPMItems(node.items, `${name} / `, scriptOf) };
+      const out: Record<string, unknown> = { name, item: toPMItems(node.items, `${name} / `, library) };
+      const event = eventsOf(node.scripts, library);
+      if (event) out.event = event;
+      return out;
     }
-    const script = scriptOf(node.id);
-    const out: Record<string, unknown> = { name, request: toPMRequest(node.request, script) };
-    const event = toPMEvents(script);
+    const out: Record<string, unknown> = { name, request: toPMRequest(node.request) };
+    const event = eventsOf(node.request.scripts, library);
     if (event) out.event = event;
     return out;
   });
@@ -494,31 +526,27 @@ function toPMItems(nodes: TreeNode[], prefix: string, scriptOf: ScriptLookup): R
 /**
  * 导出为 Postman Collection v2.1：多个集合会各自变成一个顶层文件夹，
  * 这样一个文件就能整包导入 Postman，不用逐个导。
+ *
+ * 集合 / 文件夹 / 请求三层的前置后置操作都会导出成对应的 event；等待步骤 Postman 没有对应概念，跳过。
  */
 export function toPostmanCollection(
   collections: Collection[],
   envs: { name: string; vars: KV[] }[],
-  scripts: ScriptEntry[] = [],
+  library: LibraryScript[] = [],
 ): string {
-  // 只导出挂在具体请求上的脚本：Postman 的集合里没有「全局脚本」这个概念。
-  const scriptOf: ScriptLookup = (nodeId) => {
-    const mine = scripts.filter((s) => s.scope === "request" && s.scopeId === nodeId && s.enabled);
-    if (mine.length === 0) return undefined;
-    const join = (phase: "pre" | "post"): string =>
-      mine
-        .filter((s) => s.phase === phase)
-        .map((s) => s.source)
-        .join("\n\n");
-    return { pre: join("pre"), post: join("post") };
-  };
-  const items: Record<string, unknown>[] =
-    collections.length === 1
-      ? toPMItems(collections[0]?.items ?? [], "", scriptOf)
-      : collections.map((c) => ({ name: c.name, item: toPMItems(c.items, "", scriptOf) }));
+  const single = collections.length === 1 ? collections[0] : undefined;
+  const items: Record<string, unknown>[] = single
+    ? toPMItems(single.items, "", library)
+    : collections.map((c) => {
+        const out: Record<string, unknown> = { name: c.name, item: toPMItems(c.items, "", library) };
+        const event = eventsOf(c.scripts, library);
+        if (event) out.event = event;
+        return out;
+      });
 
-  const dump = {
+  const dump: Record<string, unknown> = {
     info: {
-      name: collections.length === 1 ? (collections[0]?.name ?? "Kotae") : "Kotae 全部集合",
+      name: single ? single.name : "Kotae 全部集合",
       schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     },
     item: items,
@@ -526,5 +554,8 @@ export function toPostmanCollection(
       e.vars.filter((v) => v.enabled && v.key).map((v) => ({ key: v.key, value: v.value })),
     ),
   };
+  // 单集合导出时集合本身不是文件夹，它自己的脚本挂到顶层。
+  const rootEvent = eventsOf(single?.scripts, library);
+  if (rootEvent) dump.event = rootEvent;
   return JSON.stringify(dump, null, 2);
 }

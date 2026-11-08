@@ -15,21 +15,27 @@ import type {
   FolderNode,
   HistoryEntry,
   KV,
+  LibraryScript,
   PersistedTab,
   PersistedWorkspace,
   RequestNode,
-  ScriptEntry,
-  ScriptPhase,
-  ScriptScopeKind,
+  ScriptSteps,
   ThemeMode,
   TreeNode,
 } from "./types";
+import {
+  emptySteps,
+  normalizeScriptLibrary,
+  normalizeSteps,
+  parseLegacyScripts,
+  splitLegacyScripts,
+} from "./scriptData";
 
 /** 数据库文件名。SQLite 插件只接受文件名，实际落在 userData 目录。 */
 const DB_FILE = "workspace.db";
 
-/** 表结构版本，升级时按版本号追加迁移步骤。 */
-const SCHEMA_VERSION = 1;
+/** 表结构版本。2：脚本从「一个全局有序列表」改成「脚本库 + 各层的前置/后置操作」。 */
+const SCHEMA_VERSION = 2;
 
 const SCHEMA: string[] = [
   `CREATE TABLE IF NOT EXISTS meta (
@@ -130,62 +136,41 @@ async function connect(): Promise<Database> {
 }
 
 /** 集合 / 文件夹的共享设置只写有内容的字段，空值不占库。 */
-function sharedJSON(node: { auth?: { type: string }; vars?: KV[] }): string | null {
-  const out: { auth?: unknown; vars?: KV[] } = {};
+function sharedJSON(node: { auth?: { type: string }; vars?: KV[]; scripts?: ScriptSteps }): string | null {
+  const out: { auth?: unknown; vars?: KV[]; scripts?: ScriptSteps } = {};
   if (node.auth && node.auth.type !== "none") out.auth = node.auth;
   if (node.vars && node.vars.length > 0) out.vars = node.vars;
+  const scripts = node.scripts;
+  if (scripts && (scripts.pre.length > 0 || scripts.post.length > 0)) out.scripts = scripts;
   return Object.keys(out).length > 0 ? JSON.stringify(out) : null;
 }
 
 /** 读回共享设置：没有设置时保持字段缺失，让「继承」逻辑按缺省处理。 */
-function applyShared(node: { auth?: unknown; vars?: KV[] }, raw: string): void {
+function applyShared(
+  node: { auth?: unknown; vars?: KV[]; scripts?: ScriptSteps },
+  raw: string,
+): void {
   if (!raw) return;
-  let parsed: { auth?: unknown; vars?: KV[] };
+  let parsed: { auth?: unknown; vars?: KV[]; scripts?: unknown };
   try {
-    parsed = JSON.parse(raw) as { auth?: unknown; vars?: KV[] };
+    parsed = JSON.parse(raw) as { auth?: unknown; vars?: KV[]; scripts?: unknown };
   } catch {
     return;
   }
   const auth = parsed.auth as { type?: string } | undefined;
   if (auth && auth.type && auth.type !== "none") node.auth = auth;
   if (Array.isArray(parsed.vars) && parsed.vars.length > 0) node.vars = parsed.vars;
+  const steps = normalizeSteps(parsed.scripts);
+  if (steps.pre.length > 0 || steps.post.length > 0) node.scripts = steps;
 }
 
-/** 脚本库写成一行 JSON：数组顺序就是执行顺序。 */
-function scriptsJSON(scripts: ScriptEntry[] | undefined): string {
-  return JSON.stringify(Array.isArray(scripts) ? scripts : []);
-}
+/** 设置表的写入语句，迁移与正常保存共用。 */
+const SETTING_SQL = `INSERT INTO settings(key, value) VALUES(?, ?)
+  ON CONFLICT(key) DO UPDATE SET value = excluded.value`;
 
-/** 读回脚本库：字段逐项校正，坏条目直接丢掉，不让一份破 JSON 把脚本库搞挂。 */
-function parseScripts(raw: string | undefined): ScriptEntry[] {
-  if (!raw) return [];
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return [];
-  }
-  if (!Array.isArray(parsed)) return [];
-  const out: ScriptEntry[] = [];
-  for (const item of parsed) {
-    if (!item || typeof item !== "object") continue;
-    const raw = item as Partial<ScriptEntry>;
-    if (typeof raw.id !== "string" || !raw.id) continue;
-    const phase: ScriptPhase = raw.phase === "post" ? "post" : "pre";
-    const scope: ScriptScopeKind =
-      raw.scope === "collection" || raw.scope === "request" ? raw.scope : "global";
-    out.push({
-      id: raw.id,
-      name: typeof raw.name === "string" ? raw.name : "未命名脚本",
-      phase,
-      ...(typeof raw.scopeId === "string" && raw.scopeId ? { scopeId: raw.scopeId } : {}),
-      scope,
-      source: typeof raw.source === "string" ? raw.source : "",
-      enabled: raw.enabled !== false,
-      trusted: raw.trusted !== false,
-    });
-  }
-  return out;
+/** 脚本库写成一行 JSON；步骤组合同理，空值也存空壳，读回来不用猜。 */
+function scriptsJSON(value: unknown): string {
+  return JSON.stringify(value);
 }
 
 /** 表里没有这一列就补一列：SQLite 没有 `ADD COLUMN IF NOT EXISTS`。 */
@@ -213,7 +198,11 @@ export interface Migration {
 export async function init(): Promise<Migration> {
   const db = await connect();
   const done = await db.query("SELECT value FROM meta WHERE key = 'schema_version'");
-  if (done.rows.length > 0) return { imported: null, legacyBroken: false };
+  if (done.rows.length > 0) {
+    const version = int(done.rows[0] ? text(done.rows[0][0]) : "0", 1);
+    if (version < SCHEMA_VERSION) await migrate(db, version);
+    return { imported: null, legacyBroken: false };
+  }
 
   let legacy = "";
   try {
@@ -236,6 +225,65 @@ export async function init(): Promise<Migration> {
   }
   await db.execute("INSERT INTO meta(key, value) VALUES('schema_version', ?)", [String(SCHEMA_VERSION)]);
   return { imported, legacyBroken };
+}
+
+/** 按库里的版本号往上升，每步做完才写新版本号。 */
+async function migrate(db: Database, from: number): Promise<void> {
+  if (from < 2) await migrateScriptsToLayers(db);
+  await db.execute("UPDATE meta SET value = ? WHERE key = 'schema_version'", [String(SCHEMA_VERSION)]);
+}
+
+/**
+ * v1 → v2：旧的「全局有序脚本列表」拆成脚本库 + 各层的前置/后置操作。
+ * 每条旧脚本变成一个库脚本加一个引用它的步骤，作用范围跟着搬过去；
+ * 集合 / 请求已经不存在的退回全局，不让脚本在迁移里凭空消失。
+ */
+async function migrateScriptsToLayers(db: Database): Promise<void> {
+  const stored = await db.query("SELECT value FROM settings WHERE key = 'scripts'");
+  const legacy = parseLegacyScripts(stored.rows.length ? text(stored.rows[0]![0]) : undefined);
+
+  const collections = new Set<string>();
+  for (const row of (await db.query("SELECT id FROM collections")).rows) collections.add(text(row[0]));
+  const requestJSON = new Map<string, string>();
+  for (const row of (await db.query("SELECT id, request FROM requests")).rows) {
+    requestJSON.set(text(row[0]), text(row[1]));
+  }
+  const collectionSettings = new Map<string, string>();
+  for (const row of (await db.query("SELECT id, settings FROM collections")).rows) {
+    collectionSettings.set(text(row[0]), text(row[1]));
+  }
+
+  const split = splitLegacyScripts(legacy, {
+    collections,
+    requests: new Set(requestJSON.keys()),
+  });
+  const statements: Statement[] = [];
+  for (const [id, steps] of split.collections) {
+    const merged = mergeSharedScripts(collectionSettings.get(id) ?? "", steps);
+    statements.push({ sql: "UPDATE collections SET settings = ? WHERE id = ?", params: [merged, id] });
+  }
+  for (const [id, steps] of split.requests) {
+    const request = (parseRaw(requestJSON.get(id)) ?? {}) as Record<string, unknown>;
+    request.scripts = steps;
+    statements.push({
+      sql: "UPDATE requests SET request = ? WHERE id = ?",
+      params: [JSON.stringify(request), id],
+    });
+  }
+  if (legacy.length > 0) {
+    statements.push({ sql: SETTING_SQL, params: ["scriptLibrary", scriptsJSON(split.library)] });
+    statements.push({ sql: SETTING_SQL, params: ["globalScripts", scriptsJSON(split.global)] });
+  }
+  // 旧的列表行必须删，不然后续保存不会再写它，它会一直留在库里。
+  statements.push({ sql: "DELETE FROM settings WHERE key = 'scripts'", params: [] });
+  await db.transaction(statements);
+}
+
+/** 把升级得到的操作合并进已有的共享设置 JSON。 */
+function mergeSharedScripts(raw: string, steps: ScriptSteps): string {
+  const shared = (parseRaw(raw) ?? {}) as Record<string, unknown>;
+  shared.scripts = steps;
+  return JSON.stringify(shared);
 }
 
 /** 读回整个工作区。 */
@@ -347,7 +395,8 @@ export async function load(): Promise<PersistedWorkspace> {
     envs,
     activeEnvId: activeEnv.rows.length ? text(activeEnv.rows[0]![0]) : "",
     globals,
-    scripts: parseScripts(settings.get("scripts")),
+    scriptLibrary: normalizeScriptLibrary(parseRaw(settings.get("scriptLibrary"))),
+    globalScripts: normalizeSteps(parseRaw(settings.get("globalScripts"))),
     tabs,
     activeTabId: activeTab.rows.length ? text(activeTab.rows[0]![0]) : null,
     theme: themeMode(settings.get("theme")),
@@ -422,6 +471,7 @@ function rows(data: PersistedWorkspace): Row[] {
         ci,
         collection.auth ?? null,
         collection.vars ?? null,
+        collection.scripts ?? null,
       ]),
       sql: `INSERT INTO collections(id, name, position, settings, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET name = excluded.name, position = excluded.position,
@@ -488,7 +538,8 @@ function rows(data: PersistedWorkspace): Row[] {
     ["zoom", String(data.zoom)],
     ["codeFontSize", String(data.codeFontSize)],
     ["shortcuts", JSON.stringify(data.shortcuts ?? {})],
-    ["scripts", scriptsJSON(data.scripts)],
+    ["scriptLibrary", scriptsJSON(data.scriptLibrary ?? [])],
+    ["globalScripts", scriptsJSON(data.globalScripts ?? emptySteps())],
   ];
   for (const [key, value] of settings) {
     out.push({
@@ -524,6 +575,7 @@ function walk(
           node.open,
           node.auth ?? null,
           node.vars ?? null,
+          node.scripts ?? null,
         ]),
         sql: `INSERT INTO folders(id, collection_id, parent_id, name, position, open, settings) VALUES(?, ?, ?, ?, ?, ?, ?)
               ON CONFLICT(id) DO UPDATE SET collection_id = excluded.collection_id, parent_id = excluded.parent_id,
@@ -651,6 +703,41 @@ function float(value: string | undefined, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+/** 集合树里的全部节点 id，迁移时判断旧脚本的作用范围还存不存在。 */
+function nodeIds(collections: Collection[]): { collections: Set<string>; requests: Set<string> } {
+  const out = { collections: new Set<string>(), requests: new Set<string>() };
+  for (const collection of collections) {
+    out.collections.add(collection.id);
+    walkRequests(collection.items, (node) => out.requests.add(node.id));
+  }
+  return out;
+}
+
+function walkRequests(items: TreeNode[], visit: (node: RequestNode) => void): void {
+  for (const node of items) {
+    if (node.type === "folder") walkRequests(node.items, visit);
+    else visit(node);
+  }
+}
+
+/** 迁移得到的一串操作并到已有的后面：已有的是用户在更新的版本里加的，排在后面更安全。 */
+function mergeSteps(extra: ScriptSteps, current: ScriptSteps | undefined): ScriptSteps {
+  return {
+    pre: extra.pre.concat(current?.pre ?? []),
+    post: extra.post.concat(current?.post ?? []),
+  };
+}
+
+/** 坏 JSON 不抛异常，交给调用方按缺省处理。 */
+function parseRaw(raw: string | undefined): unknown {
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+}
+
 function parseJSON<T>(raw: string): T {
   return JSON.parse(raw) as T;
 }
@@ -661,13 +748,37 @@ function themeMode(value: string | undefined): ThemeMode {
 
 /** 把外部 JSON（旧工作区文件、备份）补成完整结构，缺字段按默认值填。 */
 function normalize(p: Partial<PersistedWorkspace>): PersistedWorkspace {
+  const collections = Array.isArray(p.collections) ? p.collections : [];
+  const extra = p as { scripts?: unknown; scriptLibrary?: unknown; globalScripts?: unknown };
+  let scriptLibrary = normalizeScriptLibrary(extra.scriptLibrary);
+  let globalScripts = normalizeSteps(extra.globalScripts);
+  // 0.2.x 及更早的工作区文件里脚本是一个全局有序列表，这里顺手拆成库 + 分层操作。
+  const legacy = Array.isArray(extra.scripts) ? parseLegacyScripts(JSON.stringify(extra.scripts)) : [];
+  if (legacy.length > 0) {
+    const split = splitLegacyScripts(legacy, nodeIds(collections));
+    scriptLibrary = scriptLibrary.concat(split.library);
+    globalScripts = {
+      pre: globalScripts.pre.concat(split.global.pre),
+      post: globalScripts.post.concat(split.global.post),
+    };
+    for (const collection of collections) {
+      const own = split.collections.get(collection.id);
+      if (own) collection.scripts = mergeSteps(own, collection.scripts);
+      walkRequests(collection.items, (node) => {
+        const steps = split.requests.get(node.id);
+        if (steps) node.request.scripts = mergeSteps(steps, node.request.scripts);
+      });
+    }
+  }
   return {
     version: SCHEMA_VERSION,
-    collections: Array.isArray(p.collections) ? p.collections : [],
+    collections,
     history: Array.isArray(p.history) ? p.history : [],
     envs: Array.isArray(p.envs) ? p.envs : [],
     activeEnvId: typeof p.activeEnvId === "string" ? p.activeEnvId : "",
     globals: Array.isArray(p.globals) ? p.globals : [],
+    scriptLibrary,
+    globalScripts,
     tabs: Array.isArray(p.tabs) ? p.tabs : [],
     activeTabId: typeof p.activeTabId === "string" ? p.activeTabId : null,
     theme: themeMode(p.theme),

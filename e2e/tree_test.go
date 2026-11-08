@@ -114,7 +114,7 @@ func TestTreeFolderMenuAndRename(t *testing.T) {
 	h.clearOverlays(t)
 
 	rightClick(t, ".tree-row", "响应类型")
-	expectMenu(t, "文件夹", []string{"新建请求", "新建子文件夹", "共享认证与变量…", "重命名", "复制文件夹", "删除文件夹"})
+	expectMenu(t, "文件夹", []string{"新建请求", "新建子文件夹", "共享设置…", "重命名", "复制文件夹", "删除文件夹"})
 	h.pressKeys(t, "Escape", false, false)
 	h.wait(t, "Esc 收起菜单", `!document.querySelector('.ctx-menu')`)
 
@@ -127,7 +127,7 @@ func TestTreeCollectionMenu(t *testing.T) {
 	h.clearOverlays(t)
 
 	rightClick(t, ".tree-row", "固定用例")
-	expectMenu(t, "集合", []string{"新建请求", "新建文件夹", "共享认证与变量…", "重命名", "删除集合"})
+	expectMenu(t, "集合", []string{"新建请求", "新建文件夹", "共享设置…", "重命名", "删除集合"})
 
 	// 点菜单外面要收起来（和系统菜单一致）。
 	h.eval(t, `(() => { document.querySelector('.search-input').click(); return true })()`, nil)
