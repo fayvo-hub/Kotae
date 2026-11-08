@@ -18,6 +18,7 @@ import type {
   PersistedTab,
   PersistedWorkspace,
   RequestNode,
+  RequestScript,
   ThemeMode,
   TreeNode,
 } from "./types";
@@ -127,25 +128,58 @@ async function connect(): Promise<Database> {
 }
 
 /** 集合 / 文件夹的共享设置只写有内容的字段，空值不占库。 */
-function sharedJSON(node: { auth?: { type: string }; vars?: KV[] }): string | null {
-  const out: { auth?: unknown; vars?: KV[] } = {};
+function sharedJSON(node: {
+  auth?: { type: string };
+  vars?: KV[];
+  script?: RequestScript;
+}): string | null {
+  const out: { auth?: unknown; vars?: KV[]; script?: RequestScript } = {};
   if (node.auth && node.auth.type !== "none") out.auth = node.auth;
   if (node.vars && node.vars.length > 0) out.vars = node.vars;
+  // 空白脚本不写：一个编辑器打开过但没有内容不应反复重写这一行。
+  if (node.script && (node.script.pre !== "" || node.script.post !== "")) out.script = node.script;
   return Object.keys(out).length > 0 ? JSON.stringify(out) : null;
 }
 
 /** 读回共享设置：没有设置时保持字段缺失，让「继承」逻辑按缺省处理。 */
-function applyShared(node: { auth?: unknown; vars?: KV[] }, raw: string): void {
+function applyShared(node: { auth?: unknown; vars?: KV[]; script?: RequestScript }, raw: string): void {
   if (!raw) return;
-  let parsed: { auth?: unknown; vars?: KV[] };
+  let parsed: { auth?: unknown; vars?: KV[]; script?: RequestScript };
   try {
-    parsed = JSON.parse(raw) as { auth?: unknown; vars?: KV[] };
+    parsed = JSON.parse(raw) as { auth?: unknown; vars?: KV[]; script?: RequestScript };
   } catch {
     return;
   }
   const auth = parsed.auth as { type?: string } | undefined;
   if (auth && auth.type && auth.type !== "none") node.auth = auth;
   if (Array.isArray(parsed.vars) && parsed.vars.length > 0) node.vars = parsed.vars;
+  const script = parsed.script;
+  if (script && ((script.pre ?? "") !== "" || (script.post ?? "") !== "")) {
+    node.script = {
+      pre: script.pre ?? "",
+      post: script.post ?? "",
+      trusted: script.trusted !== false,
+    };
+  }
+}
+
+/** 脚本列成一行 JSON；空脚本写空串，表示「这一层没有脚本」。 */
+function scriptJSON(script: RequestScript | undefined): string {
+  if (!script || (script.pre === "" && script.post === "")) return "";
+  return JSON.stringify({ pre: script.pre, post: script.post, trusted: script.trusted !== false });
+}
+
+function parseScript(raw: string | undefined): RequestScript | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as Partial<RequestScript>;
+    const pre = typeof parsed.pre === "string" ? parsed.pre : "";
+    const post = typeof parsed.post === "string" ? parsed.post : "";
+    if (!pre && !post) return undefined;
+    return { pre, post, trusted: parsed.trusted !== false };
+  } catch {
+    return undefined;
+  }
 }
 
 /** 表里没有这一列就补一列：SQLite 没有 `ADD COLUMN IF NOT EXISTS`。 */
@@ -307,6 +341,7 @@ export async function load(): Promise<PersistedWorkspace> {
     envs,
     activeEnvId: activeEnv.rows.length ? text(activeEnv.rows[0]![0]) : "",
     globals,
+    globalScript: parseScript(settings.get("globalScript")),
     tabs,
     activeTabId: activeTab.rows.length ? text(activeTab.rows[0]![0]) : null,
     theme: themeMode(settings.get("theme")),
@@ -376,7 +411,13 @@ function rows(data: PersistedWorkspace): Row[] {
     out.push({
       table: "collections",
       id: collection.id,
-      signature: JSON.stringify([collection.name, ci, collection.auth ?? null, collection.vars ?? null]),
+      signature: JSON.stringify([
+        collection.name,
+        ci,
+        collection.auth ?? null,
+        collection.vars ?? null,
+        collection.script ?? null,
+      ]),
       sql: `INSERT INTO collections(id, name, position, settings, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET name = excluded.name, position = excluded.position,
               settings = excluded.settings, updated_at = excluded.updated_at`,
@@ -442,6 +483,7 @@ function rows(data: PersistedWorkspace): Row[] {
     ["zoom", String(data.zoom)],
     ["codeFontSize", String(data.codeFontSize)],
     ["shortcuts", JSON.stringify(data.shortcuts ?? {})],
+    ["globalScript", scriptJSON(data.globalScript)],
   ];
   for (const [key, value] of settings) {
     out.push({
@@ -477,6 +519,7 @@ function walk(
           node.open,
           node.auth ?? null,
           node.vars ?? null,
+          node.script ?? null,
         ]),
         sql: `INSERT INTO folders(id, collection_id, parent_id, name, position, open, settings) VALUES(?, ?, ?, ?, ?, ?, ?)
               ON CONFLICT(id) DO UPDATE SET collection_id = excluded.collection_id, parent_id = excluded.parent_id,

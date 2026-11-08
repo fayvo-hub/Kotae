@@ -22,6 +22,7 @@ import {
   persist,
   saveTabAs,
   scope,
+  setGlobalScript,
   setSnippetLang,
   setEnv,
   setPendingCurl,
@@ -50,6 +51,8 @@ import type { ApiRequest } from "../types";
 import { System } from "../mygo";
 import { formatBytes } from "../util";
 import { askConfirm, askText } from "./prompt";
+import { scriptEditor } from "./scriptEditor";
+import type { ScriptPhase } from "../script";
 import {
   SHORTCUT_ACTIONS,
   beginShortcutCapture,
@@ -632,6 +635,32 @@ export function globalsSection(): HTMLElement {
   });
 }
 
+// ---- 全局脚本 ----
+
+/** 设置页的「全局脚本」：任何请求发送前后都会跑，前置最先、后置最后。 */
+function globalScriptSection(): HTMLElement {
+  const host = el("div", { class: "stack" });
+  // 设置弹窗不随 emit 重建，阶段状态放本地即可。
+  let phase: ScriptPhase = "pre";
+  const paint = (): void => {
+    fill(
+      host,
+      scriptEditor({
+        script: state.globalScript,
+        phase,
+        onPhase: (next) => {
+          phase = next;
+          paint();
+        },
+        // 只落库不广播：重建设置弹窗会把正在输入的焦点弄丢。
+        onInput: (target, value) => setGlobalScript(target === "pre" ? { pre: value } : { post: value }),
+      }),
+    );
+  };
+  paint();
+  return host;
+}
+
 // ---- 设置 ----
 
 /**
@@ -989,6 +1018,7 @@ export function settingsDialog(): HTMLElement {
     section("快捷键", shortcutsSection()),
     section("桌面", desktopSection()),
     section("全局变量", globalsSection()),
+    section("全局脚本", globalScriptSection()),
     section("内置动态变量", varList),
     section("数据与备份", backupSection()),
     section("更新", updateSection()),

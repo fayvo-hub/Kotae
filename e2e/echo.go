@@ -113,6 +113,18 @@ func StartEcho() *Echo {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = io.WriteString(w, base64.StdEncoding.EncodeToString([]byte("解码后的响应体：中文正常。")))
 	})
+	// 登录桩：脚本里先换 token 再重发受保护接口，这个端点只认 /login 发的那个 token。
+	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{"token": fixtureToken, "user": "fixture"})
+	})
+	mux.HandleFunc("/protected", func(w http.ResponseWriter, r *http.Request) {
+		got := r.Header.Get("Authorization")
+		if got != "Bearer "+fixtureToken {
+			writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "未登录", "got": got})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": "fixture", "token": fixtureToken})
+	})
 	mux.HandleFunc("/slow", func(w http.ResponseWriter, r *http.Request) {
 		ms, _ := strconv.Atoi(r.URL.Query().Get("ms"))
 		if ms <= 0 || ms > 5000 {
@@ -164,6 +176,9 @@ const (
 	placeholderBaseURL = "__BASE_URL__"
 	placeholderToken   = "__TOKEN__"
 )
+
+// fixtureToken 是 /login 发出去、/protected 唯一认可的 token，只存在于桩服务内部。
+const fixtureToken = "fixture-token-7d1c"
 
 // fileServer 用当前构建产物当「前端服务器」：测试跑的是生产构建的页面，
 // 与安装包里的那份完全一致，只多了一层本地静态服务。

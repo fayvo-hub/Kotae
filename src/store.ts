@@ -15,9 +15,11 @@ import type {
   RedirectMode,
   RequestNode,
   RequestOptions,
+  RequestScript,
   ResponseRecord,
   ResponseTrace,
   ScriptRun,
+  ScriptScope,
   SentBody,
   SentFile,
   SentRecord,
@@ -42,7 +44,13 @@ import {
   uid,
   type VarScope,
 } from "./util";
-import { runScript } from "./script";
+import {
+  runScript,
+  scriptScopeLabel,
+  type ScriptHttpRequest,
+  type ScriptHttpResponse,
+  type ScriptResponseState,
+} from "./script";
 import { SHORTCUT_ACTIONS, comboLabel, shortcutAction } from "./shortcuts";
 
 export interface Toast {
@@ -58,6 +66,8 @@ export interface State {
   envs: Env[];
   activeEnvId: string;
   globals: KV[];
+  /** 全局脚本：所有请求都会跑它，前置最先、后置最后。 */
+  globalScript: RequestScript;
   tabs: Tab[];
   activeTabId: string | null;
   theme: ThemeMode;
@@ -123,6 +133,7 @@ function blankState(): State {
     envs: [],
     activeEnvId: "",
     globals: [],
+    globalScript: { pre: "", post: "", trusted: true },
     tabs: [],
     activeTabId: null,
     theme: "auto",
@@ -187,6 +198,7 @@ function snapshot(): PersistedWorkspace {
     envs: state.envs,
     activeEnvId: state.activeEnvId,
     globals: state.globals,
+    globalScript: state.globalScript,
     tabs: state.tabs.map((t) => ({
       id: t.id,
       name: t.name,
@@ -263,6 +275,11 @@ function applyPersisted(p: Partial<PersistedWorkspace>): void {
   state.history = Array.isArray(p.history) ? p.history : [];
   state.envs = Array.isArray(p.envs) ? p.envs : [];
   state.globals = Array.isArray(p.globals) ? p.globals : [];
+  state.globalScript = {
+    pre: p.globalScript?.pre ?? "",
+    post: p.globalScript?.post ?? "",
+    trusted: p.globalScript?.trusted !== false,
+  };
   state.activeEnvId = typeof p.activeEnvId === "string" ? p.activeEnvId : "";
   state.theme = p.theme === "dark" || p.theme === "light" ? p.theme : "auto";
   // 上下限与拖拽时一致：拖到边缘再重启，尺寸不该被悄悄改掉。
@@ -368,14 +385,16 @@ export interface Inherited {
 
 const NO_INHERIT: Inherited = { vars: [], varSources: [] };
 
-/**
- * 沿「集合 → 文件夹…→ 请求所在层」解析继承来的认证与变量。
- * 认证只看请求所在层往上（自己这一层由请求自己的 auth 决定，不参与继承）。
- */
-export function inheritedFor(origin?: Tab["origin"]): Inherited {
-  if (!origin) return NO_INHERIT;
+interface OriginChain {
+  collection: Collection;
+  /** 从最外层到请求所在层的文件夹链；请求直接在集合下时是空数组。 */
+  folders: FolderNode[];
+}
+
+function originChain(origin?: Tab["origin"]): OriginChain | undefined {
+  if (!origin) return undefined;
   const collection = state.collections.find((c) => c.id === origin.collectionId);
-  if (!collection) return NO_INHERIT;
+  if (!collection) return undefined;
 
   // 找到目标节点，同时记下它上方的文件夹链。
   let path: FolderNode[] | undefined;
@@ -396,7 +415,18 @@ export function inheritedFor(origin?: Tab["origin"]): Inherited {
     return false;
   };
   walk(collection.items, []);
-  const layers = (path ?? []).slice().reverse();
+  return { collection, folders: path ?? [] };
+}
+
+/**
+ * 沿「集合 → 文件夹…→ 请求所在层」解析继承来的认证与变量。
+ * 认证只看请求所在层往上（自己这一层由请求自己的 auth 决定，不参与继承）。
+ */
+export function inheritedFor(origin?: Tab["origin"]): Inherited {
+  const chain = originChain(origin);
+  if (!chain) return NO_INHERIT;
+  const { collection } = chain;
+  const layers = chain.folders.slice().reverse();
 
   const vars: KV[] = [];
   const varSources: string[] = [];
@@ -445,7 +475,7 @@ export function emptyAuth(): AuthConfig {
 export function setNodeSettings(
   collectionId: string,
   nodeId: string | undefined,
-  patch: { auth?: AuthConfig; vars?: KV[] },
+  patch: { auth?: AuthConfig; vars?: KV[]; script?: RequestScript },
 ): void {
   const collection = state.collections.find((c) => c.id === collectionId);
   if (!collection) return;
@@ -465,8 +495,54 @@ export function setNodeSettings(
     if (patch.vars) target.vars = patch.vars;
     else delete target.vars;
   }
+  if ("script" in patch) {
+    // 同上：编辑器改的是同一个对象，空脚本也先挂在节点上，不落库即可。
+    if (patch.script) target.script = patch.script;
+    else delete target.script;
+  }
   persist();
   emit();
+}
+
+/** 改全局脚本（设置面板里的全局脚本区）。 */
+export function setGlobalScript(patch: Partial<RequestScript>): void {
+  state.globalScript = { ...state.globalScript, ...patch };
+  persist();
+}
+
+/** 一层可执行的脚本：挂在哪一层、叫什么、内容是什么。 */
+export interface ScriptLayer {
+  scope: ScriptScope;
+  /** 集合 / 文件夹的名字；全局与本请求没有名字。 */
+  name?: string;
+  script: RequestScript;
+}
+
+function hasScript(script: RequestScript | undefined): script is RequestScript {
+  return !!script && (script.pre.trim() !== "" || script.post.trim() !== "");
+}
+
+/**
+ * 当前标签页生效的脚本层，从外到内：全局 → 集合 → 文件夹…→ 本请求。
+ * 前置脚本按这个顺序跑，后置脚本把数组反过来跑（靠近请求的先看到响应）。
+ */
+export function scriptLayers(tab: Tab | null = activeTab() ?? null): ScriptLayer[] {
+  const layers: ScriptLayer[] = [];
+  if (hasScript(state.globalScript)) layers.push({ scope: "global", script: state.globalScript });
+  const chain = originChain(tab?.origin);
+  if (chain) {
+    if (hasScript(chain.collection.script)) {
+      layers.push({ scope: "collection", name: chain.collection.name, script: chain.collection.script });
+    }
+    for (const folder of chain.folders) {
+      if (hasScript(folder.script)) {
+        layers.push({ scope: "folder", name: folder.name, script: folder.script });
+      }
+    }
+  }
+  const own = tab ? scriptOf(tab.request) : undefined;
+  if (hasScript(own)) layers.push({ scope: "request", script: own });
+  return layers;
 }
 
 /**
@@ -862,6 +938,35 @@ function buildBody(request: ApiRequest, headers: Headers, method: string): BodyI
   return body;
 }
 
+/**
+ * pm.sendRequest 的出口：脚本里发的请求也走 Go 侧的 HTTP 栈。
+ * 只带请求自己给的头，不碰请求级的代理 / TLS / Cookie 选项（那些属于主请求）。
+ */
+async function scriptHttp(req: ScriptHttpRequest): Promise<ScriptHttpResponse> {
+  const headers = new Headers();
+  for (const [key, value] of req.headers) headers.append(key, value);
+  const started = performance.now();
+  const res = await fetchFrom(req.url, {
+    method: req.method,
+    headers,
+    body: req.body,
+    redirect: "follow",
+  });
+  const body = await res.text();
+  const list: [string, string][] = [];
+  res.headers.forEach((value, key) => list.push([key, value]));
+  return {
+    code: res.status,
+    status: res.statusText,
+    headers: list,
+    body,
+    ms: Math.round(performance.now() - started),
+  };
+}
+
+/** 一次点击最多自动重发 3 次：两个脚本互相触发时不能把应用打死。 */
+const MAX_SCRIPT_RESEND = 3;
+
 export async function send(): Promise<void> {
   const tab = activeTab();
   if (!tab || tab.sending) return;
@@ -872,10 +977,28 @@ export async function send(): Promise<void> {
     return;
   }
 
+  // 后置脚本调了 pm.execution.resend() 就回到这里把整条流程再走一遍：变量重新插值，
+  // 所以「401 → 登录拿 token → 重发」才成立。各轮的脚本记录攒在同一个数组里。
+  const scriptRuns: ScriptRun[] = [];
+  tab.scriptRuns = scriptRuns;
+  for (let attempt = 0; ; attempt += 1) {
+    const resend = await sendAttempt(tab, scriptRuns);
+    if (!resend) return;
+    if (attempt >= MAX_SCRIPT_RESEND) {
+      toast(`脚本连续要求重发超过 ${MAX_SCRIPT_RESEND} 次，已停止`, "error");
+      return;
+    }
+    // 标签页已经关掉了就不用再发。
+    if (!state.tabs.some((t) => t.id === tab.id)) return;
+  }
+}
+
+/** 一次完整的发送；返回 true 表示后置脚本要求用最新的变量把同一个请求再发一次。 */
+async function sendAttempt(tab: Tab, scriptRuns: ScriptRun[]): Promise<boolean> {
   let url = ensureScheme(buildURL(tab.request, resolveText));
   if (!url.trim()) {
     toast("请先填写请求地址", "error");
-    return;
+    return false;
   }
   const missing = interpolate(
     [
@@ -888,7 +1011,7 @@ export async function send(): Promise<void> {
   ).missing;
   if (missing.length > 0) {
     toast(`未定义的变量：${missing.map((m) => `{{${m}}}`).join("、")}`, "error");
-    return;
+    return false;
   }
 
   // 请求自己没设认证时，用集合 / 文件夹继承下来的那一份。
@@ -897,10 +1020,10 @@ export async function send(): Promise<void> {
   if (typeof headers !== "string") applyNetworkOptions(headers, tab.request.options);
   if (typeof headers === "string") {
     toast(`请求头「${headers}」不是合法的头名`, "error");
-    return;
+    return false;
   }
   // 脚本拿到的初始头：闭包里引用 let 会丢掉收窄，单独存一份。
-  const startHeaders = headers;
+  let startHeaders = headers;
 
   let body = buildBody(tab.request, headers, tab.request.method.toUpperCase());
   let methodUpper = tab.request.method.toUpperCase();
@@ -916,10 +1039,8 @@ export async function send(): Promise<void> {
   tab.sending = true;
   emit();
 
-  // 前置脚本：拿到的就是「马上要发出去」的请求，改头、改地址、改体都直接生效。
-  const script = scriptOf(tab.request);
-  const scriptRuns: ScriptRun[] = [];
-  tab.scriptRuns = scriptRuns;
+  // 前置脚本：从全局到本请求依次跑，拿到的就是「马上要发出去」的请求。
+  const layers = scriptLayers(tab);
   let scriptVars: Record<string, string> = {};
   const scriptRequestState = () => ({
     method: methodUpper,
@@ -927,39 +1048,53 @@ export async function send(): Promise<void> {
     headers: [...startHeaders.entries()] as [string, string][],
     body: typeof body === "string" ? body : null,
   });
-  if (script.pre.trim()) {
-    if (!script.trusted) {
+  const scriptContext = (response?: ScriptResponseState) => ({
+    request: scriptRequestState(),
+    ...(response ? { response } : {}),
+    getVar: (name: string) => lookupVar(name, scope()),
+    setEnvVar: (name: string, value: string) => writeScriptVar("env", name, value),
+    setGlobalVar: (name: string, value: string) => writeScriptVar("global", name, value),
+    http: scriptHttp,
+    resolve: (text: string) => resolveText(text),
+  });
+  for (const layer of layers) {
+    const source = layer.script.pre;
+    if (!source.trim()) continue;
+    const label = scriptScopeLabel(layer.scope, layer.name);
+    if (!layer.script.trusted) {
       scriptRuns.push({
         phase: "pre",
-        logs: [{ level: "warn", text: "这段脚本来自导入文件，还没被信任，本次不执行" }],
+        scope: layer.scope,
+        scopeName: layer.name,
+        logs: [{ level: "warn", text: `${label}脚本来自导入文件，还没被信任，本次不执行` }],
         ms: 0,
       });
-    } else {
-      const pre = await runScript(
-        "pre",
-        script.pre,
-        {
-          request: scriptRequestState(),
-          getVar: (name) => lookupVar(name, scope()),
-          setEnvVar: (name, value) => writeScriptVar("env", name, value),
-          setGlobalVar: (name, value) => writeScriptVar("global", name, value),
-        },
-        scriptVars,
-      );
-      scriptVars = pre.vars;
-      scriptRuns.push({ phase: "pre", logs: pre.logs, error: pre.error, ms: pre.ms, tests: pre.tests });
-      if (pre.error) {
-        tab.sending = false;
-        emit();
-        toast(`前置脚本出错，请求已取消：${pre.error}`, "error");
-        return;
-      }
-      url = pre.request.url;
-      methodUpper = pre.request.method;
-      headers = new Headers();
-      for (const [key, value] of pre.request.headers) headers.append(key, value);
-      if (typeof body === "string" && pre.request.body !== null) body = pre.request.body;
+      continue;
     }
+    const pre = await runScript("pre", source, scriptContext(), scriptVars);
+    scriptVars = pre.vars;
+    scriptRuns.push({
+      phase: "pre",
+      scope: layer.scope,
+      scopeName: layer.name,
+      logs: pre.logs,
+      error: pre.error,
+      ms: pre.ms,
+      tests: pre.tests,
+    });
+    if (pre.error) {
+      tab.sending = false;
+      emit();
+      toast(`${label}的前置脚本出错，请求已取消：${pre.error}`, "error");
+      return false;
+    }
+    url = pre.request.url;
+    methodUpper = pre.request.method;
+    headers = new Headers();
+    for (const [key, value] of pre.request.headers) headers.append(key, value);
+    if (typeof body === "string" && pre.request.body !== null) body = pre.request.body;
+    // 下一层脚本与后置脚本看到的必须是这一层改完的请求。
+    startHeaders = headers;
   }
 
   // Cookie 开关：关掉时通知 Go 侧停止携带与记录。
@@ -1004,48 +1139,52 @@ export async function send(): Promise<void> {
     });
     const record = await readResponse(res, started, performance.now() - started);
 
-    // 后置脚本：可以读响应、改响应体（解密、脱敏、重排都在这做）。
-    if (script.post.trim()) {
-      if (!script.trusted) {
+    // 后置脚本：从本请求往外跑，靠近请求的先看到响应（改响应体、写变量）。
+    // 任何一层调了 pm.execution.resend()，本次响应处理完就把请求再发一遍。
+    let wantsResend = false;
+    for (const layer of [...layers].reverse()) {
+      const source = layer.script.post;
+      if (!source.trim()) continue;
+      const label = scriptScopeLabel(layer.scope, layer.name);
+      if (!layer.script.trusted) {
         scriptRuns.push({
           phase: "post",
-          logs: [{ level: "warn", text: "这段脚本来自导入文件，还没被信任，本次不执行" }],
+          scope: layer.scope,
+          scopeName: layer.name,
+          logs: [{ level: "warn", text: `${label}脚本来自导入文件，还没被信任，本次不执行` }],
           ms: 0,
         });
-      } else {
-        const post = await runScript(
-          "post",
-          script.post,
-          {
-            request: scriptRequestState(),
-            response: {
-              code: record.status,
-              status: record.statusText,
-              headers: record.headers,
-              body: record.body,
-            },
-            getVar: (name) => lookupVar(name, scope()),
-            setEnvVar: (name, value) => writeScriptVar("env", name, value),
-            setGlobalVar: (name, value) => writeScriptVar("global", name, value),
-          },
-          scriptVars,
-        );
-        scriptVars = post.vars;
-        if (post.responseBody !== undefined) {
-          record.body = post.responseBody;
-          record.binary = false;
-          record.base64 = undefined;
-          record.truncated = false;
-        }
-        scriptRuns.push({
-          phase: "post",
-          logs: post.logs,
-          error: post.error,
-          ms: post.ms,
-          bodyEdited: post.responseBody !== undefined,
-          tests: post.tests,
-        });
+        continue;
       }
+      const post = await runScript(
+        "post",
+        source,
+        scriptContext({
+          code: record.status,
+          status: record.statusText,
+          headers: record.headers,
+          body: record.body,
+        }),
+        scriptVars,
+      );
+      scriptVars = post.vars;
+      if (post.responseBody !== undefined) {
+        record.body = post.responseBody;
+        record.binary = false;
+        record.base64 = undefined;
+        record.truncated = false;
+      }
+      scriptRuns.push({
+        phase: "post",
+        scope: layer.scope,
+        scopeName: layer.name,
+        logs: post.logs,
+        error: post.error,
+        ms: post.ms,
+        bodyEdited: post.responseBody !== undefined,
+        tests: post.tests,
+      });
+      if (post.resend) wantsResend = true;
     }
     if (scriptRuns.length > 0) record.scripts = scriptRuns;
 
@@ -1058,6 +1197,7 @@ export async function send(): Promise<void> {
     }
     addHistory(tab.request, record.status, record.durationMs);
     notifyIfBackground(record);
+    return wantsResend;
   } catch (err) {
     const current = state.tabs.find((t) => t.id === tab.id);
     // 用户点「取消」时 Go 侧回的是 context canceled 一类文本，靠关键字判断会漏，
@@ -1069,6 +1209,7 @@ export async function send(): Promise<void> {
       current.responseTab = "body";
     }
     addHistory(tab.request, 0, record.durationMs);
+    return false;
   } finally {
     if (timer !== undefined) window.clearTimeout(timer);
     controllers.delete(tab.id);

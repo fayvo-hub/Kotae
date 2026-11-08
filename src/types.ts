@@ -92,6 +92,12 @@ export interface RequestScript {
   trusted: boolean;
 }
 
+/**
+ * 脚本挂在哪一层。前置脚本从外到内跑（全局 → 集合 → 文件夹 → 请求），
+ * 后置脚本反过来（请求 → 文件夹 → 集合 → 全局），靠近请求的先看到响应。
+ */
+export type ScriptScope = "global" | "collection" | "folder" | "request";
+
 /** 脚本里 console.log / warn / error 产出的一行。 */
 export interface ScriptLog {
   level: "log" | "warn" | "error";
@@ -108,6 +114,10 @@ export interface ScriptTest {
 /** 一次脚本执行的记录，前置与后置各一条。 */
 export interface ScriptRun {
   phase: "pre" | "post";
+  /** 这段脚本挂在哪一层；老记录没有这个字段，按「本请求」处理。 */
+  scope?: ScriptScope;
+  /** 层级的显示名（集合 / 文件夹名），响应区按它标注来源。 */
+  scopeName?: string;
   logs: ScriptLog[];
   error?: string;
   ms: number;
@@ -161,6 +171,8 @@ export interface FolderNode {
   auth?: AuthConfig;
   /** 文件夹级变量：子请求插值时优先于环境变量之外的集合与全局。 */
   vars?: KV[];
+  /** 文件夹级脚本：这个文件夹里的请求都会执行它。 */
+  script?: RequestScript;
 }
 
 export type TreeNode = RequestNode | FolderNode;
@@ -173,6 +185,8 @@ export interface Collection {
   auth?: AuthConfig;
   /** 集合级变量：文件夹与请求之外的一层，优先级低于文件夹。 */
   vars?: KV[];
+  /** 集合级脚本：集合里的每个请求都会执行它。 */
+  script?: RequestScript;
 }
 
 /** 一跳：这次用了什么方法、打到哪个地址、返回什么状态码。 */
@@ -344,6 +358,8 @@ export interface PersistedWorkspace {
   envs: Env[];
   activeEnvId: string;
   globals: KV[];
+  /** 全局脚本（所有请求都会执行）。缺省视为没有脚本。 */
+  globalScript?: RequestScript;
   tabs: PersistedTab[];
   activeTabId: string | null;
   theme: ThemeMode;
