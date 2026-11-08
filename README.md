@@ -141,7 +141,7 @@ MYGO_E2E_SHOTS=1 npm run e2e       # 把关键界面截图到 e2e/artifacts/（�
 元数据都在 `mygo.config.ts`：`name`（用户看到的名字，安装包与快捷方式用它）、`slug`（安装包文件名、Debian 包名等纯 ASCII 场景）、`identifier`（系统登记用的反向域名）、`icon`、`windows.displayName` / `windows.installDirName`（Windows 显示名与 `%LOCALAPPDATA%\Programs\Kotae` 目录名）、`linux.*`（Debian 包与 desktop 条目）、`urlSchemes`（深链）。
 
 ```bash
-npm run build                         # build/windows-amd64/：Kotae.exe + kotae-setup-0.2.0-amd64.exe
+npm run build                         # build/windows-amd64/：Kotae.exe + kotae-setup-0.2.1-amd64.exe
 npx mygo-cli build -skip-installer    # 只要可执行文件
 npx mygo-cli build -platform linux/amd64,darwin/universal   # 交叉编译（需要各平台的打包工具）
 ```
@@ -173,9 +173,9 @@ Windows 安装包是 NSIS 做的按用户安装：装到 `%LOCALAPPDATA%\Program
 `.github/workflows/release.yml` 在推送 `v*` tag（或在 Actions 页面手动触发）时构建两个平台的安装包并挂到 GitHub Release：
 
 ```bash
-# 发布 0.2.0：先把 mygo.config.ts 的 version 改成 0.2.0 并提交
-git tag v0.2.0
-git push origin v0.2.0
+# 发布 0.2.1：先把 mygo.config.ts 的 version 改成 0.2.1 并提交
+git tag v0.2.1
+git push origin v0.2.1
 ```
 
 两个平台并行构建：`windows-latest` 跑 `mygo-cli build -platform windows/amd64`（出 exe、NSIS 安装包，并把裸 exe 改名成 `kotae-<版本>-portable.exe`），`macos-latest` 跑 `-platform darwin/universal`（出 `.app` 与 `.dmg`），最后由 `release` job 汇总上传。没有配签名证书时构建带 `-skip-notarize`，产物能装能跑但需要用户手动放行；接入签名后去掉这个参数，并按上一节补配置。
