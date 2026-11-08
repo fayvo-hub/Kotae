@@ -889,6 +889,11 @@ function bindEvents(): void {
     closeEnvMenu();
   });
   // 右键菜单收起由 ui/menu.ts 统一处理，这里只管环境下拉。
+
+  // 系统默认右键菜单（WebView2 的刷新、检查、另存为、复制粘贴）一律关掉：
+  // 全应用的右键菜单都由 ui/menu.ts 自绘。目标元素上的 contextmenu 回调先于这里执行，
+  // 所以标签页、集合树、标签行、操作行里的菜单不受影响。
+  document.addEventListener("contextmenu", (ev) => ev.preventDefault());
 }
 
 function onKeydown(ev: KeyboardEvent): void {

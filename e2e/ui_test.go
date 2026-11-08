@@ -303,3 +303,32 @@ func TestNoPageErrors(t *testing.T) {
 		t.Fatalf("页面出现了 %d 个错误：%v\n应用日志：\n%s", len(errs), errs, h.appLog())
 	}
 }
+
+// 系统默认右键菜单（WebView2 的刷新 / 检查 / 另存为 / 复制粘贴）整个窗口都关掉了，
+// 应用自绘的 .ctx-menu 照旧打开。
+type ctxMenuProbe struct {
+	Prevented bool `json:"prevented"`
+	Menus     int  `json:"menus"`
+}
+
+func TestNativeContextMenuDisabled(t *testing.T) {
+	h.clearOverlays(t)
+	var probe ctxMenuProbe
+	h.eval(t, `(() => {
+  const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 400, clientY: 300 });
+  const target = document.querySelector('.response-panel') || document.body;
+  target.dispatchEvent(ev);
+  return { prevented: ev.defaultPrevented, menus: document.querySelectorAll('.ctx-menu').length };
+})()`, &probe)
+	if !probe.Prevented {
+		t.Fatalf("空白处右键没有拦下系统默认菜单")
+	}
+	if probe.Menus != 0 {
+		t.Fatalf("空白处右键弹出了 %d 个自绘菜单，应该一个都不弹", probe.Menus)
+	}
+	// 自绘菜单不受影响：标签页右键照旧出四个菜单项。
+	if labels := tabMenuLabels(t, 0); len(labels) != 4 {
+		t.Fatalf("标签页右键菜单项异常：%v", labels)
+	}
+	h.clearOverlays(t)
+}
