@@ -453,7 +453,7 @@ cURL 解析是首版核心能力，实现归属为"需自研或引入开源库"�
 | 存储层 | `src/db.ts` | SQLite 建表、整库读回、按差异提交（WAL + 事务）、旧 JSON 一次性迁移 |
 | cURL | `src/curl.ts` | 自研轻量解析器与生成器（3.10 的方案一），覆盖常用参数并对未支持参数给中文提示 |
 | 导入导出 | `src/postman.ts` | Postman Collection v2.0/v2.1 与 HAR 解析、导出 Postman Collection |
-| 脚本 | `src/script.ts` | `pm.*` 运行时（前置/后置、`pm.test` 断言、单次 5 秒上限、导入脚本默认不执行需信任） |
+| 脚本 | `src/script.ts`、`src/ui/scriptDialog.ts` | `pm.*` 运行时（前置/后置、`pm.test` 断言、单次 5 秒上限）；脚本库浮层按列表顺序执行全局/集合/请求脚本，可上移下移、停用、导入脚本默认不执行需信任 |
 | Go 网络层 | `transport.go`、`trace.go`、`cookies.go`、`updates.go` | 按内部头选代理与跳过 TLS 的 `RoundTripper`、重定向逐跳与分阶段耗时采集、可枚举的 Cookie 罐、自动更新状态与偏好 |
 | 快捷键 | `src/shortcuts.ts` | 17 个动作的默认键位、组合键归一化、录制与冲突检查 |
 | 界面 | `src/main.ts`、`src/ui/*`、`src/style.css` | 外壳、请求/响应/侧边栏/流式面板、编辑控件、浮层、右键菜单（`src/ui/menu.ts`）、命令面板；视觉规范见 `docs/设计系统.md` |

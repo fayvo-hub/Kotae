@@ -22,7 +22,6 @@ import {
   persist,
   saveTabAs,
   scope,
-  setGlobalScript,
   setSnippetLang,
   setEnv,
   setPendingCurl,
@@ -51,8 +50,6 @@ import type { ApiRequest } from "../types";
 import { System } from "../mygo";
 import { formatBytes } from "../util";
 import { askConfirm, askText } from "./prompt";
-import { scriptEditor } from "./scriptEditor";
-import type { ScriptPhase } from "../script";
 import {
   SHORTCUT_ACTIONS,
   beginShortcutCapture,
@@ -95,6 +92,7 @@ export function closeAll(): void {
   state.curlOpen = false;
   state.snippetsOpen = false;
   state.cookiesOpen = false;
+  state.scriptsOpen = false;
   state.importOpen = false;
   state.pendingCurl = null;
   state.pendingImport = null;
@@ -635,32 +633,6 @@ export function globalsSection(): HTMLElement {
   });
 }
 
-// ---- 全局脚本 ----
-
-/** 设置页的「全局脚本」：任何请求发送前后都会跑，前置最先、后置最后。 */
-function globalScriptSection(): HTMLElement {
-  const host = el("div", { class: "stack" });
-  // 设置弹窗不随 emit 重建，阶段状态放本地即可。
-  let phase: ScriptPhase = "pre";
-  const paint = (): void => {
-    fill(
-      host,
-      scriptEditor({
-        script: state.globalScript,
-        phase,
-        onPhase: (next) => {
-          phase = next;
-          paint();
-        },
-        // 只落库不广播：重建设置弹窗会把正在输入的焦点弄丢。
-        onInput: (target, value) => setGlobalScript(target === "pre" ? { pre: value } : { post: value }),
-      }),
-    );
-  };
-  paint();
-  return host;
-}
-
 // ---- 设置 ----
 
 /**
@@ -1018,7 +990,6 @@ export function settingsDialog(): HTMLElement {
     section("快捷键", shortcutsSection()),
     section("桌面", desktopSection()),
     section("全局变量", globalsSection()),
-    section("全局脚本", globalScriptSection()),
     section("内置动态变量", varList),
     section("数据与备份", backupSection()),
     section("更新", updateSection()),
@@ -1134,7 +1105,7 @@ function backupSection(): HTMLElement {
         try {
           const saved = await System.saveText(
             "kotae-postman.json",
-            toPostmanCollection(state.collections, state.envs),
+            toPostmanCollection(state.collections, state.envs, state.scripts),
           );
           if (saved) toast(`已导出到 ${saved}`, "success");
         } catch (err) {
@@ -1254,6 +1225,13 @@ export function commandPalette(): HTMLElement {
       hint: "Ctrl+Shift+G",
       icon: "code",
       run: () => toggleUI("snippetsOpen", true),
+    },
+    {
+      id: "scripts",
+      title: "脚本库（全局 / 集合 / 请求脚本）",
+      hint: "",
+      icon: "code",
+      run: () => toggleUI("scriptsOpen", true),
     },
     {
       id: "save",

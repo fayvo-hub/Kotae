@@ -3,7 +3,7 @@
 // 属于 Postman 的重型能力，本工具不做，导入时以 warnings 的形式说明被忽略的部分。
 
 import { emptyRequest } from "./curl";
-import type { ApiRequest, AuthConfig, Collection, FormField, KV, TreeNode } from "./types";
+import type { ApiRequest, AuthConfig, Collection, FormField, KV, ScriptEntry, TreeNode } from "./types";
 import { uid } from "./util";
 
 export type ImportKind = "postman" | "har";
@@ -105,8 +105,8 @@ ${source}` : source;
     else if (listen) warnings.push(`脚本事件 ${listen} 暂不支持，已跳过`);
   }
   if (!pre && !post) return;
-  req.script = { pre, post, trusted: false };
-  warnings.push("脚本已导入但默认不执行，在「脚本」页签点「信任并启用」后才会运行");
+  req.importScript = { pre, post, trusted: false };
+  warnings.push("脚本已导入脚本库但默认不执行，在「脚本库」里点「信任并启用」后才会运行");
 }
 
 function keyValList(raw: unknown): PMKeyVal[] {
@@ -437,7 +437,7 @@ function toPMBody(req: ApiRequest): Record<string, unknown> | undefined {
   return undefined;
 }
 
-function toPMRequest(req: ApiRequest): Record<string, unknown> {
+function toPMRequest(req: ApiRequest, script?: { pre: string; post: string }): Record<string, unknown> {
   const query = req.params.map((p) => ({ key: p.key, value: p.value, disabled: !p.enabled }));
   const suffix = query
     .filter((p) => !p.disabled && p.key)
@@ -458,8 +458,7 @@ function toPMRequest(req: ApiRequest): Record<string, unknown> {
 }
 
 /** 导出脚本：prerequest / test 两个事件，exec 按行拆开（Postman 的存储格式）。 */
-function toPMEvents(req: ApiRequest): Record<string, unknown>[] | undefined {
-  const script = req.script;
+function toPMEvents(script: { pre: string; post: string } | undefined): Record<string, unknown>[] | undefined {
   if (!script) return undefined;
   const events: Record<string, unknown>[] = [];
   for (const [listen, source] of [
@@ -475,14 +474,18 @@ function toPMEvents(req: ApiRequest): Record<string, unknown>[] | undefined {
   return events.length > 0 ? events : undefined;
 }
 
-function toPMItems(nodes: TreeNode[], prefix: string): Record<string, unknown>[] {
+/** 某个请求在脚本库里挂着的脚本，按阶段拼成 Postman 的前置 / 后置两段。 */
+type ScriptLookup = (nodeId: string) => { pre: string; post: string } | undefined;
+
+function toPMItems(nodes: TreeNode[], prefix: string, scriptOf: ScriptLookup): Record<string, unknown>[] {
   return nodes.map((node, i) => {
     const name = node.name || `${prefix}${i + 1}`;
     if (node.type === "folder") {
-      return { name, item: toPMItems(node.items, `${name} / `) };
+      return { name, item: toPMItems(node.items, `${name} / `, scriptOf) };
     }
-    const out: Record<string, unknown> = { name, request: toPMRequest(node.request) };
-    const event = toPMEvents(node.request);
+    const script = scriptOf(node.id);
+    const out: Record<string, unknown> = { name, request: toPMRequest(node.request, script) };
+    const event = toPMEvents(script);
     if (event) out.event = event;
     return out;
   });
@@ -492,11 +495,26 @@ function toPMItems(nodes: TreeNode[], prefix: string): Record<string, unknown>[]
  * 导出为 Postman Collection v2.1：多个集合会各自变成一个顶层文件夹，
  * 这样一个文件就能整包导入 Postman，不用逐个导。
  */
-export function toPostmanCollection(collections: Collection[], envs: { name: string; vars: KV[] }[]): string {
+export function toPostmanCollection(
+  collections: Collection[],
+  envs: { name: string; vars: KV[] }[],
+  scripts: ScriptEntry[] = [],
+): string {
+  // 只导出挂在具体请求上的脚本：Postman 的集合里没有「全局脚本」这个概念。
+  const scriptOf: ScriptLookup = (nodeId) => {
+    const mine = scripts.filter((s) => s.scope === "request" && s.scopeId === nodeId && s.enabled);
+    if (mine.length === 0) return undefined;
+    const join = (phase: "pre" | "post"): string =>
+      mine
+        .filter((s) => s.phase === phase)
+        .map((s) => s.source)
+        .join("\n\n");
+    return { pre: join("pre"), post: join("post") };
+  };
   const items: Record<string, unknown>[] =
     collections.length === 1
-      ? toPMItems(collections[0]?.items ?? [], "")
-      : collections.map((c) => ({ name: c.name, item: toPMItems(c.items, "") }));
+      ? toPMItems(collections[0]?.items ?? [], "", scriptOf)
+      : collections.map((c) => ({ name: c.name, item: toPMItems(c.items, "", scriptOf) }));
 
   const dump = {
     info: {

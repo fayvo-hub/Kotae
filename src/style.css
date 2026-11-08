@@ -2324,25 +2324,9 @@ body.resizing-row * {
   gap: 10px;
 }
 
-/* 面板高度不够时让外层滚动，不要把编辑器压扁。 */
+/* 面板高度不够时让外层滚动，不要把只读列表压扁。 */
 .script-pane > * {
   flex: 0 0 auto;
-}
-
-.script-switch {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.script-dot {
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  margin-left: 6px;
-  border-radius: var(--radius-pill);
-  background: var(--accent);
-  vertical-align: middle;
 }
 
 .script-block {
@@ -2426,6 +2410,86 @@ body.resizing-row * {
 .script-api-list li {
   font-family: var(--mono);
   font-size: var(--fs-xs);
+}
+
+/* 脚本库浮层：左侧是执行顺序列表，右侧编辑选中的那一条。 */
+.script-lib {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.script-lib-side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.script-lib-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 420px;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.script-lib-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+}
+
+.script-lib-item:hover {
+  background: var(--surface-3);
+}
+
+.script-lib-item.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.script-lib-name {
+  font-size: var(--fs-md);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.script-lib-item.off .script-lib-name {
+  color: var(--text-3);
+}
+
+.script-lib-meta {
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.script-lib-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.script-lib-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .script-untrusted {

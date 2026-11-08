@@ -9,9 +9,9 @@ import (
 
 // pm.test 断言：通过记绿的、抛错记红的，响应区头部的「断言 x/y」要对得上。
 func TestPmTestAssertions(t *testing.T) {
+	cleanupScripts(t)
 	h.clearOverlays(t)
 	newTab(t)
-	openScriptPane(t, "post")
 
 	script := strings.Join([]string{
 		`pm.test("状态码是 200", () => {`,
@@ -25,7 +25,10 @@ func TestPmTestAssertions(t *testing.T) {
 		`  throw new Error("预期失败");`,
 		`});`,
 	}, "\n")
-	h.typeInto(t, `.script-input[data-phase="post"]`, script)
+	openScriptLibrary(t)
+	addLibraryScript(t, "断言", "post", "全局（所有请求）", script)
+	h.clearOverlays(t)
+
 	typeURL(t, "{{baseUrl}}/json")
 	h.send(t)
 

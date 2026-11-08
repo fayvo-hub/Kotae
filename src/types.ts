@@ -82,21 +82,40 @@ export interface RequestOptions {
   insecureTLS: boolean;
 }
 
+/** 脚本在库里是前置还是后置。 */
+export type ScriptPhase = "pre" | "post";
+
+/** 脚本的作用范围：所有请求、某个集合（含其中的文件夹与请求）、某个请求。 */
+export type ScriptScopeKind = "global" | "collection" | "request";
+
 /**
- * 前置 / 后置脚本。老数据里没有这个字段，读的时候统一用 `scriptOf()` 兜底。
- * trusted 只对导入来的脚本有意义：false 时不会执行，直到用户点「信任」。
+ * 脚本库里的一个脚本。库里是一个有序列表，发送时按这份顺序执行：
+ * 前置只跑 phase 为 pre 的，后置只跑 phase 为 post 的，顺序即用户排的顺序。
+ * trusted 只对导入来的脚本有意义：false 时不会执行，直到用户在库里点「信任并启用」。
+ */
+export interface ScriptEntry {
+  id: string;
+  name: string;
+  phase: ScriptPhase;
+  /** 作用范围；不匹配当前请求的脚本不会执行。 */
+  scope: ScriptScopeKind;
+  /** scope 为 collection 时是集合 id，为 request 时是请求节点 id；global 不用。 */
+  scopeId?: string;
+  source: string;
+  /** 关掉就跳过，但脚本仍留在库里。 */
+  enabled: boolean;
+  trusted: boolean;
+}
+
+/**
+ * 导入时临时携带的一对脚本（Postman 的一个请求最多一个 prerequest + 一个 test）。
+ * 只在 `parseImport` 到 `importCollections` 之间有效，落库前会拆成库里的脚本并清掉。
  */
 export interface RequestScript {
   pre: string;
   post: string;
   trusted: boolean;
 }
-
-/**
- * 脚本挂在哪一层。前置脚本从外到内跑（全局 → 集合 → 文件夹 → 请求），
- * 后置脚本反过来（请求 → 文件夹 → 集合 → 全局），靠近请求的先看到响应。
- */
-export type ScriptScope = "global" | "collection" | "folder" | "request";
 
 /** 脚本里 console.log / warn / error 产出的一行。 */
 export interface ScriptLog {
@@ -111,12 +130,14 @@ export interface ScriptTest {
   error?: string;
 }
 
-/** 一次脚本执行的记录，前置与后置各一条。 */
+/** 一次脚本执行的记录，每条跑过的脚本一条。 */
 export interface ScriptRun {
-  phase: "pre" | "post";
-  /** 这段脚本挂在哪一层；老记录没有这个字段，按「本请求」处理。 */
-  scope?: ScriptScope;
-  /** 层级的显示名（集合 / 文件夹名），响应区按它标注来源。 */
+  phase: ScriptPhase;
+  /** 库里的脚本名，响应区按它标注这次跑的是哪个脚本。 */
+  name?: string;
+  /** 这条脚本的作用范围；响应区用它标注来源。 */
+  scope?: ScriptScopeKind;
+  /** 集合 / 请求的名字，配合 scope 显示成「集合「用户」」。 */
   scopeName?: string;
   logs: ScriptLog[];
   error?: string;
@@ -150,8 +171,8 @@ export interface ApiRequest {
   form: FormField[];
   auth: AuthConfig;
   options: RequestOptions;
-  /** 前置 / 后置脚本；缺省视为没有脚本。 */
-  script?: RequestScript;
+  /** 只由 Postman 导入临时携带，导入时拆成库里的脚本并清掉；不要持久化。 */
+  importScript?: RequestScript;
 }
 
 export interface RequestNode {
@@ -171,8 +192,6 @@ export interface FolderNode {
   auth?: AuthConfig;
   /** 文件夹级变量：子请求插值时优先于环境变量之外的集合与全局。 */
   vars?: KV[];
-  /** 文件夹级脚本：这个文件夹里的请求都会执行它。 */
-  script?: RequestScript;
 }
 
 export type TreeNode = RequestNode | FolderNode;
@@ -185,8 +204,6 @@ export interface Collection {
   auth?: AuthConfig;
   /** 集合级变量：文件夹与请求之外的一层，优先级低于文件夹。 */
   vars?: KV[];
-  /** 集合级脚本：集合里的每个请求都会执行它。 */
-  script?: RequestScript;
 }
 
 /** 一跳：这次用了什么方法、打到哪个地址、返回什么状态码。 */
@@ -358,8 +375,8 @@ export interface PersistedWorkspace {
   envs: Env[];
   activeEnvId: string;
   globals: KV[];
-  /** 全局脚本（所有请求都会执行）。缺省视为没有脚本。 */
-  globalScript?: RequestScript;
+  /** 脚本库，数组顺序就是执行顺序。 */
+  scripts?: ScriptEntry[];
   tabs: PersistedTab[];
   activeTabId: string | null;
   theme: ThemeMode;

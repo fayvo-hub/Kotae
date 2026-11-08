@@ -2,12 +2,10 @@
 
 import { el, fill } from "./dom";
 import { authEditor } from "./authEditor";
-import { scriptEditor } from "./scriptEditor";
 import { kvTable } from "./kvtable";
 import { closeAll, modal } from "./overlays";
 import { emptyAuth, findNode, setNodeSettings, state } from "../store";
-import type { ScriptPhase } from "../script";
-import type { Collection, FolderNode, KV, RequestScript } from "../types";
+import type { Collection, FolderNode, KV } from "../types";
 
 export function nodeSettingsDialog(): HTMLElement {
   const target = state.nodeSettings;
@@ -68,35 +66,6 @@ export function nodeSettingsDialog(): HTMLElement {
   });
   body.append(
     section("变量", "发送请求时按「环境 > 文件夹 > 集合 > 全局」的顺序取值，同名变量深层优先。", table),
-  );
-
-  // ---- 脚本 ----
-  // 这段脚本对这个集合（文件夹）里的每个请求都跑：前置在请求自己的脚本之前，
-  // 后置在请求自己的脚本之后。弹窗不随 emit 重建，所以阶段状态放在本地。
-  let scriptPhase: ScriptPhase = "pre";
-  const scriptHost = el("div", { class: "stack" });
-  const paintScript = (): void => {
-    const current: RequestScript = node.script ?? { pre: "", post: "", trusted: true };
-    fill(
-      scriptHost,
-      scriptEditor({
-        script: current,
-        phase: scriptPhase,
-        onPhase: (phase) => {
-          scriptPhase = phase;
-          paintScript();
-        },
-        onInput: (phase, value) => write({ script: { ...current, [phase]: value } }),
-      }),
-    );
-  };
-  paintScript();
-  body.append(
-    section(
-      "脚本",
-      `这里的脚本对${node === collection ? "集合" : "文件夹"}里的每个请求都会执行：前置比请求自己的脚本先跑，后置比它后跑。`,
-      scriptHost,
-    ),
   );
 
   const footer = el("div", { class: "dialog-foot" });

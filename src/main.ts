@@ -23,6 +23,7 @@ import {
 } from "./ui/overlays";
 import { nodeSettingsDialog } from "./ui/nodeSettings";
 import { cookieDialog } from "./ui/cookies";
+import { scriptsDialog } from "./ui/scriptDialog";
 import { emptyRequest, parseCurl } from "./curl";
 import { methodTone } from "./util";
 import { closeContextMenu, openContextMenu } from "./ui/menu";
@@ -114,11 +115,13 @@ function buildShell(): void {
   paletteBtn.dataset.role = "palette";
   const settingsBtn = iconButton("settings", "设置", () => toggleUI("settingsOpen", true));
   settingsBtn.dataset.role = "settings";
+  const scriptsBtn = iconButton("code", "脚本库", () => toggleUI("scriptsOpen", true));
+  scriptsBtn.dataset.role = "scripts";
   const sidebarBtn = iconButton("sidebar", "收起 / 展开侧边栏（Ctrl+B）", () => toggleSidebar());
   sidebarBtn.dataset.role = "sidebar";
 
   // 环境切换由左上角的环境胶囊负责，这里不再放重复入口。
-  actions.append(curlBtn, paletteBtn, themeBtn, settingsBtn, sidebarBtn);
+  actions.append(curlBtn, paletteBtn, themeBtn, scriptsBtn, settingsBtn, sidebarBtn);
 
   const topbar = el("header", { class: "topbar" });
   topbar.append(brand, envHost, el("span", { class: "spacer" }), actions);
@@ -634,6 +637,7 @@ function overlaySignature(): string {
     state.settingsOpen,
     state.snippetsOpen,
     state.cookiesOpen,
+    state.scriptsOpen,
     state.nodeSettings ? `${state.nodeSettings.collectionId}:${state.nodeSettings.nodeId ?? ""}` : "",
     saveOpen,
   ].join("|");
@@ -657,6 +661,8 @@ function renderOverlays(): void {
     overlayRoot.append(snippetsDialog());
   } else if (state.cookiesOpen) {
     overlayRoot.append(cookieDialog());
+  } else if (state.scriptsOpen) {
+    overlayRoot.append(scriptsDialog());
   } else if (state.nodeSettings) {
     overlayRoot.append(nodeSettingsDialog());
   } else if (state.settingsOpen) {
@@ -908,6 +914,7 @@ function onKeydown(ev: KeyboardEvent): void {
       state.envOpen ||
       state.snippetsOpen ||
       state.cookiesOpen ||
+      state.scriptsOpen ||
       state.settingsOpen ||
       state.nodeSettings ||
       saveOpen ||

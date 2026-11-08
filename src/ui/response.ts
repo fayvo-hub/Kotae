@@ -14,8 +14,8 @@ import type {
   StreamState,
   Tab,
 } from "../types";
-import { copyText, clearStreamMessages, sendStreamMessage, toast } from "../store";
-import { scriptScopeLabel } from "../script";
+import { copyText, clearStreamMessages, sendStreamMessage, scriptScopeLabel, toast } from "../store";
+import { scriptPhaseLabel } from "../script";
 import { formatBytes, formatDuration } from "../util";
 import { prettyJSON } from "../util";
 
@@ -70,15 +70,16 @@ export function responsePanel(tab: Tab): HTMLElement {
   return wrap;
 }
 
-/** 脚本执行记录：前置 / 后置各自一行摘要，下面跟 console 输出与报错。 */
+/** 脚本执行记录：每条脚本一行摘要，下面跟 console 输出与报错。 */
 function scriptLog(runs: ScriptRun[]): HTMLElement {
   const box = el("section", { class: "script-log" });
   for (const run of runs) {
     const head = el("div", { class: "script-log-head" });
-    const phase = run.phase === "pre" ? "前置脚本" : "后置脚本";
-    // 多层级脚本会连着跑好几段，只写「前置/后置」分不清是哪一层在说话。
+    const phase = `${scriptPhaseLabel(run.phase)}脚本`;
+    // 一次发送可能跑好几条脚本，只写「前置/后置」分不清是哪一条在说话。
+    const who = [run.name?.trim(), run.scopeName, phase].filter((part): part is string => !!part);
     head.append(
-      el("span", { class: "script-log-phase", text: run.scope && run.scope !== "request" ? `${phase} · ${scriptScopeLabel(run.scope, run.scopeName)}` : phase }),
+      el("span", { class: "script-log-phase", text: who.join(" · ") }),
       el("span", { class: "script-log-ms", text: `${run.ms} ms` }),
     );
     if (run.bodyEdited) head.append(el("span", { class: "script-log-tag", text: "已改写响应体" }));

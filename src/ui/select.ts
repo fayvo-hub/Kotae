@@ -184,7 +184,17 @@ document.addEventListener("mousedown", (ev) => {
   if (target?.closest(".select-menu") || open.root.contains(target)) return;
   closeSelect();
 });
-document.addEventListener("scroll", () => closeSelect(), true);
+document.addEventListener(
+  "scroll",
+  (ev) => {
+    if (!open) return;
+    // 菜单自己往上挪（把选中项滚进可视区）不算「页面滚了」，否则长列表一展开就自己收起。
+    const target = ev.target as Node | null;
+    if (target && open.menu.contains(target)) return;
+    closeSelect();
+  },
+  true,
+);
 window.addEventListener("resize", () => closeSelect());
 document.addEventListener(
   "keydown",

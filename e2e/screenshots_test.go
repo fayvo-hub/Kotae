@@ -154,18 +154,25 @@ func TestScreenshots(t *testing.T) {
 
 	// 03 请求脚本：前置脚本算 HMAC 签名，响应下方是脚本日志。
 	newTab(t)
-	openScriptPane(t, "pre")
-	h.typeInto(t, `.script-input[data-phase="pre"]`, strings.Join([]string{
+	openScriptLibrary(t)
+	addLibraryScript(t, "签名", "pre", "全局（所有请求）", strings.Join([]string{
 		`const ts = String(pm.utils.now());`,
 		`pm.request.headers.upsert("X-Ts", ts);`,
 		`pm.request.headers.upsert("X-Sign", await pm.utils.hmacSha256("e2e-secret", "/signed|" + ts));`,
 		`console.log("已签名 ts=" + ts);`,
 	}, "\n"))
+	h.clearOverlays(t)
 	h.typeInto(t, ".url-input", "{{baseUrl}}/signed")
 	blurURL(t)
 	h.send(t)
 	waitResponse(t, "200")
 	shotTo(t, dir, "03-script")
+
+	// 13 脚本库：多条脚本排成一列，列表顺序就是执行顺序。
+	openScriptLibrary(t)
+	selectLibraryScript(t, "签名")
+	shotTo(t, dir, "13-script-library")
+	h.clearOverlays(t)
 
 	// 04 环境变量：顶栏胶囊 → 编辑按钮进入环境对话框。
 	h.pressKeys(t, "e", true, false)

@@ -103,3 +103,35 @@ func TestVarAssistStaysOpen(t *testing.T) {
 	h.wait(t, "变量已写入输入框", `[...document.querySelectorAll('.kv-row .kv-value')].pop()?.value === '{{baseUrl}}'`)
 	h.wait(t, "补全层收起", `!document.querySelector('.assist.open')`)
 }
+
+// TestSelectStaysOpenForLongList 回归：选项很多、选中项在列表靠下时，
+// 展开菜单会先把选中项滚进可视区，那次滚动以前会被当成「页面滚了」而把菜单立刻收起。
+func TestSelectStaysOpenForLongList(t *testing.T) {
+	const (
+		colName = "长列表集合"
+		reqName = "长列表请求"
+	)
+	cleanupScripts(t)
+	h.clearOverlays(t)
+	newCollection(t, colName)
+	newRequestVia(t, colName)
+	typeURL(t, "{{baseUrl}}/echo")
+	saveTabInto(t, reqName, colName, "")
+	h.openRequest(t, reqName)
+
+	// 新建的脚本默认挂在这个请求上，作用范围下拉框的选中项因此排在集合与请求之后。
+	openScriptLibrary(t)
+	h.clickContaining(t, ".script-lib-side .tools-row .btn", "新建")
+	h.wait(t, "新建出一条脚本", `document.querySelectorAll('.script-lib-item').length === 1`)
+	h.click(t, `.script-lib-editor .form-grid > .field:nth-child(2) .select .select-trigger`)
+	h.wait(t, "作用范围下拉框展开", `!!document.querySelector('.select-menu')`)
+	time.Sleep(400 * time.Millisecond)
+	if !h.exists(t, ".select-menu") {
+		t.Fatalf("选项列表很长时下拉框也不该自己收起")
+	}
+	// 点选靠下的选项：菜单已展开，直接点，别再用触发器切一次。
+	h.clickContaining(t, ".select-menu .select-option", "全局（所有请求）")
+	h.wait(t, "作用范围改到全局", `document.querySelector('.script-lib-editor .form-grid > .field:nth-child(2) .select')?.dataset.value === 'global'`)
+	h.clearOverlays(t)
+	deleteCollectionViaMenu(t, colName)
+}

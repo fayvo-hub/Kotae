@@ -3,7 +3,6 @@
 import { el, fill, icon, iconButton, icons } from "./dom";
 import { assistOpen, enableVarAssist, kvTable } from "./kvtable";
 import { selectBox } from "./select";
-import { scriptEditor } from "./scriptEditor";
 import {
   abortSend,
   activeTab,
@@ -13,6 +12,7 @@ import {
   isStreaming,
   mutate,
   scriptLayers,
+  scriptScopeLabel,
   send,
   setPendingCurl,
   toast,
@@ -20,7 +20,7 @@ import {
 } from "../store";
 import { System } from "../mygo";
 import { CurlError, buildURL, parseCurl } from "../curl";
-import { scriptScopeLabel } from "../script";
+import { scriptPhaseLabel } from "../script";
 import {
   METHODS,
   type BodyMode,
@@ -330,7 +330,7 @@ function tabStrip(tab: Tab): HTMLElement {
     headers: tab.request.headers.filter((h) => h.enabled && h.key).length,
     body: 0,
     auth: tab.request.auth.type === "none" ? 0 : 1,
-    script: tab.request.script?.pre.trim() || tab.request.script?.post.trim() ? 1 : 0,
+    script: scriptLayers(tab).length,
     options: 0,
   };
   const defs: { key: Tab["requestTab"]; label: string; icon: keyof typeof icons }[] = [
@@ -364,70 +364,49 @@ function tabStrip(tab: Tab): HTMLElement {
   return strip;
 }
 
-/** 脚本页一次只显示一段，前置与后置用分段控件切换，两块都塞进去会把面板压扁。 */
-let scriptPhase: "pre" | "post" = "pre";
-
+/**
+ * 脚本页不在这里编辑：脚本统一放「脚本库」，列表顺序就是执行顺序。
+ * 这里只回答一个问题——这次发送会跑哪几条脚本。
+ */
 function scriptPane(tab: Tab): HTMLElement {
   const host = el("div", { class: "pane script-pane" });
-  if (!tab.request.script) {
-    mutate((r) => {
-      r.script = { pre: "", post: "", trusted: true };
-    });
-  }
-  const script = tab.request.script ?? { pre: "", post: "", trusted: true };
-
-  // 本请求之外还有哪几层脚本会一起跑：缺一层就会漏掉「为什么它改了我的请求」的线索。
-  const outer = scriptLayers(tab).filter((layer) => layer.scope !== "request");
-  if (outer.length > 0) {
-    host.append(
-      el("p", {
-        class: "pane-hint",
-        text: `前置从外到内、后置从内到外执行。本请求之外还会跑：${outer
-          .map((layer) => scriptScopeLabel(layer.scope, layer.name))
-          .join(" → ")}`,
-      }),
-    );
-  }
+  const list = scriptLayers(tab);
 
   host.append(
-    scriptEditor({
-      script,
-      phase: scriptPhase,
-      onPhase: (phase) => {
-        scriptPhase = phase;
-        window.dispatchEvent(new CustomEvent("mygo:rerender-request"));
-      },
-      onInput: (phase, value) => {
-        mutate((r) => {
-          r.script = { ...(r.script ?? { pre: "", post: "", trusted: true }), [phase]: value };
-        });
-      },
+    el("p", {
+      class: "pane-hint",
+      text: "脚本在「脚本库」里统一管理，列表顺序就是执行顺序；这里只列出本次发送会跑的那几条。",
     }),
   );
 
-  if (!(tab.request.script?.trusted ?? true)) {
-    const warn = el("div", { class: "script-untrusted" });
-    warn.append(
-      el("span", {
-        text: "这段脚本随导入文件一起进来，默认不执行。确认内容后再信任。",
-      }),
-      el("button", {
-        class: "btn small danger-solid",
-        attr: { type: "button" },
-        text: "信任并启用",
-        on: {
-          click: () => {
-            mutate((r) => {
-              r.script = { ...(r.script ?? { pre: "", post: "", trusted: true }), trusted: true };
-            });
-            toast("已信任这段脚本，下次发送会执行", "success");
-            window.dispatchEvent(new CustomEvent("mygo:rerender-request"));
-          },
-        },
-      }),
-    );
-    host.append(warn);
+  if (list.length === 0) {
+    host.append(el("p", { class: "muted small", text: "这次发送没有会执行的脚本。" }));
+  } else {
+    const runs = el("div", { class: "stack-tight" });
+    for (const entry of list) {
+      const box = el("div", { class: "script-block" });
+      const head = el("div", { class: "script-block-head" });
+      head.append(
+        el("span", { class: "script-block-title", text: entry.name.trim() || "未命名脚本" }),
+        el("span", {
+          class: "script-block-hint",
+          text: `${scriptPhaseLabel(entry.phase)}脚本 · ${scriptScopeLabel(entry)}`,
+        }),
+      );
+      box.append(head);
+      runs.append(box);
+    }
+    host.append(runs);
   }
+
+  const openBtn = el("button", {
+    class: "btn small",
+    attr: { type: "button" },
+    on: { click: () => toggleUI("scriptsOpen", true) },
+  });
+  openBtn.append(icon("code"), el("span", { text: "打开脚本库" }));
+  host.append(el("div", { class: "tools-row" }, openBtn));
+
   return host;
 }
 

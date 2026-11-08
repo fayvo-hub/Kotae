@@ -15,11 +15,12 @@ import type {
   RedirectMode,
   RequestNode,
   RequestOptions,
-  RequestScript,
   ResponseRecord,
   ResponseTrace,
+  ScriptEntry,
+  ScriptPhase,
   ScriptRun,
-  ScriptScope,
+  ScriptScopeKind,
   SentBody,
   SentFile,
   SentRecord,
@@ -32,7 +33,7 @@ import type {
 } from "./types";
 import type { WebSocket as GoWebSocket } from "@mygo-plugins/websocket";
 import { init as openStorage, load as readStorage, save as writeStorage } from "./db";
-import { buildURL, cloneRequest, emptyRequest, scriptOf, toCurl } from "./curl";
+import { buildURL, cloneRequest, emptyRequest, toCurl } from "./curl";
 import { snippetText, type SnippetLang } from "./snippets";
 import {
   ensureScheme,
@@ -46,7 +47,7 @@ import {
 } from "./util";
 import {
   runScript,
-  scriptScopeLabel,
+  scriptPhaseLabel,
   type ScriptHttpRequest,
   type ScriptHttpResponse,
   type ScriptResponseState,
@@ -66,8 +67,8 @@ export interface State {
   envs: Env[];
   activeEnvId: string;
   globals: KV[];
-  /** 全局脚本：所有请求都会跑它，前置最先、后置最后。 */
-  globalScript: RequestScript;
+  /** 脚本库，数组顺序就是执行顺序。 */
+  scripts: ScriptEntry[];
   tabs: Tab[];
   activeTabId: string | null;
   theme: ThemeMode;
@@ -100,6 +101,8 @@ export interface State {
   snippetsOpen: boolean;
   /** Cookie 管理器浮层。 */
   cookiesOpen: boolean;
+  /** 脚本库浮层。 */
+  scriptsOpen: boolean;
   /** 代码片段面板选中的语言，不持久化。 */
   snippetLang: SnippetLang;
   /** cURL 解析结果，等待用户确认后填充。 */
@@ -133,7 +136,7 @@ function blankState(): State {
     envs: [],
     activeEnvId: "",
     globals: [],
-    globalScript: { pre: "", post: "", trusted: true },
+    scripts: [],
     tabs: [],
     activeTabId: null,
     theme: "auto",
@@ -156,6 +159,7 @@ function blankState(): State {
     importDraft: "",
     snippetsOpen: false,
     cookiesOpen: false,
+    scriptsOpen: false,
     snippetLang: "fetch",
     pendingCurl: null,
     pendingImport: null,
@@ -198,7 +202,7 @@ function snapshot(): PersistedWorkspace {
     envs: state.envs,
     activeEnvId: state.activeEnvId,
     globals: state.globals,
-    globalScript: state.globalScript,
+    scripts: state.scripts,
     tabs: state.tabs.map((t) => ({
       id: t.id,
       name: t.name,
@@ -275,11 +279,14 @@ function applyPersisted(p: Partial<PersistedWorkspace>): void {
   state.history = Array.isArray(p.history) ? p.history : [];
   state.envs = Array.isArray(p.envs) ? p.envs : [];
   state.globals = Array.isArray(p.globals) ? p.globals : [];
-  state.globalScript = {
-    pre: p.globalScript?.pre ?? "",
-    post: p.globalScript?.post ?? "",
-    trusted: p.globalScript?.trusted !== false,
-  };
+  state.scripts = Array.isArray(p.scripts)
+    ? p.scripts.map((entry) => ({
+        ...entry,
+        source: entry.source ?? "",
+        enabled: entry.enabled !== false,
+        trusted: entry.trusted !== false,
+      }))
+    : [];
   state.activeEnvId = typeof p.activeEnvId === "string" ? p.activeEnvId : "";
   state.theme = p.theme === "dark" || p.theme === "light" ? p.theme : "auto";
   // 上下限与拖拽时一致：拖到边缘再重启，尺寸不该被悄悄改掉。
@@ -321,8 +328,8 @@ function normalizeRequest(r: Partial<ApiRequest> | undefined): ApiRequest {
   const base = emptyRequest();
   if (!r) return base;
   return {
-    // protocol / script / binary 都必须原样带过去：少了它们，重启后
-    // SSE·WebSocket 标签会退回 HTTP，脚本与二进制请求体会静默消失。
+    // protocol / importScript / binary 都必须原样带过去：少了它们，
+    // SSE·WebSocket 标签会退回 HTTP，待确认的导入脚本与二进制请求体会静默消失。
     protocol: r.protocol ?? "http",
     method: r.method ?? base.method,
     url: r.url ?? base.url,
@@ -342,7 +349,7 @@ function normalizeRequest(r: Partial<ApiRequest> | undefined): ApiRequest {
       proxy: r.options?.proxy ?? base.options.proxy ?? "",
       insecureTLS: r.options?.insecureTLS ?? false,
     },
-    script: r.script,
+    importScript: r.importScript,
   };
 }
 
@@ -475,7 +482,7 @@ export function emptyAuth(): AuthConfig {
 export function setNodeSettings(
   collectionId: string,
   nodeId: string | undefined,
-  patch: { auth?: AuthConfig; vars?: KV[]; script?: RequestScript },
+  patch: { auth?: AuthConfig; vars?: KV[] },
 ): void {
   const collection = state.collections.find((c) => c.id === collectionId);
   if (!collection) return;
@@ -495,54 +502,111 @@ export function setNodeSettings(
     if (patch.vars) target.vars = patch.vars;
     else delete target.vars;
   }
-  if ("script" in patch) {
-    // 同上：编辑器改的是同一个对象，空脚本也先挂在节点上，不落库即可。
-    if (patch.script) target.script = patch.script;
-    else delete target.script;
-  }
   persist();
   emit();
 }
 
-/** 改全局脚本（设置面板里的全局脚本区）。 */
-export function setGlobalScript(patch: Partial<RequestScript>): void {
-  state.globalScript = { ...state.globalScript, ...patch };
+// ---- 脚本库 ----
+
+/** 新建一条脚本并返回它的 id；scope 为 request 时必须带请求节点 id。 */
+export function createScript(scope: ScriptScopeKind, scopeId?: string, phase: ScriptPhase = "pre"): string {
+  const entry: ScriptEntry = {
+    id: uid("script"),
+    name: "新建脚本",
+    phase,
+    scope,
+    ...(scope !== "global" && scopeId ? { scopeId } : {}),
+    source: "",
+    enabled: true,
+    trusted: true,
+  };
+  state.scripts.push(entry);
   persist();
-}
-
-/** 一层可执行的脚本：挂在哪一层、叫什么、内容是什么。 */
-export interface ScriptLayer {
-  scope: ScriptScope;
-  /** 集合 / 文件夹的名字；全局与本请求没有名字。 */
-  name?: string;
-  script: RequestScript;
-}
-
-function hasScript(script: RequestScript | undefined): script is RequestScript {
-  return !!script && (script.pre.trim() !== "" || script.post.trim() !== "");
+  emit();
+  return entry.id;
 }
 
 /**
- * 当前标签页生效的脚本层，从外到内：全局 → 集合 → 文件夹…→ 本请求。
- * 前置脚本按这个顺序跑，后置脚本把数组反过来跑（靠近请求的先看到响应）。
+ * 改一条脚本。改源码用的是 `quiet`：编辑时每敲一个字都重绘主界面太浪费，
+ * 结构性的改动（名字、阶段、范围、开关）才需要重绘。
  */
-export function scriptLayers(tab: Tab | null = activeTab() ?? null): ScriptLayer[] {
-  const layers: ScriptLayer[] = [];
-  if (hasScript(state.globalScript)) layers.push({ scope: "global", script: state.globalScript });
-  const chain = originChain(tab?.origin);
-  if (chain) {
-    if (hasScript(chain.collection.script)) {
-      layers.push({ scope: "collection", name: chain.collection.name, script: chain.collection.script });
+export function updateScript(id: string, patch: Partial<Omit<ScriptEntry, "id">>, quiet = false): void {
+  const entry = state.scripts.find((s) => s.id === id);
+  if (!entry) return;
+  Object.assign(entry, patch);
+  persist();
+  if (!quiet) emit();
+}
+
+export function deleteScript(id: string): void {
+  const at = state.scripts.findIndex((s) => s.id === id);
+  if (at < 0) return;
+  state.scripts.splice(at, 1);
+  persist();
+  emit();
+}
+
+/** 在库里上移 / 下移一位：库的顺序就是执行顺序。 */
+export function moveScript(id: string, delta: number): void {
+  const at = state.scripts.findIndex((s) => s.id === id);
+  const to = at + delta;
+  if (at < 0 || to < 0 || to >= state.scripts.length) return;
+  const [entry] = state.scripts.splice(at, 1);
+  if (!entry) return;
+  state.scripts.splice(to, 0, entry);
+  persist();
+  emit();
+}
+
+/** 脚本来源的中文写法：全局 / 集合「用户」/ 请求「登录」。 */
+export function scriptScopeLabel(entry: ScriptEntry): string {
+  switch (entry.scope) {
+    case "global":
+      return "全局";
+    case "collection": {
+      const name = state.collections.find((c) => c.id === entry.scopeId)?.name;
+      return name ? `集合「${name}」` : "集合（已删除）";
     }
-    for (const folder of chain.folders) {
-      if (hasScript(folder.script)) {
-        layers.push({ scope: "folder", name: folder.name, script: folder.script });
-      }
+    default: {
+      const name = entry.scopeId ? requestName(entry.scopeId) : undefined;
+      return name ? `请求「${name}」` : "请求（已删除）";
     }
   }
-  const own = tab ? scriptOf(tab.request) : undefined;
-  if (hasScript(own)) layers.push({ scope: "request", script: own });
-  return layers;
+}
+
+/** 作用范围里那个集合 / 请求的名字，响应区日志用它标注来源。 */
+function scriptScopeName(entry: ScriptEntry): string | undefined {
+  if (entry.scope === "collection") return state.collections.find((c) => c.id === entry.scopeId)?.name;
+  if (entry.scope === "request") return entry.scopeId ? requestName(entry.scopeId) : undefined;
+  return undefined;
+}
+
+/** 在所有集合里按节点 id 找请求名。 */
+function requestName(nodeId: string): string | undefined {
+  for (const collection of state.collections) {
+    const hit = findNode(collection.id, nodeId)?.node;
+    if (hit && hit.type === "request") return hit.name;
+  }
+  return undefined;
+}
+
+/**
+ * 当前标签页会执行的脚本，按库里的顺序（也就是用户排的顺序）：
+ * 全局的全跑；集合脚本只在请求属于该集合时跑；请求脚本只在就是这条请求时跑。
+ */
+export function scriptLayers(tab: Tab | null = activeTab() ?? null): ScriptEntry[] {
+  return state.scripts.filter((entry) => {
+    if (!entry.enabled || !entry.source.trim()) return false;
+    if (entry.scope === "global") return true;
+    if (!entry.scopeId) return false;
+    if (entry.scope === "collection") return tab?.origin?.collectionId === entry.scopeId;
+    return tab?.origin?.nodeId === entry.scopeId;
+  });
+}
+
+/** 库里全部脚本（脚本库浮层用），不做可用性过滤。 */
+export function allScripts(): ScriptEntry[] {
+  return state.scripts;
 }
 
 /**
@@ -1039,8 +1103,9 @@ async function sendAttempt(tab: Tab, scriptRuns: ScriptRun[]): Promise<boolean> 
   tab.sending = true;
   emit();
 
-  // 前置脚本：从全局到本请求依次跑，拿到的就是「马上要发出去」的请求。
+  // 前置脚本：按脚本库里的顺序跑，拿到的就是「马上要发出去」的请求。
   const layers = scriptLayers(tab);
+  const phaseScripts = (phase: ScriptPhase): ScriptEntry[] => layers.filter((entry) => entry.phase === phase);
   let scriptVars: Record<string, string> = {};
   const scriptRequestState = () => ({
     method: methodUpper,
@@ -1057,26 +1122,25 @@ async function sendAttempt(tab: Tab, scriptRuns: ScriptRun[]): Promise<boolean> 
     http: scriptHttp,
     resolve: (text: string) => resolveText(text),
   });
-  for (const layer of layers) {
-    const source = layer.script.pre;
-    if (!source.trim()) continue;
-    const label = scriptScopeLabel(layer.scope, layer.name);
-    if (!layer.script.trusted) {
+  for (const entry of phaseScripts("pre")) {
+    if (!entry.trusted) {
       scriptRuns.push({
         phase: "pre",
-        scope: layer.scope,
-        scopeName: layer.name,
-        logs: [{ level: "warn", text: `${label}脚本来自导入文件，还没被信任，本次不执行` }],
+        name: entry.name,
+        scope: entry.scope,
+        scopeName: scriptScopeName(entry),
+        logs: [{ level: "warn", text: `脚本来自导入文件，还没被信任，本次不执行（在「脚本库」里点「信任并启用」）` }],
         ms: 0,
       });
       continue;
     }
-    const pre = await runScript("pre", source, scriptContext(), scriptVars);
+    const pre = await runScript("pre", entry.source, scriptContext(), scriptVars);
     scriptVars = pre.vars;
     scriptRuns.push({
       phase: "pre",
-      scope: layer.scope,
-      scopeName: layer.name,
+      name: entry.name,
+      scope: entry.scope,
+      scopeName: scriptScopeName(entry),
       logs: pre.logs,
       error: pre.error,
       ms: pre.ms,
@@ -1085,7 +1149,7 @@ async function sendAttempt(tab: Tab, scriptRuns: ScriptRun[]): Promise<boolean> 
     if (pre.error) {
       tab.sending = false;
       emit();
-      toast(`${label}的前置脚本出错，请求已取消：${pre.error}`, "error");
+      toast(`脚本「${entry.name}」出错，请求已取消：${pre.error}`, "error");
       return false;
     }
     url = pre.request.url;
@@ -1139,26 +1203,24 @@ async function sendAttempt(tab: Tab, scriptRuns: ScriptRun[]): Promise<boolean> 
     });
     const record = await readResponse(res, started, performance.now() - started);
 
-    // 后置脚本：从本请求往外跑，靠近请求的先看到响应（改响应体、写变量）。
-    // 任何一层调了 pm.execution.resend()，本次响应处理完就把请求再发一遍。
+    // 后置脚本：同样按库里的顺序跑（改响应体、写变量），顺序完全由用户在库里排。
+    // 任何一条调了 pm.execution.resend()，本次响应处理完就把请求再发一遍。
     let wantsResend = false;
-    for (const layer of [...layers].reverse()) {
-      const source = layer.script.post;
-      if (!source.trim()) continue;
-      const label = scriptScopeLabel(layer.scope, layer.name);
-      if (!layer.script.trusted) {
+    for (const entry of phaseScripts("post")) {
+      if (!entry.trusted) {
         scriptRuns.push({
           phase: "post",
-          scope: layer.scope,
-          scopeName: layer.name,
-          logs: [{ level: "warn", text: `${label}脚本来自导入文件，还没被信任，本次不执行` }],
+          name: entry.name,
+          scope: entry.scope,
+          scopeName: scriptScopeName(entry),
+          logs: [{ level: "warn", text: `脚本来自导入文件，还没被信任，本次不执行（在「脚本库」里点「信任并启用」）` }],
           ms: 0,
         });
         continue;
       }
       const post = await runScript(
         "post",
-        source,
+        entry.source,
         scriptContext({
           code: record.status,
           status: record.statusText,
@@ -1176,8 +1238,9 @@ async function sendAttempt(tab: Tab, scriptRuns: ScriptRun[]): Promise<boolean> 
       }
       scriptRuns.push({
         phase: "post",
-        scope: layer.scope,
-        scopeName: layer.name,
+        name: entry.name,
+        scope: entry.scope,
+        scopeName: scriptScopeName(entry),
         logs: post.logs,
         error: post.error,
         ms: post.ms,
@@ -2201,6 +2264,7 @@ export interface WorkspaceBundle {
   collections: Collection[];
   envs: Env[];
   globals: KV[];
+  scripts: ScriptEntry[];
 }
 
 export function exportBundle(): string {
@@ -2211,8 +2275,15 @@ export function exportBundle(): string {
     collections: state.collections,
     envs: state.envs,
     globals: state.globals,
+    scripts: state.scripts,
   };
   return JSON.stringify(bundle, null, 2);
+}
+
+/** 重新分配 id 时记下新旧对应关系，脚本库里的范围引用要跟着改。 */
+interface IdMap {
+  collections: Map<string, string>;
+  nodes: Map<string, string>;
 }
 
 /** 导入备份：合并到现有数据（id 冲突时整体换新 id）。 */
@@ -2220,8 +2291,9 @@ export function importBundle(raw: string): { collections: number; envs: number }
   const parsed = JSON.parse(raw) as Partial<WorkspaceBundle>;
   const collections = Array.isArray(parsed.collections) ? parsed.collections : [];
   const envs = Array.isArray(parsed.envs) ? parsed.envs : [];
+  const map: IdMap = { collections: new Map(), nodes: new Map() };
   for (const c of collections) {
-    reassignCollectionIds(c);
+    reassignCollectionIds(c, map);
     state.collections.push(c);
   }
   for (const e of envs) {
@@ -2231,6 +2303,22 @@ export function importBundle(raw: string): { collections: number; envs: number }
   }
   if (Array.isArray(parsed.globals)) {
     for (const g of parsed.globals) state.globals.push({ ...g, id: uid("kv") });
+  }
+  // 脚本跟着集合一起搬家：范围指向的集合 / 请求换成新 id，找不到的条目不导。
+  if (Array.isArray(parsed.scripts)) {
+    for (const entry of parsed.scripts) {
+      const scopeId =
+        entry.scope === "collection"
+          ? map.collections.get(entry.scopeId ?? "")
+          : entry.scope === "request"
+            ? map.nodes.get(entry.scopeId ?? "")
+            : undefined;
+      if (entry.scope !== "global" && !scopeId) continue;
+      const copy: ScriptEntry = { ...entry, id: uid("script") };
+      if (scopeId) copy.scopeId = scopeId;
+      else delete copy.scopeId;
+      state.scripts.push(copy);
+    }
   }
   persist();
   emit();
@@ -2243,15 +2331,46 @@ export function importCollections(
 ): { collections: number; requests: number } {
   let requests = 0;
   for (const item of parsed) {
-    reassignCollectionIds(item.collection);
+    reassignCollectionIds(item.collection, { collections: new Map(), nodes: new Map() });
     requests += countRequests(item.collection.items);
     state.collections.push(item.collection);
+    adoptImportedScripts(item.collection.items);
   }
   state.pendingImport = null;
   state.importOpen = false;
   persist();
   emit();
   return { collections: parsed.length, requests };
+}
+
+/**
+ * 导入带进来的脚本拆成库里的条目：一条前置、一条后置，挂在具体请求上，
+ * 默认不信任（不点「信任并启用」就不会跑）。
+ */
+function adoptImportedScripts(nodes: TreeNode[]): void {
+  for (const node of nodes) {
+    if (node.type === "folder") {
+      adoptImportedScripts(node.items);
+      continue;
+    }
+    const imported = node.request.importScript;
+    if (!imported) continue;
+    delete node.request.importScript;
+    for (const phase of ["pre", "post"] as const) {
+      const source = phase === "pre" ? imported.pre : imported.post;
+      if (!source.trim()) continue;
+      state.scripts.push({
+        id: uid("script"),
+        name: `${node.name} · ${phase === "pre" ? "前置" : "后置"}`,
+        phase,
+        scope: "request",
+        scopeId: node.id,
+        source,
+        enabled: true,
+        trusted: false,
+      });
+    }
+  }
 }
 
 function countRequests(nodes: TreeNode[]): number {
@@ -2263,15 +2382,19 @@ function countRequests(nodes: TreeNode[]): number {
   return n;
 }
 
-function reassignCollectionIds(col: Collection): void {
-  col.id = uid("col");
+function reassignCollectionIds(col: Collection, map: IdMap): void {
+  const next = uid("col");
+  map.collections.set(col.id, next);
+  col.id = next;
   const walk = (nodes: TreeNode[]): void => {
     for (const n of nodes) {
       if (n.type === "folder") {
         n.id = uid("folder");
         walk(n.items);
       } else {
-        n.id = uid("req");
+        const id = uid("req");
+        map.nodes.set(n.id, id);
+        n.id = id;
         reassignRequestIds(n.request);
       }
     }
@@ -2346,7 +2469,8 @@ export function toggleUI(
     | "curlOpen"
     | "importOpen"
     | "snippetsOpen"
-    | "cookiesOpen",
+    | "cookiesOpen"
+    | "scriptsOpen",
   open?: boolean,
 ): void {
   const next = open === undefined ? !state[key] : open;
@@ -2357,6 +2481,7 @@ export function toggleUI(
   state.importOpen = false;
   state.snippetsOpen = false;
   state.cookiesOpen = false;
+  state.scriptsOpen = false;
   state.nodeSettings = null;
   state[key] = next;
   emit();
@@ -2383,6 +2508,7 @@ export function openNodeSettings(
   state.importOpen = false;
   state.snippetsOpen = false;
   state.cookiesOpen = false;
+  state.scriptsOpen = false;
   state.nodeSettings = { collectionId, nodeId, name: label };
   emit();
 }

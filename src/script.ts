@@ -14,9 +14,9 @@
 //   pm.utils.{hmacSha256,sha256,base64Encode,base64Decode,now,uuid,randomInt}
 //   console.log / warn / error
 
-import type { ScriptLog, ScriptScope, ScriptTest } from "./types";
+import type { ScriptLog, ScriptPhase, ScriptTest } from "./types";
 
-export type ScriptPhase = "pre" | "post";
+export type { ScriptPhase };
 
 export interface ScriptRequestState {
   method: string;
@@ -90,18 +90,9 @@ export function emptyScriptOutcome(request: ScriptRequestState): ScriptOutcome {
   return { logs: [], request, vars: {}, tests: [], ms: 0 };
 }
 
-/** 层级的中文叫法，界面提示与日志表头共用（name 只在集合 / 文件夹层上有）。 */
-export function scriptScopeLabel(scope: ScriptScope, name?: string): string {
-  switch (scope) {
-    case "global":
-      return "全局";
-    case "collection":
-      return name ? `集合「${name}」` : "集合";
-    case "folder":
-      return name ? `文件夹「${name}」` : "文件夹";
-    default:
-      return "本请求";
-  }
+/** 阶段的中文叫法。 */
+export function scriptPhaseLabel(phase: ScriptPhase): string {
+  return phase === "pre" ? "前置" : "后置";
 }
 
 /** 把脚本里 console.log 的多个参数拼成一行可读文本。 */

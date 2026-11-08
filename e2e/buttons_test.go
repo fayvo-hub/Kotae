@@ -202,7 +202,7 @@ func TestAllSubtabsSwitchable(t *testing.T) {
 	}
 }
 
-// 请求体的五种模式、认证的四种方式、脚本的前后两阶段：每组都要能切过去。
+// 请求体的五种模式、认证的四种方式：每组都要能切过去；脚本页是只读列表 + 脚本库入口。
 func TestAllSegmentsSwitchable(t *testing.T) {
 	h.clearOverlays(t)
 
@@ -224,14 +224,10 @@ func TestAllSegmentsSwitchable(t *testing.T) {
 			jsString(label)))
 	}
 
+	// 脚本页只读：列出本次发送会跑的那几条，编辑入口是「打开脚本库」。
 	clickIn(t, ".subtabs:not(.response-subtabs)", "脚本")
-	h.wait(t, "脚本页签", `!!document.querySelector('.segmented[aria-label="脚本阶段"]')`)
-	for _, label := range []string{"前置", "后置"} {
-		clickIn(t, ".segmented[aria-label='脚本阶段']", label)
-		h.wait(t, "脚本阶段 "+label, fmt.Sprintf(
-			`[...document.querySelectorAll('.segmented[aria-label="脚本阶段"] .segmented-item.active')].some(el => el.textContent.startsWith(%s))`,
-			jsString(label)))
-	}
+	h.wait(t, "脚本页签", `!!document.querySelector('.script-pane')`)
+	h.wait(t, "脚本页有打开脚本库的入口", `[...document.querySelectorAll('.script-pane .btn')].some(b => (b.textContent || '').includes('打开脚本库'))`)
 }
 
 // 顶栏与侧边栏的按钮逐个按一遍，每个都要有可见结果。
