@@ -70,8 +70,8 @@ AI 代理修改本仓库时的强制规则。与 `~/.pi/agent/AGENTS.md` 冲突�
 - 界面可以读 `state`、也可以直接改纯 UI 字段，但改完必须触发重绘（`emit()` 或 `window.dispatchEvent(new CustomEvent("mygo:rerender-…"))`）；凡是会落库的字段（`src/db.ts` 里 settings 表登记的那些）必须同时调 `persist()`，否则重启后回到旧值
 - 托盘、深链、拖入文件只发 `desktop:command` 事件，页面复用同一套 store action；不要在 Go 侧复制一份业务逻辑
 - 热点文件（每次改动只做与任务直接相关的局部编辑，新增功能优先落新模块）：
-  `src/store.ts`（2601 行，含 SSE / WebSocket 流式连接、共享认证/变量继承）、`src/ui/overlays.ts`（1616）、`src/ui/request.ts`（1151）、`src/main.ts`（1114）、`src/ui/response.ts`（934）、`src/curl.ts`（789）、`src/ui/sidebar.ts`（678）、`src/db.ts`（685）、`desktop.go`（504）、`src/style.css`（4722）
-- 已拆出的独立模块（新增同类能力放这里，别往热点文件里塞）：`src/postman.ts`（Postman Collection / HAR 互转，530 行）、`src/script.ts`（脚本运行时：`pm` 对象、`pm.test` 断言、5 秒超时、HMAC/Base64 工具，580 行）、`src/snippets.ts`（231 行）、`src/shortcuts.ts`（键位表、组合键归一化与录制，140 行）、`src/ui/{dom,icons,kvtable,jsonview,prompt,menu,select,authEditor,nodeSettings,cookies}.ts`、`src/ui/scriptDialog.ts`（脚本库浮层：有序列表 + 单条编辑，309 行）、`src/ui/scriptEditor.ts`（单条脚本的源码框与 API 说明，84 行）、`src/ui/paintWarmup.ts`（启动时把常用控件先画两帧，避开 WebView2 冷 GPU 缓存的首帧编译，65 行）（`menu.ts` 是集合树与标签页共用的中文右键菜单，`select.ts` 是全应用统一的下拉框，`authEditor.ts` 是请求与共享设置共用的认证编辑器）、`src/types.ts`、`src/util.ts`、`transport.go`（按内部头选代理与跳过 TLS，114 行）、`trace.go`（重定向逐跳与分阶段耗时，134 行）、`cookies.go`（可枚举的 Cookie 罐，202 行）、`updates.go`（69 行）
+  `src/store.ts`（2830 行，含 SSE / WebSocket 流式连接、共享认证/变量继承、分层操作列表的组装与发送计划）、`src/ui/overlays.ts`（1647）、`src/ui/request.ts`（1160）、`src/main.ts`（1114）、`src/ui/response.ts`（934）、`src/db.ts`（796）、`src/curl.ts`（789）、`src/ui/sidebar.ts`（678）、`desktop.go`（504）、`src/style.css`（4968）
+- 已拆出的独立模块（新增同类能力放这里，别往热点文件里塞）：`src/postman.ts`（Postman Collection / HAR 互转，561 行）、`src/script.ts`（脚本运行时：`pm` 对象、`pm.test` 断言、5 秒超时、HMAC/Base64 工具，580 行）、`src/snippets.ts`（231 行）、`src/shortcuts.ts`（键位表、组合键归一化与录制，140 行）、`src/ui/{dom,icons,kvtable,jsonview,prompt,menu,select,authEditor,nodeSettings,cookies}.ts`、`src/scriptData.ts`（操作步骤与脚本库的归一化、旧版脚本数据的拆分迁移，198 行）、`src/ui/scriptSteps.ts`（前置/后置操作列表组件：行内展开、开关、上移下移菜单，324 行）、`src/ui/scriptSnippets.ts`（代码片段数据与右侧片段栏，158 行）、`src/ui/scriptDialog.ts`（脚本库浮层：库列表 + 名称/说明/源码，202 行）、`src/ui/scriptEditor.ts`（源码框 + 片段栏 + API 速查，95 行）、`src/ui/paintWarmup.ts`（启动时把常用控件先画两帧，避开 WebView2 冷 GPU 缓存的首帧编译，110 行）（`menu.ts` 是集合树与标签页共用的中文右键菜单，`select.ts` 是全应用统一的下拉框，`authEditor.ts` 是请求与共享设置共用的认证编辑器）、`src/types.ts`、`src/util.ts`、`transport.go`（按内部头选代理与跳过 TLS，114 行）、`trace.go`（重定向逐跳与分阶段耗时，134 行）、`cookies.go`（可枚举的 Cookie 罐，202 行）、`updates.go`（69 行）
 - 新 TS 模块约 500 行时反思职责，约 800 行必须拆
 - 禁止 `as any` / `@ts-ignore` / `@ts-expect-error`（当前 0 处，保持）；`tsconfig` 是 `strict` + `noUncheckedIndexedAccess`，用真实的类型收窄解决报错
 
@@ -117,7 +117,7 @@ AI 代理修改本仓库时的强制规则。与 `~/.pi/agent/AGENTS.md` 冲突�
 - `npm run e2e` 默认会先 `npm run build:web`；前端没改动时用 `MYGO_E2E_SKIP_BUILD=1 npm run e2e`
 - 排障用 `MYGO_E2E_KEEP=1 npm run e2e`（保留临时目录与应用日志），截图在 `e2e/artifacts/`
 - e2e 启动的窗口默认被挪到屏幕外（`desktop.go` 的 `placeE2EWindow`），不挡使用者；要盯屏跑用 `MYGO_E2E_WINDOW=visible`。每次运行的应用名带随机后缀，避免上一轮残留进程占着单实例锁把这一轮挡在启动阶段
-- e2e 每轮都是全新的 userData，WebView2 的 GPU 着色器/栅格缓存是冷的：某个控件类型第一次出现时（如脚本库的源码编辑框）会掉一次 70ms 级长帧，用同一个 userData 重启后同一步骤就只剩 8–14ms。量帧间隔或排查「首次操作卡一下」时别把它当回归。已由 `src/ui/paintWarmup.ts` 在启动时把对话框骨架 + 等宽文本域 + 折叠面板先画两帧（实测 `新建脚本` 首帧长帧 74ms → 0）；以后新增会在首屏后首次绘制的控件，加进那份预热清单
+- e2e 每轮都是全新的 userData，WebView2 的 GPU 着色器/栅格缓存是冷的：某个控件类型第一次出现时（如脚本库的源码编辑框）会掉一次 70ms 级长帧，用同一个 userData 重启后同一步骤就只剩 8–14ms。量帧间隔或排查「首次操作卡一下」时别把它当回归。已由 `src/ui/paintWarmup.ts` 在启动时把对话框骨架 + 等宽文本域 + 折叠面板 + 前置/后置操作行与代码片段栏先画两帧（实测 `新建脚本` 首帧长帧 74ms → 0）；以后新增会在首屏后首次绘制的控件，加进那份预热清单
 - **未实际执行的验证不得声称通过**；只跑了部分用例就写清跑了哪些
 
 ## 测试纪律
