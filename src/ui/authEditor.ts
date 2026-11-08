@@ -2,6 +2,7 @@
 
 import { el, icon } from "./dom";
 import type { AuthConfig, AuthType } from "../types";
+import { enableVarHighlight } from "./varTokens";
 
 export const AUTH_TYPES: { value: AuthType; label: string }[] = [
   { value: "none", label: "无认证" },
@@ -66,6 +67,7 @@ export function authEditor(auth: AuthConfig, hooks: AuthEditorHooks): HTMLElemen
       },
     });
     input.value = value;
+    enableVarHighlight(input);
     return el("label", { class: "field" }, el("span", { class: "field-label", text: label }), input);
   };
 

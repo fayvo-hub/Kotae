@@ -32,6 +32,33 @@ export function warmUpFirstPaint(): void {
       scriptApiDetails(),
       // 请求体那种裸的等宽文本域。
       el("textarea", { class: "code-input", attr: { spellcheck: "false", "aria-label": "预热" } }),
+      // 变量高亮的镜像层 + 变量浮层：着色、标签边框与阴影都是首次绘制才编译。
+      el(
+        "div",
+        { class: "var-host" },
+        el(
+          "div",
+          { class: "var-mirror on" },
+          el(
+            "div",
+            { class: "var-inner" },
+            el("span", { class: "var-token", text: "{{baseUrl}}" }),
+            el("span", { class: "var-token missing", text: "{{nope}}" }),
+          ),
+        ),
+        el("input", { class: "text-input var-input", attr: { "aria-label": "预热" } }),
+      ),
+      el(
+        "div",
+        { class: "var-tip on", style: { left: "40px", top: "40px" } },
+        el(
+          "div",
+          { class: "var-tip-head" },
+          el("code", { class: "var-tip-name", text: "{{baseUrl}}" }),
+          el("span", { class: "var-tip-tag", text: "环境变量" }),
+        ),
+        el("div", { class: "var-tip-value", text: "预热" }),
+      ),
       el(
         "div",
         { class: "form-grid" },

@@ -3,6 +3,7 @@
 import { databaseFile } from "../db";
 import { el, fill, icon, iconButton, icons } from "./dom";
 import { enableVarAssist, kvTable } from "./kvtable";
+import { enableVarHighlight } from "./varTokens";
 import {
   activeTab,
   applyPendingCurl,
@@ -128,6 +129,7 @@ export function curlDialog(): HTMLElement {
   });
   let autoTimer: number | undefined;
   enableVarAssist(textarea, "curl-input");
+  enableVarHighlight(textarea);
 
   const pasteBtn = el("button", {
     class: "btn small",

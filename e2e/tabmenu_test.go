@@ -31,29 +31,40 @@ func tabMenuLabels(t *testing.T, index int) []string {
 	return out
 }
 
-// activeTabMenuLabels 在当前激活标签页上右键，返回菜单项文字。
-func activeTabMenuLabels(t *testing.T) []string {
+// activeTabIndex 当前激活标签页的下标。
+func activeTabIndex(t *testing.T) int {
 	t.Helper()
 	var index int
 	h.eval(t, `[...document.querySelectorAll('.tab')].findIndex((t) => t.classList.contains('active'))`, &index)
 	if index < 0 {
 		t.Fatalf("找不到激活的标签页")
 	}
-	return tabMenuLabels(t, index)
+	return index
 }
 
-// clickTabMenu 点右键菜单里某一项。
-func clickTabMenu(t *testing.T, label string) {
+// activeTabMenuLabels 在当前激活标签页上右键，返回菜单项文字。
+func activeTabMenuLabels(t *testing.T) []string {
+	t.Helper()
+	return tabMenuLabels(t, activeTabIndex(t))
+}
+
+// clickTabMenu 在指定标签页上右键，并在同一次脚本里点菜单项。
+// 拆成两次 RPC 会偶发失败：两步之间的重绘和滚动会把菜单收起来。
+func clickTabMenu(t *testing.T, index int, label string) {
 	t.Helper()
 	var ok bool
 	h.eval(t, fmt.Sprintf(`(() => {
+  const tab = [...document.querySelectorAll('.tab')][%d];
+  if (!tab) return false;
+  const r = tab.getBoundingClientRect();
+  tab.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: Math.round(r.left + 20), clientY: Math.round(r.top + 10) }));
   const item = [...document.querySelectorAll('.ctx-menu .env-menu-item')].find((b) => (b.textContent || '').trim().includes(%q));
   if (!item) return false;
   item.click();
   return true;
-})()`, label), &ok)
+})()`, index, label), &ok)
 	if !ok {
-		t.Fatalf("右键菜单里没有「%s」", label)
+		t.Fatalf("右键菜单里点不到「%s」", label)
 	}
 }
 
@@ -70,11 +81,8 @@ func TestTabContextMenu(t *testing.T) {
 	}
 	h.shot(t, "42-tab-menu")
 
-	// 截图会让页面重绘，菜单可能已经收起，重新打开再点。
-	tabMenuLabels(t, 1)
-
 	// 关闭其他：只剩右键点中的那一个。
-	clickTabMenu(t, "关闭其他")
+	clickTabMenu(t, 1, "关闭其他")
 	h.wait(t, "只剩一个标签页", `document.querySelectorAll('.tab').length === 1`)
 	if n := h.count(t, ".tab"); n != 1 {
 		t.Fatalf("「关闭其他」之后应该只剩 1 个标签页，实际 %d", n)
@@ -87,7 +95,7 @@ func TestTabContextMenu(t *testing.T) {
 	if len(labels) != 4 {
 		t.Fatalf("第二次右键菜单项异常：%v", labels)
 	}
-	clickTabMenu(t, "关闭全部")
+	clickTabMenu(t, 0, "关闭全部")
 	h.wait(t, "只剩空白标签页", `document.querySelectorAll('.tab').length === 1`)
 	if name := h.text(t, ".tab.active .tab-name"); name != "未命名请求" {
 		t.Fatalf("「关闭全部」之后应该是一个空白请求，实际 %q", name)
@@ -102,7 +110,7 @@ func TestTabContextMenu(t *testing.T) {
 	if labels := activeTabMenuLabels(t); len(labels) != 4 {
 		t.Fatalf("激活标签页的右键菜单项异常：%v", labels)
 	}
-	clickTabMenu(t, "刷新")
+	clickTabMenu(t, activeTabIndex(t), "刷新")
 	h.wait(t, "刷新后拿到响应", `!!document.querySelector('.status-code')`)
 	h.shot(t, "43-tab-menu-refresh")
 }

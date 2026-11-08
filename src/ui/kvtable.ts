@@ -6,6 +6,7 @@ import { visibleVarNames } from "../util";
 import { pasteText, scope, toast } from "../store";
 import { DYNAMIC_VARS } from "../util";
 import { askAlert, askText } from "./prompt";
+import { enableVarHighlight } from "./varTokens";
 
 export interface KVRow {
   id: string;
@@ -117,6 +118,7 @@ export function kvTable<T extends KVRow>(opts: KVTableOptions<T>): HTMLElement {
     // 补全在创建时就挂上：靠 focus 挂会让「已经被聚焦的输入框」漏掉（重绘后焦点是恢复出来的，
     // 不会再派发一次 focus）。
     enableVarAssist(keyInput, `kv:${row.id}:key`);
+    enableVarHighlight(keyInput);
     if (opts.keyList && opts.keyList.length > 0) {
       const listId = `dl_${newId()}`;
       const dl = el("datalist", { attr: { id: listId } });
@@ -156,6 +158,7 @@ export function kvTable<T extends KVRow>(opts: KVTableOptions<T>): HTMLElement {
         });
     valueInput.value = row.value;
     enableVarAssist(valueInput, `kv:${row.id}:value`);
+    enableVarHighlight(valueInput);
     if (opts.multiline) queueMicrotask(() => autoGrow(valueInput as HTMLTextAreaElement));
 
     line.append(keyInput, valueInput);

@@ -490,10 +490,11 @@ func (hb *harness) responseText(t *testing.T) string {
 	return hb.text(t, ".response-body")
 }
 
-// shot 截图存到 e2e/artifacts，作为交付时的视觉证据。
+// shot 截图存到 e2e/artifacts。默认不存：截图只在需要视觉核对（改界面、发版前
+// 更新 README/docs 截图）时才有用，平时每轮几十张只是噪音，用 MYGO_E2E_SHOTS=1 打开。
 func (hb *harness) shot(t *testing.T, name string) {
 	t.Helper()
-	if artDir == "" {
+	if artDir == "" || os.Getenv("MYGO_E2E_SHOTS") != "1" {
 		return
 	}
 	png, err := hb.client.Capture(hb.win)

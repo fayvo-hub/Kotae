@@ -23,6 +23,7 @@ import {
 import { System } from "../mygo";
 import { CurlError, parseCurl } from "../curl";
 import { scriptStepsPanel } from "./scriptSteps";
+import { enableVarHighlight } from "./varTokens";
 import {
   METHODS,
   type BodyMode,
@@ -35,7 +36,6 @@ import {
 import {
   formatBytes,
   interpolate,
-  lookupVar,
   pathVarNames,
   prettyJSON,
   uid,
@@ -135,21 +135,6 @@ function urlBar(tab: Tab): HTMLElement {
     },
   });
 
-  // 变量高亮层：与输入框共用字体与内边距，输入框文字设为透明确保留光标。
-  const mirrorInner = el("div", { class: "url-mirror-inner" });
-  const mirror = el("div", {
-    class: "url-mirror",
-    attr: { "aria-hidden": "true" },
-  });
-  mirror.append(mirrorInner);
-
-  const paintHighlight = (): void => {
-    mirrorInner.replaceChildren(...urlTokens(urlInput.value));
-    urlInput.title = urlTitle(urlInput.value);
-  };
-  const syncHighlightScroll = (): void => {
-    mirrorInner.style.transform = `translateX(${-urlInput.scrollLeft}px)`;
-  };
   const urlInput = el("input", {
     class: "url-input",
     attr: {
@@ -161,8 +146,6 @@ function urlBar(tab: Tab): HTMLElement {
     on: {
       input: () => {
         setUrlInvalid(urlInput, false);
-        paintHighlight();
-        syncHighlightScroll();
       },
       paste: (ev) => {
         const text = ev.clipboardData?.getData("text") ?? "";
@@ -185,7 +168,6 @@ function urlBar(tab: Tab): HTMLElement {
       // 协议在发送时按解析后的地址兜底（见 util.ensureScheme）。
       // 必须写回自己的标签：切换标签时旧输入框被移除也会触发一次 blur，
       // 那时 activeTab 已经是新标签了。
-      scroll: () => syncHighlightScroll(),
       blur: () => {
         const raw = urlInput.value;
         if (!raw.trim()) return;
@@ -201,8 +183,8 @@ function urlBar(tab: Tab): HTMLElement {
     },
   });
   urlInput.value = tab.request.url;
-  paintHighlight();
   enableVarAssist(urlInput, `url:${tab.id}`);
+  enableVarHighlight(urlInput);
 
   const streaming = isStreaming(tab);
   // 普通请求发送中按钮原地变「取消」，流式连接建立后变「断开」。
@@ -244,49 +226,12 @@ function urlBar(tab: Tab): HTMLElement {
   fill(
     bar,
     el("div", { class: "url-method" }, protocolSelect, methodSelect),
-    el("div", { class: "url-field" }, el("div", { class: "url-input-wrap" }, mirror, urlInput), unresolvedBadge(tab)),
+    el("div", { class: "url-field" }, el("div", { class: "url-input-wrap" }, urlInput), unresolvedBadge(tab)),
     // 与顶栏、快捷键重复的动作不在这里重复放：导入 cURL 在顶栏与 Ctrl+I，
     // 复制 cURL 走代码片段（选 cURL）或 Ctrl+Shift+C。
     el("div", { class: "url-actions" }, saveBtn, snippetBtn, sendBtn),
   );
   return bar;
-}
-
-/** 把地址拆成普通文本与变量片段，变量片段单独上色。 */
-function urlTokens(text: string): Node[] {
-  const out: Node[] = [];
-  const re = /\{\{\s*([^{}]+?)\s*\}\}/g;
-  const scope = storeScope();
-  let last = 0;
-  for (const m of text.matchAll(re)) {
-    const at = m.index ?? 0;
-    if (at > last) out.push(document.createTextNode(text.slice(last, at)));
-    const name = m[1] ?? "";
-    const value = lookupVar(name, scope);
-    out.push(
-      el("span", {
-        class: `url-var${value === undefined ? " missing" : ""}`,
-        text: m[0],
-      }),
-    );
-    last = at + m[0].length;
-  }
-  if (last < text.length) out.push(document.createTextNode(text.slice(last)));
-  return out;
-}
-
-/** 地址栏悬停提示：完整地址 + 每个变量的解析值。 */
-function urlTitle(text: string): string {
-  const trimmed = text.trim();
-  if (!trimmed) return "输入请求地址，支持 {{变量}} 与直接粘贴 cURL";
-  const lines = [`完整地址：${trimmed}`];
-  const scope = storeScope();
-  const names = [...new Set([...trimmed.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)].map((m) => m[1] ?? ""))];
-  for (const name of names) {
-    const value = lookupVar(name, scope);
-    lines.push(value === undefined ? `{{${name}}} = 未定义` : `{{${name}}} = ${value}`);
-  }
-  return lines.join("\n");
 }
 
 function setUrlInvalid(input: HTMLInputElement, invalid: boolean): void {
@@ -690,6 +635,7 @@ function bodyPane(tab: Tab): HTMLElement {
   });
   area.value = tab.request.body;
   enableVarAssist(area, `body:${tab.id}`);
+  enableVarHighlight(area);
 
   const status = el("div", { class: "pane-status" });
   const updateJsonStatus = (value: string): void => {
@@ -738,6 +684,7 @@ function graphqlBodyPane(tab: Tab): HTMLElement {
   });
   query.value = tab.request.body;
   enableVarAssist(query, `gql:${tab.id}`);
+  enableVarHighlight(query);
 
   const vars = el("textarea", {
     class: "code-input graphql-vars",

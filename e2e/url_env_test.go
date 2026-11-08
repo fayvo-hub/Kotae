@@ -96,26 +96,11 @@ func TestURLTemplate(t *testing.T) {
 		t.Fatalf("失焦后地址被改写：%q", value)
 	}
 
-	// 2) 变量上色 + 悬停提示（变量放路径里，别污染查询参数表格）。
+	// 2) 变量高亮：{{}} 由镜像层单独上色，悬停出解析值浮层。
 	h.typeInto(t, ".url-input", "{{baseUrl}}/echo/{{nope}}")
-	var report string
-	h.eval(t, `(() => {
-		const vars = [...document.querySelectorAll('.url-var')];
-		return JSON.stringify({
-			text: vars.map(v => v.textContent),
-			missing: vars.filter(v => v.classList.contains('missing')).map(v => v.textContent),
-			title: document.querySelector('.url-input').title,
-		});
-	})()`, &report)
-	if !strings.Contains(report, `"text":["{{baseUrl}}","{{nope}}"]`) {
-		t.Fatalf("变量没有单独高亮：%s", report)
-	}
-	if !strings.Contains(report, `"missing":["{{nope}}"]`) {
-		t.Fatalf("未定义变量没有标红：%s", report)
-	}
-	if !strings.Contains(report, "{{baseUrl}} = http://127.0.0.1:") {
-		t.Fatalf("悬停提示缺解析值：%s", report)
-	}
+	assertVarsHighlighted(t, ".url-input", 2, "{{nope}}")
+	assertVarTip(t, ".url-input", 0, "{{baseUrl}}", "环境变量", "http://127.0.0.1:")
+	assertVarTip(t, ".url-input", 1, "{{nope}}", "未定义", "发送时会原样保留")
 }
 
 // 协议写在变量外面的旧数据：发送时按变量值纠正，不拼出双协议。

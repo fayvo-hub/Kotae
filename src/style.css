@@ -2074,9 +2074,7 @@ body.resizing-row * {
   background: transparent;
   font-family: var(--mono);
   font-size: var(--fs-md);
-  /* 文字由高亮层绘制，这里只留光标与选区。 */
-  color: transparent;
-  caret-color: var(--text);
+  color: var(--text);
 }
 
 .url-input:focus {
@@ -2088,39 +2086,131 @@ body.resizing-row * {
   font-family: var(--sans);
 }
 
-.url-input::selection {
+/* ---- 变量高亮与悬停浮层（varTokens.ts，地址栏 / 参数值 / 请求体 / 认证字段共用） ----
+   输入框里的 {{变量}} 由镜像层上色，镜像照抄输入框的字体、内边距与边框宽度，
+   所以两者逐像素重合；镜像本身不吃鼠标事件，浮层靠输入框自己的 mousemove 定位。 */
+
+.var-host {
+  position: relative;
+}
+
+.var-mirror {
+  position: absolute;
+  z-index: 2;
+  display: none;
+  overflow: hidden;
+  border-style: solid;
+  border-color: transparent;
+  background: transparent;
+  /* 镜像与输入框逐字对齐后只负责画颜色，不能抢焦点或挡光标。 */
+  pointer-events: none;
+  color: var(--text);
+}
+
+.var-mirror.on {
+  display: block;
+}
+
+/* 单行输入框的垂直居中由 flex 完成，与原生 input 的行为一致。 */
+.var-mirror.on.single {
+  display: flex;
+  align-items: center;
+}
+
+.var-inner {
+  white-space: inherit;
+  will-change: transform;
+}
+
+.var-token {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  border-radius: var(--radius-xs);
+}
+
+.var-token.missing {
+  color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 13%, transparent);
+}
+
+/* 文字透明，只保留光标与选区；高亮由镜像画在上层。 */
+.var-input {
+  color: transparent;
+  caret-color: var(--text);
+}
+
+.var-input::selection {
   background: var(--accent-soft);
   color: transparent;
 }
 
-.url-mirror {
-  position: absolute;
-  inset: 0;
+/* 变量浮层：变量名 + 来源标签 + 解析值。 */
+.var-tip {
+  position: fixed;
+  z-index: 210;
   display: flex;
-  align-items: center;
-  overflow: hidden;
-  padding: 0 10px;
-  font-family: var(--mono);
-  font-size: var(--fs-md);
-  white-space: pre;
-  color: var(--text);
+  flex-direction: column;
+  gap: 5px;
+  max-width: 340px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity var(--speed), transform var(--speed);
   pointer-events: none;
 }
 
-.url-mirror-inner {
-  will-change: transform;
+.var-tip.on {
+  opacity: 1;
+  transform: none;
 }
 
-.url-var {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+.var-tip-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.var-tip-name {
+  padding: 1px 5px;
   border-radius: var(--radius-xs);
-  padding: 1px 0;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
 }
 
-.url-var.missing {
+.var-tip-tag {
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  line-height: 16px;
+}
+
+.var-tip-tag.missing {
+  border-color: color-mix(in srgb, var(--bad) 45%, transparent);
   color: var(--bad);
-  background: color-mix(in srgb, var(--bad) 14%, transparent);
+}
+
+.var-tip-value {
+  max-height: 168px;
+  overflow: auto;
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.var-tip-value.missing {
+  font-family: var(--sans);
+  color: var(--text-3);
 }
 
 .url-badge {
