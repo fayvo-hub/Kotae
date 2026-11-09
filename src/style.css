@@ -4001,12 +4001,26 @@ textarea.kv-value {
 
 .json-key {
   color: var(--redirect);
+  /* 值可能是一整串没有空格的长文本（URL 编码、内嵌 JSON、base64）：
+     key 必须保住自己的宽度，否则会被 flex 挤成单字一列竖着排。
+     超过窗口六成时才折行，避免超长 key 把值挤到看不见。 */
+  flex: 0 0 auto;
+  max-width: 60%;
   word-break: break-word;
   user-select: text;
 }
 
 .json-colon {
+  flex: 0 0 auto;
   color: var(--text-3);
+}
+
+.json-value {
+  /* 长值占满剩余宽度并在任意位置折行（换行后仍对齐到值的起点），
+     不把行撑出横向滚动条。 */
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .json-punct {

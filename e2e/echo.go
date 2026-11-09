@@ -44,6 +44,17 @@ func StartEcho() *Echo {
 			},
 		})
 	})
+	// /longvalue 用来验证结构化视图里超长值不会把 key 挤成一列：
+	// 值是一整串没有空格的转义 JSON（真实接口里常见的 URL 编码大参数）。
+	mux.HandleFunc("/longvalue", func(w http.ResponseWriter, r *http.Request) {
+		inner := `{"class":"server","method":"trans","param_array":[{"admin_id":"679",` +
+			`"key":"{{SECRET_5m2qk8vd}}","requestdata":"o%7B%22c%22%3A%22user%22%2C%22a%22%3A%22index%22%7D"}],` +
+			`"rpc_msg_id":"66229d658fee14d0671bc8711e693412"}`
+		writeJSON(w, http.StatusOK, map[string]any{
+			"command": inner,
+			"detail":  map[string]any{"state": true},
+		})
+	})
 	mux.HandleFunc("/echo", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		headers := map[string]string{}
