@@ -79,7 +79,7 @@ func addPaneStep(t *testing.T, phase, kind string) {
 	if !ok {
 		t.Fatalf("找不到「%s」的添加按钮", title)
 	}
-	h.wait(t, "添加操作菜单展开", `!!document.querySelector('.ctx-menu')`)
+	h.wait(t, "添加操作菜单展开", `!!document.querySelector('.ctx-menu .env-menu-item')`)
 	clickMenuItem(t, kind)
 	h.wait(t, "操作行出现", fmt.Sprintf(`document.querySelectorAll('.step-row').length === %d`, before+1))
 }
@@ -117,7 +117,7 @@ func clearGlobalSteps(t *testing.T) {
 				break
 			}
 			h.click(t, ".settings-sub .step-row .step-more")
-			h.wait(t, "行菜单展开", `!!document.querySelector('.ctx-menu')`)
+			h.wait(t, "行菜单展开", `!!document.querySelector('.ctx-menu .env-menu-item')`)
 			clickMenuItem(t, "删除")
 			if h.exists(t, ".prompt-dialog") {
 				h.clickContaining(t, ".prompt-dialog .btn", "删除")

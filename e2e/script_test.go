@@ -124,7 +124,7 @@ func addStep(t *testing.T, phase, kind string) int {
 	t.Helper()
 	before := h.count(t, ".step-row")
 	h.click(t, ".step-add")
-	h.wait(t, "添加操作菜单展开", `!!document.querySelector('.ctx-menu')`)
+	h.wait(t, "添加操作菜单展开", `!!document.querySelector('.ctx-menu .env-menu-item')`)
 	clickMenuItem(t, kind)
 	h.wait(t, "操作行出现", fmt.Sprintf(`document.querySelectorAll('.step-row').length === %d`, before+1))
 	return before + 1
@@ -148,9 +148,15 @@ func fillStepSource(t *testing.T, index int, code string) {
 // pickStepLibrary 在第 index 行里选中脚本库中的某条脚本。
 func pickStepLibrary(t *testing.T, index int, name string) {
 	t.Helper()
-	sel := fmt.Sprintf(".step-row:nth-child(%d) .step-picker .select", index)
-	h.wait(t, "脚本库下拉就绪", fmt.Sprintf(`!!document.querySelector(%s)`, jsString(sel)))
-	h.pickSelect(t, sel, name)
+	row := fmt.Sprintf(".step-row:nth-child(%d)", index)
+	// 下拉框收起是同步的，但行摘要靠 store 改动后的重绘才更新（重绘走 requestAnimationFrame），
+	// 所以这里要等摘要真的变过来，不能收起就断言。
+	h.wait(t, "脚本库下拉就绪", fmt.Sprintf(`!!document.querySelector(%s)`, jsString(row+" .step-picker .select")))
+	h.pickSelect(t, row+" .step-picker .select", name)
+	h.wait(t, "行摘要显示所选脚本", fmt.Sprintf(`(() => {
+  const hint = document.querySelector(%s);
+  return !!hint && (hint.textContent || '').trim() === %s;
+})()`, jsString(row+" .step-hint"), jsString(name)))
 }
 
 // stepToggles 关掉 / 打开第 index 行（从 1 开始）。
@@ -163,7 +169,7 @@ func stepToggles(t *testing.T, index int) {
 func stepMenu(t *testing.T, index int, label string) {
 	t.Helper()
 	h.click(t, fmt.Sprintf(".step-row:nth-child(%d) .step-more", index))
-	h.wait(t, "行菜单展开", `!!document.querySelector('.ctx-menu')`)
+	h.wait(t, "行菜单展开", `!!document.querySelector('.ctx-menu .env-menu-item')`)
 	clickMenuItem(t, label)
 }
 
