@@ -54,6 +54,9 @@ function firstLine(text: string): string {
 
 function summaryOf(step: ScriptStep): string {
   if (step.kind === "script") {
+    // 起了名就用名字：日志里同一行也是这个名字，两边对得上。
+    const name = step.note?.trim();
+    if (name) return name;
     const line = firstLine(step.source ?? "");
     return line.length > 80 ? `${line.slice(0, 80)}…` : line;
   }
@@ -233,7 +236,30 @@ export function scriptStepsPanel(spec: ScriptStepsSpec): HTMLElement {
   /** 展开后的内容：脚本给编辑框，脚本库给下拉，等待时间给毫秒输入。 */
   const bodyOf = (step: ScriptStep, hint: HTMLElement): HTMLElement[] => {
     if (step.kind === "script") {
+      // 名称写在代码框上方：一行里的脚本可能干不同的事，光看代码首行认不出来。
+      const nameInput = el("input", {
+        class: "text-input step-name",
+        attr: {
+          type: "text",
+          maxlength: "60",
+          placeholder: "可留空，留空时用代码首行",
+          "aria-label": `${KIND_LABEL[step.kind]}名称`,
+        },
+        on: {
+          input: () => {
+            patchStep(step.id, { note: nameInput.value }, true);
+            hint.textContent = summaryOf({ ...step, note: nameInput.value });
+          },
+        },
+      });
+      nameInput.value = step.note ?? "";
       return [
+        el(
+          "div",
+          { class: "step-name-row" },
+          el("span", { class: "step-name-label", text: "名称" }),
+          nameInput,
+        ),
         scriptCodeArea({
           source: step.source ?? "",
           phase: spec.phase,

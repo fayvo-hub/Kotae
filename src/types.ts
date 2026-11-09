@@ -101,7 +101,10 @@ export interface ScriptStep {
   enabled: boolean;
   /** kind 为 script 时的源码。 */
   source?: string;
-  /** 行标题右侧的一句话说明（Apifox 里「脚本 console.log(1);」那一段）。 */
+  /**
+   * 内联脚本的名称（对应列表展开体里的「名称」输入框）：行摘要与执行日志的步骤名都用它，
+   * 留空时退回源码首行。脚本库 / 等待时间这两类不用这个字段。
+   */
   note?: string;
   /** kind 为 library 时引用的库脚本 id。 */
   libraryId?: string;

@@ -2606,6 +2606,25 @@ body.resizing-row * {
   border-top: 1px solid var(--border);
 }
 
+/* 脚本行展开体顶部的名称输入：同一层里的几个脚本可能干不同的事，名字也进执行日志。 */
+.step-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 10px 0;
+}
+
+.step-name-label {
+  flex: 0 0 auto;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+.step-name-row .step-name {
+  flex: 0 1 280px;
+  min-width: 0;
+}
+
 /* 脚本行展开后的代码区：左边写代码，右边常驻片段栏。 */
 .script-code {
   display: grid;
