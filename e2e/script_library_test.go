@@ -291,10 +291,17 @@ func TestScriptsPersistAcrossRestart(t *testing.T) {
 	h.openRequest(t, reqName)
 
 	openGlobalSettings(t)
-	openGlobalSettings(t)
+	openStepsPane(t, "pre")
+	addPaneStep(t, "pre", "脚本")
+	fillPaneSource(t, "pre", 1, `console.log("persist-global");`)
+	h.clearOverlays(t)
+
+	// 集合层的操作写在库里的 settings 列，也要跟着重启活下来；
+	// 顺带把库引用落在这一层（全局层不允许引用脚本库）。
+	openSharedSettings(t, colName)
 	openStepsPane(t, "pre")
 	addPaneStep(t, "pre", "脚本库")
-	h.wait(t, "全局脚本库行就绪", `!!document.querySelector('.settings-sub .step-picker .select')`)
+	h.wait(t, "集合脚本库行就绪", `!!document.querySelector('.settings-sub .step-picker .select')`)
 	var picked bool
 	h.eval(t, `(() => {
   const row = document.querySelector('.settings-sub .step-picker .select');
@@ -304,18 +311,11 @@ func TestScriptsPersistAcrossRestart(t *testing.T) {
   return true;
 })()`, &picked)
 	if !picked {
-		t.Fatal("全局操作的脚本库下拉没有触发器")
+		t.Fatal("集合共享设置的脚本库下拉没有触发器")
 	}
 	h.wait(t, "下拉展开", `!!document.querySelector('.select-menu .select-option')`)
 	h.clickContaining(t, ".select-menu .select-option", "持久库脚本")
 	h.wait(t, "下拉收起", `!document.querySelector('.select-menu')`)
-	h.clearOverlays(t)
-
-	// 集合层的操作写在库里的 settings 列，也要跟着重启活下来。
-	openSharedSettings(t, colName)
-	openStepsPane(t, "pre")
-	addPaneStep(t, "pre", "脚本")
-	fillPaneSource(t, "pre", 1, `console.log("persist-collection");`)
 	h.clearOverlays(t)
 
 	openStepsTab(t, "pre")
@@ -345,7 +345,7 @@ func TestScriptsPersistAcrossRestart(t *testing.T) {
 	openStepsPane(t, "pre")
 	var globalRows string
 	h.eval(t, `[...document.querySelectorAll('.settings-sub .step-row')].map(row => (row.querySelector('.step-hint') || {}).textContent || '').join('|')`, &globalRows)
-	if !strings.Contains(globalRows, "持久库脚本") {
+	if !strings.Contains(globalRows, "persist-global") {
 		t.Fatalf("重启后全局的前置操作丢了：%q", globalRows)
 	}
 	h.clearOverlays(t)
@@ -354,8 +354,8 @@ func TestScriptsPersistAcrossRestart(t *testing.T) {
 	openStepsPane(t, "pre")
 	var colRows string
 	h.eval(t, `[...document.querySelectorAll('.settings-sub .step-row')].map(row => (row.querySelector('.step-hint') || {}).textContent || '').join('|')`, &colRows)
-	if !strings.Contains(colRows, "persist-collection") {
-		t.Fatalf("重启后集合的前置操作丢了：%q", colRows)
+	if !strings.Contains(colRows, "持久库脚本") {
+		t.Fatalf("重启后集合的前置操作（引用库脚本）丢了：%q", colRows)
 	}
 	h.clearOverlays(t)
 
@@ -367,6 +367,45 @@ func TestScriptsPersistAcrossRestart(t *testing.T) {
 	}
 
 	deleteCollectionViaMenu(t, colName)
+}
+
+// 全局操作只给「脚本」与「等待时间」：那段代码对所有请求生效，必须能在原地看到、
+// 就地改，不能指向库里随时会被改掉的条目。集合 / 文件夹 / 请求层的列表照旧可选。
+func TestGlobalStepsRejectLibrary(t *testing.T) {
+	clearGlobalSteps(t)
+	h.clearOverlays(t)
+
+	menuItems := func() string {
+		t.Helper()
+		var joined string
+		h.eval(t, `[...document.querySelectorAll('.ctx-menu .env-menu-item .env-menu-name')]
+			.map(node => (node.textContent || '').trim()).join(',')`, &joined)
+		return joined
+	}
+
+	openGlobalSettings(t)
+	openStepsPane(t, "pre")
+	openSubStepMenu(t, "前置操作")
+	if got := menuItems(); got != "脚本,等待时间" {
+		t.Fatalf("全局操作的添加菜单只该有脚本与等待时间，实际 %q", got)
+	}
+	h.pressKeys(t, "Escape", false, false)
+	h.wait(t, "全局添加菜单收起", `!document.querySelector('.ctx-menu')`)
+	if got := h.count(t, ".settings-sub .step-row"); got != 0 {
+		t.Fatalf("全局操作不该被加上任何行，实际 %d 行", got)
+	}
+	h.clearOverlays(t)
+
+	// 请求层不受影响：三选一里的「脚本库」照常能加。
+	newTab(t)
+	openStepsTab(t, "pre")
+	h.click(t, ".step-add")
+	h.wait(t, "请求层添加菜单展开", `!!document.querySelector('.ctx-menu .env-menu-item')`)
+	if got := menuItems(); got != "脚本,脚本库,等待时间" {
+		t.Fatalf("请求层的添加菜单该有三项，实际 %q", got)
+	}
+	h.pressKeys(t, "Escape", false, false)
+	h.wait(t, "请求层添加菜单收起", `!document.querySelector('.ctx-menu')`)
 }
 
 // 脚本输出收在响应区的「控制台」页签里：默认停在响应体，徽标提示有输出，

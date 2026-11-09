@@ -1,4 +1,5 @@
 // 前置 / 后置操作列表：请求页签、集合与文件夹的共享设置、全局脚本三处共用。
+// 全局层多加一条约束：只能就地写脚本或等待，不允许引用脚本库（allowLibrary: false）。
 //
 // 每一行是一步操作（内联脚本 / 脚本库引用 / 等待时间），行内就地展开编辑。
 // 顺序就是执行顺序，靠行右侧「…」里的上移/下移调，不做拖拽——拖拽要维护
@@ -27,6 +28,12 @@ export interface ScriptStepsSpec {
   steps: () => ScriptSteps;
   /** 写回：quiet 为真时不重绘全局（编辑源码时用，避免光标丢失）。 */
   onChange: (next: ScriptSteps, quiet: boolean) => void;
+  /**
+   * 是否允许「脚本库」这一步。全局层传 false：那段代码对所有请求生效，
+   * 必须能在原地看到、就地改，不能指向库里随时会被别人改掉的条目。
+   * 默认允许；已有引用库的步骤照常渲染与执行，不删用户数据。
+   */
+  allowLibrary?: boolean;
 }
 
 const KIND_LABEL: Record<ScriptStep["kind"], string> = {
@@ -329,7 +336,9 @@ export function scriptStepsPanel(spec: ScriptStepsSpec): HTMLElement {
           click: (ev: MouseEvent) =>
             openContextMenu(ev, [
               { label: "脚本", hint: "就地写代码", run: () => addStep("script") },
-              { label: "脚本库", hint: "引用脚本库里的脚本", run: () => addStep("library") },
+              ...(spec.allowLibrary === false
+                ? []
+                : [{ label: "脚本库", hint: "引用脚本库里的脚本", run: () => addStep("library") }]),
               { label: "等待时间", hint: "停顿一会儿再继续", run: () => addStep("wait") },
             ]),
         },

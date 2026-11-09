@@ -638,7 +638,9 @@ export function globalsSection(): HTMLElement {
   });
 }
 
-/** 设置里的「全局操作」：所有请求发送前 / 拿到响应后都会跑的那两串。 */
+/** 设置里的「全局操作」：所有请求发送前 / 拿到响应后都会跑的那两串。
+ * 只给「脚本」与「等待时间」：全局脚本必须能在原地看到、就地改，不接脚本库引用。
+ */
 function globalScriptsSection(): HTMLElement {
   const box = el("div", { class: "stack" });
   for (const phase of ["pre", "post"] as const) {
@@ -658,6 +660,7 @@ function globalScriptsSection(): HTMLElement {
           phase,
           steps: () => globalSteps(),
           onChange: (next, quiet) => setGlobalSteps(next, quiet),
+          allowLibrary: false,
         }),
       ),
     );
