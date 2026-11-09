@@ -1074,7 +1074,8 @@ export function importCurlText(text: string): void {
   void (async () => {
     try {
       const result = parseCurl(text);
-      setPendingCurl({ request: result.request, warnings: result.warnings });
+      // 带上原文：浮层里的输入框直接回填，用户不用把命令再粘一次。
+      setPendingCurl({ request: result.request, warnings: result.warnings, source: text });
     } catch (err) {
       if (err instanceof CurlError) {
         const where = err.line > 0 ? `第 ${err.line} 行` : "命令";
