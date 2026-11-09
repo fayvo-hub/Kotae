@@ -27,8 +27,14 @@ export function warmUpFirstPaint(): void {
     el(
       "div",
       { class: "dialog-body" },
-      // 脚本库编辑器：等宽文本域 + 可折叠的 API 速查。
-      scriptSourceField({ source: "", phase: "pre", label: "预热", onInput: () => {} }),
+      // 脚本库编辑器：等宽文本域 + 高亮镜像层 + 可折叠的 API 速查。
+      // 源码给一段带注释/字符串/关键字/内置对象的样本，高亮的着色也一并预热。
+      scriptSourceField({
+        source: `// 预热\nconst token = pm.environment.get("baseUrl");`,
+        phase: "pre",
+        label: "预热",
+        onInput: () => {},
+      }),
       scriptApiDetails(),
       // 请求体那种裸的等宽文本域。
       el("textarea", { class: "code-input", attr: { spellcheck: "false", "aria-label": "预热" } }),

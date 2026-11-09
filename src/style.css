@@ -2213,6 +2213,70 @@ body.resizing-row * {
   color: var(--text-3);
 }
 
+/* ---- 脚本源码高亮（镜像层，与变量高亮同一套做法） ---- */
+
+.code-host {
+  position: relative;
+}
+
+.code-mirror {
+  position: absolute;
+  z-index: 2;
+  display: none;
+  overflow: hidden;
+  border-style: solid;
+  border-color: transparent;
+  background: transparent;
+  /* 镜像只负责上色，不能抢焦点、挡光标或挡住 resize 手柄。 */
+  pointer-events: none;
+  color: var(--text);
+}
+
+.code-mirror.on {
+  display: block;
+}
+
+.code-inner {
+  white-space: inherit;
+  will-change: transform;
+}
+
+/* 文字透明，光标与选区仍由文本域自己画。着色片段一律不改字重、不加斜体，
+   否则字宽变化会让镜像与文本域的字符错位。 */
+.code-input.hl-input {
+  color: transparent;
+  caret-color: var(--text);
+}
+
+.code-input.hl-input::selection {
+  background: var(--accent-soft);
+  color: transparent;
+}
+
+.hl-comment {
+  color: var(--text-3);
+}
+
+.hl-str {
+  color: var(--m-get);
+}
+
+.hl-num {
+  color: var(--m-post);
+}
+
+.hl-kw {
+  color: var(--m-put);
+}
+
+.hl-builtin {
+  color: var(--redirect);
+}
+
+.hl-fn {
+  color: var(--accent);
+}
+
 .url-badge {
   display: flex;
   align-items: center;

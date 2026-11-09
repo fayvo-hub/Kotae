@@ -2,6 +2,7 @@
 // 只负责渲染与事件转发，脚本存在哪、什么时候落库由调用方决定。
 
 import { el } from "./dom";
+import { enableCodeHighlight } from "./codeHighlight";
 import { snippetRail } from "./scriptSnippets";
 import type { ScriptPhase } from "../script";
 
@@ -53,7 +54,10 @@ function codeArea(spec: ScriptSourceSpec): HTMLElement {
     on: { input: () => spec.onInput(area.value) },
   });
   area.value = spec.source;
-  return el("div", { class: "script-code" }, area, snippetRail(spec.phase, () => area));
+  const box = el("div", { class: "script-code" }, area, snippetRail(spec.phase, () => area));
+  // 高亮要先有父节点，所以等包好 .script-code 之后再挂。
+  enableCodeHighlight(area);
+  return box;
 }
 
 /** 一条脚本的源码编辑框：标题 + 带片段栏的等宽文本域（脚本库与全局脚本用它）。 */
