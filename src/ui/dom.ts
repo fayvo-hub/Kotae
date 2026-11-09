@@ -111,6 +111,10 @@ export const icons = {
   moon: svg('<path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/>'),
   auto: svg('<circle cx="12" cy="12" r="8"/><path d="M12 4v16"/><path d="M12 4a8 8 0 0 1 0 16" fill="currentColor" stroke="none" opacity=".25"/>'),
   dot: svg('<circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/>'),
+  // 「更多操作」入口：三个实心点。单个点是状态标记（连接中/WebSocket），不是动作，别混用。
+  more: svg(
+    '<circle cx="5.5" cy="12" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="2" fill="currentColor" stroke="none"/>',
+  ),
   info: svg('<circle cx="12" cy="12" r="8"/><path d="M12 11v5"/><path d="M12 8.2v.2"/>'),
   warn: svg('<path d="M12 4.5 21 19.5H3Z"/><path d="M12 10v4"/><path d="M12 17v.2"/>'),
   filter: svg('<path d="M4 6h16"/><path d="M7 12h10"/><path d="M10 18h4"/>'),

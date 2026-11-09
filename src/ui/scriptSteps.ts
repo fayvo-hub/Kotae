@@ -201,7 +201,7 @@ export function scriptStepsPanel(spec: ScriptStepsSpec): HTMLElement {
           },
         },
       },
-      icon("dot"),
+      icon("more"),
     );
 
     const head = el(

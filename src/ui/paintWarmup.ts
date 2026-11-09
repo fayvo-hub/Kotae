@@ -97,7 +97,7 @@ export function warmUpFirstPaint(): void {
               el("span", { class: "step-hint", text: "预热" }),
               el("span", { class: "spacer" }),
               el("span", { class: "step-switch" }, el("input", { attr: { type: "checkbox" } })),
-              el("button", { class: "icon-btn mini step-more", attr: { type: "button" } }, icon("dot")),
+              el("button", { class: "icon-btn mini step-more", attr: { type: "button" } }, icon("more")),
               el("button", { class: "icon-btn mini step-expand open", attr: { type: "button" } }, icon("chevron")),
             ),
             el(

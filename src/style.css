@@ -2586,6 +2586,13 @@ body.resizing-row * {
   background: var(--surface);
 }
 
+/* 行尾的「更多操作」入口：mini 按钮默认 13px 图标，三个点挤在一起只剩一团，这里提到 16px。
+   选择器要盖过 `.icon-btn.mini .ic` 的 13px，所以三个类写全。 */
+.icon-btn.mini.step-more .ic {
+  width: 16px;
+  height: 16px;
+}
+
 /* 展开箭头：收起时朝右，展开时朝下。 */
 .step-expand .ic {
   transition: transform var(--speed);
