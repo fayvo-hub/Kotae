@@ -4382,7 +4382,9 @@ mark,
   justify-content: center;
   padding: 64px 20px 24px;
   background: var(--scrim);
-  backdrop-filter: blur(2px);
+  /* 不在这里用 backdrop-filter：Chromium 会为它单独合成一层并逐帧读回背景，
+     GPU 进程退化到软件渲染时，开关浮层会卡成几百毫秒一帧；遮罩本身有 42%~55%
+     的压暗，2px 模糊几乎看不出来，不值得这个代价。 */
   animation: fade-in 120ms ease-out;
   overflow-y: auto;
 }
