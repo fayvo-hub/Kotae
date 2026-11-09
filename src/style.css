@@ -334,11 +334,12 @@ kbd {
   opacity: 0.45;
 }
 
+/* 挂在 body 上的下拉：对话框里也有它（脚本库选择之类），层级要压过遮罩 100。 */
 .select-menu {
   position: fixed;
   top: 0;
   left: 0;
-  z-index: 60;
+  z-index: 250;
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -1318,12 +1319,13 @@ kbd {
   margin: 5px 4px;
   background: var(--border);
 }
-/* 标签页右键菜单：沿用手风琴菜单的排版，只把定位换成鼠标位置。 */
+/* 标签页右键菜单：沿用手风琴菜单的排版，只把定位换成鼠标位置。
+   共享设置、全局操作这些对话框里也用它，层级必须压过遮罩 100。 */
 .ctx-menu {
   position: fixed;
   top: 0;
   left: 0;
-  z-index: 60;
+  z-index: 250;
   min-width: 168px;
 }
 
