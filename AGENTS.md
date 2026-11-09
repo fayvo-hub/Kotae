@@ -1,6 +1,6 @@
 # AGENTS.md — Kotae
 
-纯本地的轻量级 Postman：Go 桌面壳（MyGo）+ 系统 webview 里的 Vite/TypeScript 前端，HTTP 请求由 Go 侧发出。单人维护、单包、Windows 为主，已发 0.2.1。
+纯本地的轻量级 Postman：Go 桌面壳（MyGo）+ 系统 webview 里的 Vite/TypeScript 前端，HTTP 请求由 Go 侧发出。单人维护、单包、Windows 为主，已发 0.2.2。
 
 AI 代理修改本仓库时的强制规则。与 `~/.pi/agent/AGENTS.md` 冲突时，**本文件优先**（本文件只能在此基础上收紧，唯一的放宽是「提交」一节，见下）。
 
