@@ -206,9 +206,8 @@ func TestUrlPasteCurlPrefillsDialog(t *testing.T) {
 
 // 导出入口在设置面板里（真正的写文件走系统保存对话框，交给手动验证）。
 func TestExportPostmanEntry(t *testing.T) {
-	h.clearOverlays(t)
-	h.pressKeys(t, ",", true, false)
-	h.wait(t, "设置面板打开", `!!document.querySelector('.settings-section')`)
+	h.openSettingsTab(t, "data")
+	h.wait(t, "设置面板打开", `!!document.querySelector('.settings-tabs')`)
 	var found bool
 	h.eval(t, `[...document.querySelectorAll('.btn')].some(b => (b.textContent || '').includes('导出为 Postman'))`, &found)
 	if !found {

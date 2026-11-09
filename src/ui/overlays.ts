@@ -1004,30 +1004,30 @@ function shortcutsSection(): HTMLElement {
   );
 }
 
-export function settingsDialog(): HTMLElement {
-  const body = el("div", { class: "stack settings-body" });
+/** 设置页的分类。id 同时写进 `data-tab`，样式与 e2e 都靠它定位。 */
+type SettingsTabId = "appearance" | "shortcuts" | "desktop" | "vars" | "steps" | "data" | "about";
 
+/**
+ * 当前选中的页签。改主题、改缩放会整块重建设置弹窗，所以记在模块里而不是 DOM 上；
+ * 同一会话内关掉再打开回到上次那一页。
+ */
+let settingsTab: SettingsTabId = "appearance";
+
+/** 「变量」页：全局变量 + 内置动态变量。 */
+function varsTab(): HTMLElement[] {
   const varList = el("div", { class: "var-list" });
   for (const d of DYNAMIC_VARS) {
     const row = el("div", { class: "var-row" });
     row.append(el("code", { text: `{{${d.name}}}` }), el("span", { class: "muted", text: d.desc }));
     varList.append(row);
   }
+  return [section("全局变量", globalsSection()), section("内置动态变量", varList)];
+}
 
+/** 「关于」页：版本与路径信息 + 更新检查。 */
+function aboutTab(): HTMLElement[] {
   const infoBox = el("div", { class: "info-box" });
   const versionLine = el("div", { class: "info-row" });
-
-  body.append(
-    section("外观", appearanceSection()),
-    section("快捷键", shortcutsSection()),
-    section("桌面", desktopSection()),
-    section("全局变量", globalsSection()),
-    section("全局操作", globalScriptsSection()),
-    section("内置动态变量", varList),
-    section("数据与备份", backupSection()),
-    section("更新", updateSection()),
-    section("关于", infoBox),
-  );
 
   void System.info().then((info) => {
     fill(
@@ -1070,6 +1070,73 @@ export function settingsDialog(): HTMLElement {
     fill(infoBox, versionLine, dirRow, dbRow, platformRow);
   });
 
+  return [infoBox, section("更新", updateSection())];
+}
+
+interface SettingsTabSpec {
+  id: SettingsTabId;
+  label: string;
+  icon: keyof typeof icons;
+  /** 这一页的内容块；单块且标题重复的就不包 h3。 */
+  build: () => HTMLElement[];
+}
+
+const SETTINGS_TABS: SettingsTabSpec[] = [
+  { id: "appearance", label: "外观", icon: "sun", build: () => [appearanceSection()] },
+  { id: "shortcuts", label: "快捷键", icon: "command", build: () => [shortcutsSection()] },
+  { id: "desktop", label: "桌面", icon: "sidebar", build: () => [desktopSection()] },
+  { id: "vars", label: "变量", icon: "globe", build: varsTab },
+  { id: "steps", label: "全局操作", icon: "code", build: () => [globalScriptsSection()] },
+  { id: "data", label: "数据与备份", icon: "file", build: () => [backupSection()] },
+  { id: "about", label: "关于", icon: "info", build: aboutTab },
+];
+
+/**
+ * 设置：左栏分类页签 + 右栏内容，两栏各自滚动。
+ *
+ * 以前是一条长列表从头滚到底，节数一多就得翻半天；现在按类分页，默认落在外观。
+ * 只挂载当前页签的内容（切走的页不留在 DOM 里），所以页面上的元素计数是干净的。
+ */
+export function settingsDialog(): HTMLElement {
+  const tabBar = el("nav", { class: "settings-nav", attr: { role: "tablist", "aria-label": "设置分类" } });
+  const pane = el("div", { class: "settings-content", attr: { role: "tabpanel" } });
+
+  const paint = (): void => {
+    for (const btn of tabBar.querySelectorAll<HTMLElement>(".settings-tab")) {
+      const on = btn.dataset.tab === settingsTab;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-selected", on ? "true" : "false");
+    }
+    const spec = SETTINGS_TABS.find((tab) => tab.id === settingsTab) ?? SETTINGS_TABS[0];
+    if (!spec) return;
+    pane.dataset.tab = spec.id;
+    fill(pane, ...spec.build());
+  };
+
+  for (const spec of SETTINGS_TABS) {
+    tabBar.append(
+      el(
+        "button",
+        {
+          class: "settings-tab",
+          data: { tab: spec.id },
+          attr: { type: "button", role: "tab", "aria-selected": "false" },
+          on: {
+            click: () => {
+              if (settingsTab === spec.id) return;
+              settingsTab = spec.id;
+              paint();
+            },
+          },
+        },
+        icon(spec.icon),
+        el("span", { text: spec.label }),
+      ),
+    );
+  }
+
+  paint();
+
   const footer = el("div", { class: "dialog-foot" });
   footer.append(
     el("span", { class: "spacer" }),
@@ -1081,7 +1148,7 @@ export function settingsDialog(): HTMLElement {
     }),
   );
 
-  return modal("设置", body, footer, 640);
+  return modal("设置", el("div", { class: "settings-tabs" }, tabBar, pane), footer, 760);
 }
 
 function section(title: string, content: HTMLElement): HTMLElement {

@@ -258,9 +258,9 @@ func TestToolbarButtonsWork(t *testing.T) {
 
 	// 设置按钮。
 	h.click(t, "[data-role='settings']")
-	h.wait(t, "设置打开", `!!document.querySelector('.settings-body')`)
+	h.wait(t, "设置打开", `!!document.querySelector('.settings-tabs')`)
 	h.clickText(t, ".dialog-foot button", "完成")
-	h.wait(t, "设置关闭", `!document.querySelector('.settings-body')`)
+	h.wait(t, "设置关闭", `!document.querySelector('.settings-tabs')`)
 
 	// 命令面板按钮。
 	h.click(t, "[data-role='palette']")

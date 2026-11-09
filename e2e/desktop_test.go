@@ -108,9 +108,8 @@ func readDesktopToggles(t *testing.T, out *[]bool) {
 
 // 设置面板里的桌面开关要能改、能落库、重启后保持。
 func TestDesktopPrefsToggle(t *testing.T) {
-	h.clearOverlays(t)
-	h.pressKeys(t, ",", true, false)
-	h.wait(t, "设置面板打开", `document.querySelectorAll('.desktop-toggle').length === 2`)
+	h.openSettingsTab(t, "desktop")
+	h.wait(t, "桌面开关就位", `document.querySelectorAll('.desktop-toggle').length === 2`)
 
 	var states []bool
 	readDesktopToggles(t, &states)
@@ -128,8 +127,8 @@ func TestDesktopPrefsToggle(t *testing.T) {
 	waitForCommit(t, h.userData+"/workspace.db", since)
 
 	h.restart(t)
-	h.pressKeys(t, ",", true, false)
-	h.wait(t, "重启后设置面板打开", `document.querySelectorAll('.desktop-toggle').length === 2`)
+	h.openSettingsTab(t, "desktop")
+	h.wait(t, "重启后桌面开关就位", `document.querySelectorAll('.desktop-toggle').length === 2`)
 	readDesktopToggles(t, &states)
 	if len(states) != 2 || !states[0] || states[1] {
 		t.Fatalf("重启后应该是「关闭到托盘=开、全局快捷键=关」，实际：%v", states)

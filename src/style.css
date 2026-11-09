@@ -2711,6 +2711,73 @@ body.resizing-row * {
   height: 13px;
 }
 
+/* 设置弹窗：左栏分类页签 + 右栏内容，两栏各自滚动（不再一条长列表滚到底）。 */
+.dialog-body:has(> .settings-tabs) {
+  display: flex;
+  padding: 0;
+  overflow: hidden;
+}
+
+.settings-tabs {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  flex: 1 1 auto;
+  height: min(520px, calc(100vh - 224px));
+  min-width: 0;
+}
+
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 8px;
+  border-right: 1px solid var(--border);
+  background: var(--surface-2);
+  overflow-y: auto;
+}
+
+.settings-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 9px;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font-size: var(--fs-md);
+  text-align: left;
+  white-space: nowrap;
+  transition: background var(--speed), color var(--speed);
+}
+
+.settings-tab .ic {
+  width: 13px;
+  height: 13px;
+  opacity: 0.8;
+}
+
+.settings-tab:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.settings-tab.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.settings-tab.active .ic {
+  color: var(--accent);
+  opacity: 1;
+}
+
+.settings-content {
+  min-width: 0;
+  padding: 14px 18px 18px;
+  overflow-y: auto;
+}
+
 /* 设置里的「全局操作」：两个阶段各一个小标题。 */
 .settings-sub {
   display: flex;

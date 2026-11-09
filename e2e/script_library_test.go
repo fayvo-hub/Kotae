@@ -37,12 +37,10 @@ func scriptLogHeads(t *testing.T) []string {
 	return strings.Split(joined, "\n")
 }
 
-// openGlobalSettings 打开设置弹窗。
+// openGlobalSettings 打开设置弹窗并直接落在「全局操作」页签。
 func openGlobalSettings(t *testing.T) {
 	t.Helper()
-	h.clearOverlays(t)
-	h.click(t, `[data-role="settings"]`)
-	h.wait(t, "设置弹窗打开", `!!document.querySelector('.settings-section')`)
+	h.openSettingsTab(t, "steps")
 }
 
 // openStepsPane 在当前可见的对话框里切到某一阶段的操作列表。

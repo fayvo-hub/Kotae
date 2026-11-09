@@ -408,6 +408,26 @@ func (hb *harness) clearToasts(t *testing.T) {
 	hb.eval(t, `(() => { const host = document.querySelector('.toasts'); if (host) host.replaceChildren(); return true })()`, nil)
 }
 
+// openSettingsTab 打开设置弹窗并切到指定页签（左栏分类），返回时该页签内容已挂上。
+// 设置是「左页签 + 右内容」两栏，只挂当前页签的内容，所以先切页签再断言。
+func (hb *harness) openSettingsTab(t *testing.T, id string) {
+	t.Helper()
+	hb.clearOverlays(t)
+	hb.pressKeys(t, ",", true, false)
+	hb.wait(t, "设置弹窗打开", `!!document.querySelector('.settings-tabs')`)
+	hb.clickSettingsTab(t, id)
+}
+
+// clickSettingsTab 在已打开的设置弹窗里切页签，等内容真的换成这一页再返回。
+func (hb *harness) clickSettingsTab(t *testing.T, id string) {
+	t.Helper()
+	hb.click(t, fmt.Sprintf(`.settings-tab[data-tab=%s]`, jsString(id)))
+	hb.wait(t, "设置切到页签 "+id, fmt.Sprintf(
+		`(() => { const pane = document.querySelector('.settings-content'); return !!pane && pane.dataset.tab === %s })()`,
+		jsString(id),
+	))
+}
+
 // openRequest 在侧边栏里点开一条固定用例。
 func (hb *harness) openRequest(t *testing.T, name string) {
 	t.Helper()

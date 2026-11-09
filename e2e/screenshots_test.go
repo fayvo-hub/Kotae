@@ -217,9 +217,9 @@ func TestScreenshots(t *testing.T) {
 	shotTo(t, dir, "07-palette")
 	h.clearOverlays(t)
 
-	// 08 设置：外观、全局变量、动态变量、数据备份与桌面开关。
+	// 08 设置：左栏分类页签 + 右栏内容（默认外观：主题、缩放、代码字号）。
 	h.pressKeys(t, ",", true, false)
-	h.wait(t, "设置面板", `document.querySelector('.settings-body') !== null`)
+	h.wait(t, "设置面板", `document.querySelector('.settings-tabs') !== null`)
 	shotTo(t, dir, "08-settings")
 	h.clearOverlays(t)
 

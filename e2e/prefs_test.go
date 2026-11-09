@@ -47,8 +47,7 @@ func clickShortcutEdit(t *testing.T, label string) {
 // 界面缩放走的是 WebView 的真实缩放，可视区域（CSS px）会随之变大变小；
 // 代码字号只影响代码区，通过 --fs-code 变量检查。
 func TestZoomAndCodeFontSize(t *testing.T) {
-	h.clearOverlays(t)
-	h.pressKeys(t, ",", true, false)
+	h.openSettingsTab(t, "appearance")
 	h.wait(t, "设置面板打开", `document.querySelectorAll('.stepper-field').length === 2`)
 
 	if got := stepperValue(t, 0); got != "100%" {
@@ -100,8 +99,7 @@ func TestZoomAndCodeFontSize(t *testing.T) {
 
 // 改一个快捷键应该立刻生效（不需要重启），「全部恢复默认」能撤回。
 func TestShortcutCustomize(t *testing.T) {
-	h.clearOverlays(t)
-	h.pressKeys(t, ",", true, false)
+	h.openSettingsTab(t, "shortcuts")
 	h.wait(t, "设置面板打开", `document.querySelectorAll('.shortcut-row').length > 0`)
 
 	if got := shortcutCombo(t, "新建请求"); got != "Ctrl+N" {
@@ -131,7 +129,7 @@ func TestShortcutCustomize(t *testing.T) {
 	}
 
 	// 全部恢复默认。
-	h.pressKeys(t, ",", true, false)
+	h.openSettingsTab(t, "shortcuts")
 	h.wait(t, "设置面板再次打开", `document.querySelectorAll('.shortcut-row').length > 0`)
 	h.clickText(t, ".link-btn", "全部恢复默认")
 	h.wait(t, "键位恢复默认", `(() => {
