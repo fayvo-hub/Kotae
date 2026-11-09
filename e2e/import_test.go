@@ -166,6 +166,44 @@ func TestImportPostmanAndHar(t *testing.T) {
 	}
 }
 
+// 地址栏粘贴整条 curl：导入浮层打开后，输入框里要带着那段命令，别让用户再粘一次。
+func TestUrlPasteCurlPrefillsDialog(t *testing.T) {
+	h.clearOverlays(t)
+	newTab(t)
+
+	curl := `curl -X POST 'https://httpbin.org/post' -H 'X-Paste: 1' --data-raw '{"a":1}'`
+	h.eval(t, fmt.Sprintf(`(() => {
+		const input = document.querySelector('.url-input');
+		const dt = new DataTransfer();
+		dt.setData('text/plain', %s);
+		input.focus();
+		input.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+		return true;
+	})()`, jsString(curl)), nil)
+
+	h.wait(t, "cURL 导入浮层打开", `!!document.querySelector('.curl-input')`)
+
+	var value string
+	h.eval(t, `document.querySelector('.curl-input').value`, &value)
+	if value != curl {
+		t.Fatalf("浮层输入框里没有带命令：%q", value)
+	}
+
+	// 有原文也要有解析结果，否则用户点不了「替换当前请求」。
+	if !h.exists(t, ".curl-result .preview-card") {
+		t.Fatalf("浮层里没有解析预览")
+	}
+
+	// 地址栏本身不该被塞进整条命令。
+	var url string
+	h.eval(t, `document.querySelector('.url-input').value`, &url)
+	if strings.Contains(url, "curl") {
+		t.Fatalf("地址栏被写入了整条命令：%q", url)
+	}
+
+	h.clearOverlays(t)
+}
+
 // 导出入口在设置面板里（真正的写文件走系统保存对话框，交给手动验证）。
 func TestExportPostmanEntry(t *testing.T) {
 	h.clearOverlays(t)
