@@ -863,6 +863,8 @@ function bindEvents(): void {
   window.addEventListener("mygo:rerender-response-body", scheduleRender);
   window.addEventListener("mygo:rerender-sidebar", scheduleRender);
   window.addEventListener("mygo:rerender-sidebar-body", scheduleRender);
+  // 逐字输入不重建请求面板（见 store.mutateDraft），标签条这类跟着输入变的小块单独刷新。
+  window.addEventListener("mygo:rerender-tabs", renderTabs);
 
   window.addEventListener("mygo:rerender-overlay", () => {
     saveOpen = false;

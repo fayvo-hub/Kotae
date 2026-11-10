@@ -375,6 +375,8 @@ export function enableVarAssist(target: HTMLInputElement | HTMLTextAreaElement, 
       // 元素被重绘换掉了（不是用户主动离开）：交给 resumeAssist 接手，不要收起。
       if (!target.isConnected) return;
       if (document.activeElement === target) return;
+      // 补全层已经跟着别的格子开了：这一格的延时不能把人家刚弹出的层关掉。
+      if (assistTarget && assistTarget !== target) return;
       hideAssist();
     }, 120);
   });

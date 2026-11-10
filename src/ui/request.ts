@@ -12,6 +12,7 @@ import {
   enabledStepCount,
   isStreaming,
   mutate,
+  mutateDraft,
   scriptLayers,
   send,
   setPendingCurl,
@@ -74,10 +75,24 @@ const COMMON_HEADERS = [
   "X-Api-Key",
 ];
 
+/** 子页签徽标的局部刷新入口，面板重建时由 tabStrip 重新挂上。 */
+let subtabBadges: (() => void) | null = null;
+
+/**
+ * 逐字输入后的局部刷新：徽标与标签条重画，输入框和已输入的文本原地不动。
+ *
+ * `tabsChanged` 由 store.mutateDraft 返回：未保存标记或标签名变了才需要重画标签条。
+ */
+function refreshChrome(tabsChanged: boolean): void {
+  subtabBadges?.();
+  if (tabsChanged) window.dispatchEvent(new CustomEvent("mygo:rerender-tabs"));
+}
+
 /** 渲染整块请求编辑区。 */
 export function requestPanel(tab: Tab): HTMLElement {
   const wrap = el("section", { class: "request-panel" });
   const row = el("div", { class: "request-tabs-row" });
+  subtabBadges = null;
   row.append(tabStrip(tab), envChip());
   fill(wrap, urlBar(tab), row, tabBody(tab));
   return wrap;
@@ -260,11 +275,11 @@ function unresolvedBadge(tab: Tab): HTMLElement {
   return badge;
 }
 
-function tabStrip(tab: Tab): HTMLElement {
-  const strip = el("div", { class: "subtabs", attr: { role: "tablist" } });
+/** 子页签徽标上的数字；只算这条请求自己的内容。 */
+function subtabCounts(tab: Tab): Record<Tab["requestTab"], number> {
   const own = stepsOf(tab.request);
   // 徽标只算这条请求自己的操作：集合与全局的继承条数写在面板顶部，不挤在页签上。
-  const counts = {
+  return {
     params: tab.request.params.filter((p) => p.enabled && p.key).length,
     headers: tab.request.headers.filter((h) => h.enabled && h.key).length,
     body: 0,
@@ -273,6 +288,12 @@ function tabStrip(tab: Tab): HTMLElement {
     post: enabledStepCount(own, "post"),
     options: 0,
   };
+}
+
+function tabStrip(tab: Tab): HTMLElement {
+  const strip = el("div", { class: "subtabs", attr: { role: "tablist" } });
+  const counts = subtabCounts(tab);
+  const buttons = new Map<Tab["requestTab"], HTMLElement>();
   const defs: { key: Tab["requestTab"]; label: string; icon: keyof typeof icons }[] = [
     { key: "params", label: "查询参数", icon: "filter" },
     { key: "headers", label: "请求头", icon: "table" },
@@ -300,8 +321,23 @@ function tabStrip(tab: Tab): HTMLElement {
     });
     btn.append(icon(def.icon), el("span", { text: def.label }));
     if (badge) btn.append(el("span", { class: "subtab-badge", text: String(badge) }));
+    buttons.set(def.key, btn);
     strip.append(btn);
   }
+  // 逐字输入不重建面板，但徽标上的条数会跟着变，这里就地改数字。
+  subtabBadges = () => {
+    const current = activeTab() ?? tab;
+    for (const [key, btn] of buttons) {
+      const count = subtabCounts(current)[key];
+      const badge = btn.querySelector<HTMLElement>(".subtab-badge");
+      if (!count) {
+        badge?.remove();
+        continue;
+      }
+      if (badge) badge.textContent = String(count);
+      else btn.append(el("span", { class: "subtab-badge", text: String(count) }));
+    }
+  };
   return strip;
 }
 
@@ -398,10 +434,11 @@ function paramsPane(tab: Tab): HTMLElement {
         keyPlaceholder: "参数名",
         valuePlaceholder: "路径变量值（支持 {{变量}}）",
         onChange: () => {
-          mutate((r) => {
-            r.pathVars = rows;
-          });
-          window.dispatchEvent(new CustomEvent("mygo:rerender-request"));
+          refreshChrome(
+            mutateDraft((r) => {
+              r.pathVars = rows;
+            }),
+          );
         },
         emptyHint: "暂无路径变量",
       }),
@@ -417,8 +454,7 @@ function paramsPane(tab: Tab): HTMLElement {
     valuePlaceholder: "参数值（支持 {{变量}}）",
     keyList: [],
     onChange: () => {
-      mutate((r) => r.params);
-      window.dispatchEvent(new CustomEvent("mygo:rerender-request"));
+      refreshChrome(mutateDraft((r) => r.params));
     },
     emptyHint: "暂无查询参数",
   });
@@ -438,8 +474,7 @@ function headersPane(tab: Tab): HTMLElement {
     valuePlaceholder: "头部值",
     keyList: COMMON_HEADERS,
     onChange: () => {
-      mutate((r) => r.headers);
-      window.dispatchEvent(new CustomEvent("mygo:rerender-request"));
+      refreshChrome(mutateDraft((r) => r.headers));
     },
     emptyHint: "暂无自定义请求头",
   });
@@ -545,8 +580,7 @@ function bodyPane(tab: Tab): HTMLElement {
       valuePlaceholder: "字段值",
       multiline: true,
       onChange: () => {
-        mutate((r) => r.form);
-        window.dispatchEvent(new CustomEvent("mygo:rerender-request"));
+        refreshChrome(mutateDraft((r) => r.form));
       },
       extra: (row) => {
         if (tab.request.bodyMode !== "form") return [];
@@ -613,9 +647,11 @@ function bodyPane(tab: Tab): HTMLElement {
     on: {
       input: () => {
         const value = area.value;
-        mutate((r) => {
-          r.body = value;
-        });
+        refreshChrome(
+          mutateDraft((r) => {
+            r.body = value;
+          }),
+        );
         updateJsonStatus(value);
       },
       keydown: (ev) => {
@@ -626,9 +662,11 @@ function bodyPane(tab: Tab): HTMLElement {
           area.value = `${area.value.slice(0, start)}  ${area.value.slice(area.selectionEnd)}`;
           area.setSelectionRange(start + 2, start + 2);
           const value = area.value;
-          mutate((r) => {
-            r.body = value;
-          });
+          refreshChrome(
+            mutateDraft((r) => {
+              r.body = value;
+            }),
+          );
         }
       },
     },
@@ -676,9 +714,11 @@ function graphqlBodyPane(tab: Tab): HTMLElement {
     on: {
       input: () => {
         const value = query.value;
-        mutate((r) => {
-          r.body = value;
-        });
+        refreshChrome(
+          mutateDraft((r) => {
+            r.body = value;
+          }),
+        );
       },
     },
   });
@@ -696,9 +736,11 @@ function graphqlBodyPane(tab: Tab): HTMLElement {
     on: {
       input: () => {
         const value = vars.value;
-        mutate((r) => {
-          r.graphqlVars = value;
-        });
+        refreshChrome(
+          mutateDraft((r) => {
+            r.graphqlVars = value;
+          }),
+        );
         paintVarsStatus(value);
       },
     },

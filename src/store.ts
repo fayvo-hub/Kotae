@@ -998,6 +998,25 @@ export function mutate(mutator: (r: ApiRequest, t: Tab) => void): void {
 }
 
 /**
+ * 逐字输入版的 mutate：写状态、落库、标记未保存，但不触发重绘。
+ *
+ * 每敲一个键就 emit 会把整块请求面板重建一遍——输入框被换成新节点，输入法组合态
+ * 被打断、撤销栈和选区也一起丢。打字路径一律用它，跟着输入变的小块（标签条、
+ * 子页签徽标）由调用方局部刷新。返回值表示标签名或未保存标记变了，需要刷标签条。
+ */
+export function mutateDraft(mutator: (r: ApiRequest, t: Tab) => void): boolean {
+  const tab = activeTab();
+  if (!tab) return false;
+  const wasDirty = tab.dirty;
+  const prevName = tab.name;
+  mutator(tab.request, tab);
+  tab.dirty = true;
+  tab.name = tab.name === "新请求" ? guessName(tab.request.url, tab.request.method) : tab.name;
+  persist();
+  return !wasDirty || tab.name !== prevName;
+}
+
+/**
  * 把粘贴进来的 URL 拆成基础地址与查询参数。
  *
  * `tabId` 用于「面板已经被替换」的场景：元素从 DOM 移除时浏览器仍会派发一次
