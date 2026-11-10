@@ -852,7 +852,8 @@ function bodyTools(tab: Tab, res: ResponseRecord): HTMLElement {
       keydown: (ev) => {
         if (ev.key === "Enter") {
           ev.preventDefault();
-          stepSearchHit(tab, 1);
+          // Shift+Enter 往回跳，到开头回到最后一处。
+          stepSearchHit(tab, ev.shiftKey ? -1 : 1);
           return;
         }
         if (ev.key === "Escape") {

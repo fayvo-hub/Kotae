@@ -47,6 +47,13 @@ func TestBodySearchHitCount(t *testing.T) {
 	h.pressKeysOn(t, `[data-role="body-search"]`, "Enter", false, false)
 	h.wait(t, "从末尾回到第一处命中", count+` === '1/3'`)
 
+	// Shift+Enter 往前跳，且同样回环：1/3 往前是 3/3，再往前是 2/3。
+	h.pressKeysOn(t, `[data-role="body-search"]`, "Enter", false, true)
+	h.wait(t, "从开头回环到最后一处命中", count+` === '3/3'`)
+	h.pressKeysOn(t, `[data-role="body-search"]`, "Enter", false, true)
+	h.wait(t, "往前跳到第二处命中", count+` === '2/3'`)
+	h.wait(t, "往回跳后仍只有一处命中被标成当前", current+` === 1`)
+
 	// 两种主题都拍一张：当前命中换了强调色，深浅主题下都要一眼能认出。
 	h.shot(t, "search-hit-count-dark")
 	for i := 0; i < 3 && !h.exists(t, `html[data-theme="light"]`); i += 1 {
