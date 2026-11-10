@@ -948,15 +948,34 @@ export function resetShortcuts(): void {
 
 // ---- 提示条 ----
 
-export function toast(text: string, kind: Toast["kind"] = "info"): void {
+/** 只刷新提示条那一块，不动页面其它部分。 */
+function refreshToasts(): void {
+  window.dispatchEvent(new CustomEvent("mygo:rerender-toasts"));
+}
+
+export interface ToastOptions {
+  /**
+   * 是否顺带整页重绘（默认 true）。
+   *
+   * 大多数提示出现时刚改过状态、靠这次重绘把界面刷出来；但高频且界面本来没变化的提示
+   * （如原地保存的「已保存」）传 false：整页重建会把打开着的输入框、变量高亮镜像层全换掉，
+   * 看起来就是保存一下闪一下，提示消失时还会再闪一次。
+   */
+  repaint?: boolean;
+}
+
+export function toast(text: string, kind: Toast["kind"] = "info", opts: ToastOptions = {}): void {
+  const repaint = opts.repaint !== false;
   const item: Toast = { id: uid("toast"), text, kind };
   state.toasts.push(item);
-  emit();
+  if (repaint) emit();
+  else refreshToasts();
   window.setTimeout(() => {
     const i = state.toasts.findIndex((t) => t.id === item.id);
     if (i >= 0) {
       state.toasts.splice(i, 1);
-      emit();
+      if (repaint) emit();
+      else refreshToasts();
     }
   }, kind === "error" ? 6000 : 3200);
 }
@@ -2416,7 +2435,10 @@ export function saveTab(collectionId: string, folderId: string | undefined, name
       tab.name = finalName;
       tab.dirty = false;
       persist();
-      emit();
+      // 请求面板里显示的就是刚写进集合的这份内容，一个字都没变。
+      // 走 emit() 会整页重绘，输入框、变量高亮镜像层全部重建，按 Ctrl+S 看得出一下闪。
+      // 真正变的只有标签条的未保存标记与集合树里的名字，刷新这两块就够。
+      window.dispatchEvent(new CustomEvent("mygo:rerender-saved"));
       return;
     }
     tab.origin = undefined;

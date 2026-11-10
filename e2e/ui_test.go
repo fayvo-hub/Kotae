@@ -271,6 +271,39 @@ func TestSaveUpdatesExistingRequest(t *testing.T) {
 	}
 }
 
+// 原地保存只刷新标签条与集合树：请求面板里显示的就是刚存进集合的那份内容，
+// 整页重绘会把输入框与变量高亮镜像层重建一遍，视觉上就是每按一次 Ctrl+S 闪一下。
+func TestSaveInPlaceKeepsRequestPanel(t *testing.T) {
+	const (
+		colName = "保存不重建集合"
+		reqName = "保存不重建请求"
+	)
+	h.clearOverlays(t)
+	newCollection(t, colName)
+	newRequestVia(t, colName)
+	typeURL(t, "{{baseUrl}}/json")
+	saveTabInto(t, reqName, colName, "")
+
+	typeURL(t, "{{baseUrl}}/echo")
+	// 在输入框与请求面板上各存一个标记：保存后标记还在，说明 DOM 没被重建。
+	h.eval(t, `(() => {
+		document.querySelector('.url-input').__keep = 'url';
+		document.querySelector('.request-panel').__keep = 'panel';
+		return true;
+	})()`, nil)
+	saveTabInPlace(t)
+	var kept bool
+	h.eval(t, `document.querySelector('.url-input').__keep === 'url' && document.querySelector('.request-panel').__keep === 'panel'`, &kept)
+	if !kept {
+		t.Fatal("原地保存把请求面板整块重建了：输入框被换掉，界面会闪一下")
+	}
+	// 局部刷新不能漏掉未保存标记与集合树里的名字。
+	if h.exists(t, ".tab.active .tab-dirty") {
+		t.Fatal("原地保存后未保存标记还在")
+	}
+	h.wait(t, "集合树里仍有这条请求", fmt.Sprintf(`[...document.querySelectorAll('.tree-label')].some(el => el.textContent.trim() === %s)`, jsString(reqName)))
+}
+
 func TestEnvDialogShowsVariables(t *testing.T) {
 	h.pressKeys(t, "e", true, false)
 	h.wait(t, "环境浮层出现", `!!document.querySelector('.env-layout')`)

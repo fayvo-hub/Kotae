@@ -866,6 +866,16 @@ function bindEvents(): void {
   window.addEventListener("mygo:rerender-sidebar-body", scheduleRender);
   // 逐字输入不重建请求面板（见 store.mutateDraft），标签条这类跟着输入变的小块单独刷新。
   window.addEventListener("mygo:rerender-tabs", renderTabs);
+  // 原地保存（Ctrl+S 覆盖集合里已有的请求）同理：请求面板内容没变，只刷新
+  // 标签条的未保存标记与集合树里的名字，整页重绘会让输入框重建一次（看起来闪一下）。
+  window.addEventListener("mygo:rerender-saved", () => {
+    const scrolls = captureScroll();
+    renderTabs();
+    renderSidebar();
+    restoreScroll(scrolls);
+  });
+  // 不重绘整页的提示（toast(..., { repaint: false })，如原地保存的「已保存」）只刷提示条本身。
+  window.addEventListener("mygo:rerender-toasts", renderToasts);
 
   window.addEventListener("mygo:rerender-overlay", () => {
     saveOpen = false;
@@ -990,7 +1000,9 @@ function onKeydown(ev: KeyboardEvent): void {
 /** 存一次当前标签：已进过集合就原地覆盖，只有还没归属的请求才弹保存对话框。 */
 function requestSave(): void {
   if (saveActiveTab()) {
-    toast("已保存", "success");
+    // 原地保存刚把集合里的那条改成当前内容，界面没有任何需要重建的地方：
+    // 提示条自己刷一下就行，否则每次 Ctrl+S 都会重绘整个面板（看起来闪一下）。
+    toast("已保存", "success", { repaint: false });
     return;
   }
   openSaveDialog("save");
