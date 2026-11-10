@@ -393,6 +393,10 @@ export interface Env {
   id: string;
   name: string;
   vars: KV[];
+  /** 公共查询参数：当前环境生效时，发送前自动附加到每个请求的查询串。 */
+  commonParams?: KV[];
+  /** 公共请求头：规则同 commonParams，头名比较忽略大小写。 */
+  commonHeaders?: KV[];
 }
 
 export type ThemeMode = "auto" | "dark" | "light";

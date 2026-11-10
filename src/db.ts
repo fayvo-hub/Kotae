@@ -88,7 +88,8 @@ const SCHEMA: string[] = [
      id       TEXT PRIMARY KEY,
      name     TEXT NOT NULL,
      position INTEGER NOT NULL,
-     active   INTEGER NOT NULL DEFAULT 0
+     active   INTEGER NOT NULL DEFAULT 0,
+     settings TEXT
    )`,
   `CREATE TABLE IF NOT EXISTS variables (
      id       TEXT PRIMARY KEY,
@@ -131,6 +132,8 @@ async function connect(): Promise<Database> {
   // 老库没有共享设置列（集合 / 文件夹的认证与变量），补上即可，不需要迁移数据。
   await ensureColumn(db, "collections", "settings", "TEXT");
   await ensureColumn(db, "folders", "settings", "TEXT");
+  // 环境同理：公共查询参数与公共请求头都是后加的字段，老库补列即可，不需要迁移。
+  await ensureColumn(db, "environments", "settings", "TEXT");
   conn = db;
   return db;
 }
@@ -162,6 +165,34 @@ function applyShared(
   if (Array.isArray(parsed.vars) && parsed.vars.length > 0) node.vars = parsed.vars;
   const steps = normalizeSteps(parsed.scripts);
   if (steps.pre.length > 0 || steps.post.length > 0) node.scripts = steps;
+}
+
+/**
+ * 环境级的公共参数：只写有内容的字段，空值整列留 null。
+ * 读回来也按「没有就当空」处理，让发送侧不用到处判空。
+ */
+function commonJSON(env: Env): string | null {
+  const out: { commonParams?: KV[]; commonHeaders?: KV[] } = {};
+  if (env.commonParams && env.commonParams.length > 0) out.commonParams = env.commonParams;
+  if (env.commonHeaders && env.commonHeaders.length > 0) out.commonHeaders = env.commonHeaders;
+  return Object.keys(out).length > 0 ? JSON.stringify(out) : null;
+}
+
+/** 读回公共参数；坏值当没有，不猜。 */
+function applyCommon(env: Env, raw: string): void {
+  if (!raw) return;
+  let parsed: { commonParams?: unknown; commonHeaders?: unknown };
+  try {
+    parsed = JSON.parse(raw) as { commonParams?: unknown; commonHeaders?: unknown };
+  } catch {
+    return;
+  }
+  if (Array.isArray(parsed.commonParams) && parsed.commonParams.length > 0) {
+    env.commonParams = parsed.commonParams as KV[];
+  }
+  if (Array.isArray(parsed.commonHeaders) && parsed.commonHeaders.length > 0) {
+    env.commonHeaders = parsed.commonHeaders as KV[];
+  }
 }
 
 /** 设置表的写入语句，迁移与正常保存共用。 */
@@ -354,8 +385,10 @@ export async function load(): Promise<PersistedWorkspace> {
   }
 
   const envs: Env[] = [];
-  for (const row of (await db.query("SELECT id, name FROM environments ORDER BY position")).rows) {
-    envs.push({ id: text(row[0]), name: text(row[1]), vars: [] });
+  for (const row of (await db.query("SELECT id, name, settings FROM environments ORDER BY position")).rows) {
+    const env: Env = { id: text(row[0]), name: text(row[1]), vars: [] };
+    applyCommon(env, text(row[2]));
+    envs.push(env);
   }
   const envById = new Map(envs.map((e) => [e.id, e]));
   const globals: KV[] = [];
@@ -494,13 +527,15 @@ function rows(data: PersistedWorkspace): Row[] {
   }
 
   for (const [i, env] of data.envs.entries()) {
+    const settings = commonJSON(env);
     out.push({
       table: "environments",
       id: env.id,
-      signature: JSON.stringify([env.name, i, env.id === data.activeEnvId]),
-      sql: `INSERT INTO environments(id, name, position, active) VALUES(?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET name = excluded.name, position = excluded.position, active = excluded.active`,
-      params: [env.id, env.name, i, env.id === data.activeEnvId ? 1 : 0],
+      signature: JSON.stringify([env.name, i, env.id === data.activeEnvId, settings]),
+      sql: `INSERT INTO environments(id, name, position, active, settings) VALUES(?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET name = excluded.name, position = excluded.position,
+              active = excluded.active, settings = excluded.settings`,
+      params: [env.id, env.name, i, env.id === data.activeEnvId ? 1 : 0, settings],
     });
     out.push(...variableRows(`env:${env.id}`, env.vars));
   }

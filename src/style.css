@@ -4708,6 +4708,21 @@ mark,
   color: var(--text-3);
 }
 
+/* 公共参数分组：与变量表用一条分隔线断开，不被当成同一张表。 */
+.env-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.env-section-head {
+  font-size: var(--fs-sm);
+  font-weight: 550;
+  color: var(--text-2);
+}
+
 .env-detail {
   display: flex;
   flex-direction: column;

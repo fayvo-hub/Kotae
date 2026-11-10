@@ -380,9 +380,59 @@ function defaultEnv(): Env {
  * 共享变量（深层文件夹优先），这样界面上的地址预览与真正发出去的完全一致。
  */
 export function scope(tab: Tab | null = activeTab() ?? null): VarScope {
-  const env = state.envs.find((e) => e.id === state.activeEnvId);
+  const env = activeEnv();
   const local = tab ? inheritedFor(tab.origin).vars : [];
   return { env: env?.vars ?? [], globals: state.globals, local };
+}
+
+/** 当前生效的环境；没选环境时返回 undefined。 */
+export function activeEnv(): Env | undefined {
+  return state.envs.find((e) => e.id === state.activeEnvId);
+}
+
+/** 公共参数里真正会附加的行：开了开关且键不为空。 */
+function usableCommon(rows: KV[] | undefined): KV[] {
+  return (rows ?? []).filter((row) => row.enabled && row.key.trim() !== "");
+}
+
+/** 当前环境的公共参数条数（没开开关、空键的不算），面板与列表的提示用。 */
+export function commonParamCount(env: Env | undefined, which: "query" | "header"): number {
+  return usableCommon(which === "query" ? env?.commonParams : env?.commonHeaders).length;
+}
+
+/**
+ * 把当前环境的公共参数并进要发出去的请求：查询串与请求头各一组。
+ * 返回副本，编辑区与落库的内容不受影响；请求自己已有同名键时以请求为准
+ * （被用户关掉的行也算占位——关掉就是这一次不想带），头名按 HTTP 规则忽略大小写。
+ */
+export function withCommonParams(request: ApiRequest, env: Env | undefined): ApiRequest {
+  const sharedParams = usableCommon(env?.commonParams);
+  const sharedHeaders = usableCommon(env?.commonHeaders);
+  if (sharedParams.length === 0 && sharedHeaders.length === 0) return request;
+
+  // 公共参数排在请求自己的行之前，与「请求优先」的判定顺序一致。
+  const takenParams = new Set(request.params.map((p) => p.key.trim()));
+  const addedParams: KV[] = [];
+  for (const row of sharedParams) {
+    const key = row.key.trim();
+    if (takenParams.has(key)) continue;
+    takenParams.add(key);
+    addedParams.push({ ...row, id: uid("kv") });
+  }
+  const takenHeaders = new Set(request.headers.map((h) => h.key.trim().toLowerCase()));
+  const addedHeaders: KV[] = [];
+  for (const row of sharedHeaders) {
+    const key = row.key.trim().toLowerCase();
+    if (takenHeaders.has(key)) continue;
+    takenHeaders.add(key);
+    addedHeaders.push({ ...row, id: uid("kv") });
+  }
+  if (addedParams.length === 0 && addedHeaders.length === 0) return request;
+  return {
+    ...request,
+    params: [...addedParams, ...request.params],
+    headers: [...addedHeaders, ...request.headers],
+  };
 }
 
 // ---- 集合 / 文件夹级共享设置 ----
@@ -1243,17 +1293,20 @@ export async function send(): Promise<void> {
 
 /** 一次完整的发送；返回 true 表示后置脚本要求用最新的变量把同一个请求再发一次。 */
 async function sendAttempt(tab: Tab, scriptRuns: ScriptRun[]): Promise<boolean> {
-  let url = ensureScheme(buildURL(tab.request, resolveText));
+  // 当前环境的公共参数在这里并进来：后面的校验、认证、脚本、发送、快照
+  // 看到的都是「真正要发出去」的那一份，编辑区里的请求不动。
+  const request = withCommonParams(tab.request, activeEnv());
+  let url = ensureScheme(buildURL(request, resolveText));
   if (!url.trim()) {
     toast("请先填写请求地址", "error");
     return false;
   }
   const missing = interpolate(
     [
-      tab.request.url,
-      ...tab.request.params.map((p) => `${p.key}${p.value}`),
-      ...tab.request.headers.map((h) => `${h.key}${h.value}`),
-      tab.request.body,
+      request.url,
+      ...request.params.map((p) => `${p.key}${p.value}`),
+      ...request.headers.map((h) => `${h.key}${h.value}`),
+      request.body,
     ].join("\n"),
     scope(),
   ).missing;
@@ -1263,8 +1316,8 @@ async function sendAttempt(tab: Tab, scriptRuns: ScriptRun[]): Promise<boolean> 
   }
 
   // 请求自己没设认证时，用集合 / 文件夹继承下来的那一份。
-  const auth = authFor(tab.request, tab.origin);
-  let headers = requestHeaders(tab.request, auth);
+  const auth = authFor(request, tab.origin);
+  let headers = requestHeaders(request, auth);
   if (typeof headers !== "string") applyNetworkOptions(headers, tab.request.options);
   if (typeof headers === "string") {
     toast(`请求头「${headers}」不是合法的头名`, "error");
@@ -1273,8 +1326,8 @@ async function sendAttempt(tab: Tab, scriptRuns: ScriptRun[]): Promise<boolean> 
   // 脚本拿到的初始头：闭包里引用 let 会丢掉收窄，单独存一份。
   let startHeaders = headers;
 
-  let body = buildBody(tab.request, headers, tab.request.method.toUpperCase());
-  let methodUpper = tab.request.method.toUpperCase();
+  let body = buildBody(request, headers, request.method.toUpperCase());
+  let methodUpper = request.method.toUpperCase();
 
   if (auth.type === "apikey" && auth.in === "query" && auth.key.trim()) {
     const u = new URL(url);
@@ -1770,7 +1823,9 @@ async function openStream(): Promise<void> {
   if (!tab || isStreaming(tab)) return;
 
   const protocol: "sse" | "ws" = (tab.request.protocol ?? "http") === "ws" ? "ws" : "sse";
-  const url = ensureScheme(buildURL(tab.request, resolveText));
+  // 流式连接与普通发送走同一份合并结果：握手地址与请求头都要带上公共参数。
+  const request = withCommonParams(tab.request, activeEnv());
+  const url = ensureScheme(buildURL(request, resolveText));
   if (!url.trim()) {
     toast("请先填写请求地址", "error");
     return;
@@ -1778,10 +1833,10 @@ async function openStream(): Promise<void> {
 
   const missing = interpolate(
     [
-      tab.request.url,
-      ...tab.request.params.map((p) => `${p.key}${p.value}`),
-      ...tab.request.headers.map((h) => `${h.key}${h.value}`),
-      tab.request.body,
+      request.url,
+      ...request.params.map((p) => `${p.key}${p.value}`),
+      ...request.headers.map((h) => `${h.key}${h.value}`),
+      request.body,
     ].join("\n"),
     scope(),
   ).missing;
@@ -1790,7 +1845,7 @@ async function openStream(): Promise<void> {
     return;
   }
 
-  const headers = requestHeaders(tab.request, authFor(tab.request, tab.origin));
+  const headers = requestHeaders(request, authFor(request, tab.origin));
   if (typeof headers !== "string") applyNetworkOptions(headers, tab.request.options);
   if (typeof headers === "string") {
     toast(`请求头「${headers}」不是合法的头名`, "error");
@@ -2445,6 +2500,18 @@ export function mutateGlobals(mutator: (vars: KV[]) => void): void {
   emit();
 }
 
+/**
+ * 改某个环境的公共参数。`rows` 就是表格里那份数组（kvTable 就地改它），
+ * 所以这里只负责把它挂回环境并落库，不重建界面（逐字输入重建会重播动画）。
+ */
+export function setEnvCommonParams(id: string, which: "query" | "header", rows: KV[]): void {
+  const env = state.envs.find((e) => e.id === id);
+  if (!env) return;
+  if (which === "query") env.commonParams = rows;
+  else env.commonHeaders = rows;
+  persist();
+}
+
 // ---- 导入导出 ----
 
 export interface WorkspaceBundle {
@@ -2480,6 +2547,28 @@ interface IdMap {
 }
 
 /**
+ * 导入来的公共参数：非数组、缺键的行一律丢掉，id 全部换新（不和本地已有行撞车）。
+ * 备份里没这两块（老版本导出的）就是空表。
+ */
+function commonRowsFromBackup(rows: unknown): KV[] {
+  if (!Array.isArray(rows)) return [];
+  const out: KV[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const kv = row as Partial<KV>;
+    if (typeof kv.key !== "string") continue;
+    out.push({
+      id: uid("kv"),
+      key: kv.key,
+      value: typeof kv.value === "string" ? kv.value : "",
+      enabled: kv.enabled !== false,
+      ...(kv.secret ? { secret: true } : {}),
+    });
+  }
+  return out;
+}
+
+/**
  * 导入备份：合并到现有数据（id 冲突时整体换新 id）。
  * 脚本库的条目一律换新 id，层里引用它们的步骤同步改成新 id。
  */
@@ -2495,6 +2584,8 @@ export function importBundle(raw: string): { collections: number; envs: number }
   for (const e of envs) {
     e.id = uid("env");
     for (const v of e.vars) v.id = uid("kv");
+    e.commonParams = commonRowsFromBackup(e.commonParams);
+    e.commonHeaders = commonRowsFromBackup(e.commonHeaders);
     state.envs.push(e);
   }
   if (Array.isArray(parsed.globals)) {
@@ -2655,14 +2746,16 @@ function reassignCollectionIds(col: Collection, map: IdMap): void {
 export function currentCurl(useVariables: boolean): string {
   const tab = activeTab();
   if (!tab) return "";
-  return toCurl(tab.request, { resolve: useVariables ? resolveText : (t) => t });
+  // 导出的命令要能直接跑通，所以带上当前环境的公共参数。
+  const request = withCommonParams(tab.request, activeEnv());
+  return toCurl(request, { resolve: useVariables ? resolveText : (t) => t });
 }
 
 /** 生成当前请求的代码片段文本（变量已替换成实际值，复制即可用）。 */
 export function currentSnippet(lang: SnippetLang): string {
   const tab = activeTab();
   if (!tab) return "";
-  return snippetText(tab.request, lang, { resolve: resolveText });
+  return snippetText(withCommonParams(tab.request, activeEnv()), lang, { resolve: resolveText });
 }
 
 export async function copyText(text: string, label = "已复制"): Promise<void> {

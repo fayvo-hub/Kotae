@@ -6,9 +6,11 @@ import { assistOpen, enableVarAssist, kvTable } from "./kvtable";
 import { selectBox } from "./select";
 import {
   abortSend,
+  activeEnv,
   activeTab,
   applyURL,
   closeStream,
+  commonParamCount,
   emit,
   enabledStepCount,
   isStreaming,
@@ -415,6 +417,21 @@ function tabBody(tab: Tab): HTMLElement {
   return host;
 }
 
+/**
+ * 参数 / 请求头页签的提示行。当前环境配了公共参数时先说清会自动附加，
+ * 免得用户看到发出去的请求多了几项却找不到来源。
+ */
+function commonHint(which: "query" | "header"): string {
+  const count = commonParamCount(activeEnv(), which);
+  const base =
+    which === "query"
+      ? "同名参数会全部发送；勾选框控制是否启用。粘贴带查询串的完整 URL 会自动拆到这里。"
+      : "请求由 Go 发出，可写任意请求头（包括 Origin、Referer、User-Agent）。批量粘贴支持 name: value 每行一条。";
+  if (count === 0) return base;
+  const what = which === "query" ? "公共查询参数" : "公共请求头";
+  return `当前环境带 ${String(count)} 个${what}，发送时自动附加（同名时以这里为准）。${base}`;
+}
+
 function paramsPane(tab: Tab): HTMLElement {
   const host = el("div", { class: "pane" });
   // 地址里有 `:id` 这种占位符时，参数页签顶部多一张路径变量表。
@@ -447,7 +464,7 @@ function paramsPane(tab: Tab): HTMLElement {
   }
   const hint = el("p", {
     class: "pane-hint",
-    text: "同名参数会全部发送；勾选框控制是否启用。粘贴带查询串的完整 URL 会自动拆到这里。",
+    text: commonHint("query"),
   });
   const table = kvTable({
     rows: tab.request.params,
@@ -467,7 +484,7 @@ function headersPane(tab: Tab): HTMLElement {
   const host = el("div", { class: "pane" });
   const hint = el("p", {
     class: "pane-hint",
-    text: "请求由 Go 发出，可写任意请求头（包括 Origin、Referer、User-Agent）。批量粘贴支持 name: value 每行一条。",
+    text: commonHint("header"),
   });
   const table = kvTable({
     rows: tab.request.headers,

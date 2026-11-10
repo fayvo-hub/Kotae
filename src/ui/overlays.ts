@@ -27,6 +27,7 @@ import {
   setGlobalSteps,
   setSnippetLang,
   setEnv,
+  setEnvCommonParams,
   setPendingCurl,
   setDesktopPrefs,
   setCodeFontSize,
@@ -49,7 +50,7 @@ import { CurlError, emptyRequest, parseCurl } from "../curl";
 import { SNIPPET_LANGS } from "../snippets";
 import { parseImport, toPostmanCollection } from "../postman";
 import { DYNAMIC_VARS, methodTone, visibleVarNames } from "../util";
-import type { ApiRequest } from "../types";
+import type { ApiRequest, Env, KV } from "../types";
 import { System } from "../mygo";
 import { formatBytes } from "../util";
 import { askConfirm, askText } from "./prompt";
@@ -593,7 +594,61 @@ export function envDialog(): HTMLElement {
       secretToggle: true,
     });
 
-    fill(detail, head, table);
+    // 公共参数：生效的环境会把这两组行附加到每个请求上（请求里同名时不覆盖）。
+    const commonSection = (
+      which: "query" | "header",
+      rows: KV[],
+      title: string,
+      keyHint: string,
+      valueHint: string,
+      emptyHint: string,
+    ): HTMLElement => {
+      const section = el("div", { class: `env-section env-section-${which}` });
+      section.append(
+        el("div", { class: "env-section-head", text: title }),
+        el("p", {
+          class: "pane-hint",
+          text:
+            which === "query"
+              ? "发送时附加到查询串；请求里已有同名参数时以请求为准。"
+              : "发送时附加到请求头；请求里已有同名请求头（不分大小写）时以请求为准。",
+        }),
+        kvTable({
+          rows,
+          keyPlaceholder: keyHint,
+          valuePlaceholder: valueHint,
+          onChange: () => {
+            setEnvCommonParams(env.id, which, rows);
+            syncCounts();
+            window.dispatchEvent(new CustomEvent("mygo:env-pill"));
+          },
+          emptyHint,
+        }),
+      );
+      return section;
+    };
+
+    fill(
+      detail,
+      head,
+      table,
+      commonSection(
+        "query",
+        env.commonParams ?? [],
+        "公共查询参数",
+        "参数名（如 appId）",
+        "参数值（支持 {{变量}}）",
+        "暂无公共查询参数",
+      ),
+      commonSection(
+        "header",
+        env.commonHeaders ?? [],
+        "公共请求头",
+        "头部名称（如 X-Channel）",
+        "头部值（支持 {{变量}}）",
+        "暂无公共请求头",
+      ),
+    );
   };
 
   renderList();
@@ -604,7 +659,7 @@ export function envDialog(): HTMLElement {
   footer.append(
     el("span", {
       class: "muted small",
-      text: "发送请求时 {{变量}} 会先替换成当前环境的值；未定义的变量会在发送前拦下。",
+      text: "发送请求时 {{变量}} 会先替换成当前环境的值；未定义的变量会在发送前拦下。公共参数在当前环境生效时附加到每个请求，请求里已有同名键时以请求为准。",
     }),
     el("span", { class: "spacer" }),
     el("button", {
