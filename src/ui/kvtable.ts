@@ -231,7 +231,7 @@ export function kvTable<T extends KVRow>(opts: KVTableOptions<T>): HTMLElement {
 
   const pasteBtn = el("button", {
     class: "link-btn",
-    attr: { type: "button", title: "每行一对「名称: 值」，或粘贴原始请求头文本" },
+    attr: { type: "button", title: "每行一对「名称: 值」，也可以粘 URL 查询串（?a=1&b=2）或原始请求头文本" },
     on: {
       click: () => {
         void pasteInto(rows, opts, refresh);
@@ -275,7 +275,7 @@ async function pasteInto<T extends KVRow>(
   const clip = (await pasteText()).trim();
   const submitted = await askText({
     title: "批量粘贴",
-    label: "每行一对，支持 name: value 或 name=value；行首加 # 表示禁用该行",
+    label: "每行一对，支持 name: value 或 name=value；行首加 # 表示禁用；也可以直接粘一段 URL 查询串（?name=1&age=12）",
     value: current,
     placeholder: "Content-Type: application/json\nAuthorization: Bearer {{token}}",
     multiline: true,
@@ -302,7 +302,7 @@ async function pasteInto<T extends KVRow>(
     }
     await askAlert({
       title: "没有识别出键值对",
-      message: "请检查格式：每行一条，用冒号、等号或制表符分隔名称与值。",
+      message: "请检查格式：每行一条，用冒号、等号或制表符分隔名称与值；也可以用 & 分隔的整段查询串。",
       tone: "error",
     });
     return;
@@ -316,8 +316,44 @@ async function pasteInto<T extends KVRow>(
   toast(`已粘贴 ${parsed.length} 项`);
 }
 
+/**
+ * 从单行文本里取出 URL 查询串（`a=1&b=2`、`?a=1`、`https://x/y?a=1#h` 都算），取不出返回 null。
+ * 只接单行：多行文本一律走逐行解析，避免把一张表当成一串参数弄乱。
+ */
+function queryStringOf(text: string): string | null {
+  const line = text.trim();
+  if (line === "" || /[\r\n]/.test(line)) return null;
+  const at = line.indexOf("?");
+  const body = at >= 0 ? line.slice(at + 1) : line;
+  const bare = (body.split("#")[0] ?? "").trim();
+  if (bare === "") return null;
+  // 「名: 值」形态（请求头、Cookie）不是查询串，留给逐行解析；
+  // 判据是每段都先出现 `=`，冒号要么没有要么在 `=` 之后。
+  const isPair = (part: string): boolean => {
+    const eq = part.indexOf("=");
+    if (eq <= 0) return false;
+    const colon = part.indexOf(":");
+    return colon < 0 || colon > eq;
+  };
+  const parts = bare.split("&");
+  return parts.every(isPair) ? bare : null;
+}
+
+/** 按 `&` 拆查询串；percent 解码与 `+` 当空格交给 URLSearchParams，坏编码不抛错。 */
+function parseQueryString(query: string): { key: string; value: string }[] {
+  const out: { key: string; value: string }[] = [];
+  for (const [key, value] of new URLSearchParams(query)) {
+    if (key.trim() !== "") out.push({ key: key.trim(), value });
+  }
+  return out;
+}
+
 /** 从文本里解析键值对，供批量粘贴复用；行首 `#` 表示这一行禁用。 */
 export function parsePairs(text: string): { key: string; value: string; disabled?: boolean }[] {
+  // 整段只是一行查询串（含完整 URL）时按 `&` 拆，不用自己先换行。
+  const query = queryStringOf(text);
+  if (query !== null) return parseQueryString(query);
+
   const out: { key: string; value: string; disabled?: boolean }[] = [];
   for (const rawLine of text.split(/\r?\n/)) {
     let line = rawLine.trim();
