@@ -248,6 +248,36 @@ const SCROLL_HOSTS = [
   ".subtabs-body",
 ];
 
+/**
+ * 重绘之后才插回文档的装饰节点：变量高亮镜像层是在输入框建好后异步挂上的
+ * （见 ui/varTokens.ts 的 hook），重绘瞬间的新面板里还没有它。
+ * 焦点路径必须把这类节点排除在外，否则两边的下标对不上，焦点会落到旁边的元素上。
+ */
+function isEphemeral(node: Element): boolean {
+  return node.classList.contains("var-mirror");
+}
+
+/** 元素在同级里的序号，只数会被重绘一起重建的节点。 */
+function stableIndexOf(parent: Element, node: Element): number {
+  let index = 0;
+  for (const child of parent.children) {
+    if (child === node) return index;
+    if (!isEphemeral(child)) index++;
+  }
+  return -1;
+}
+
+/** 按 stableIndexOf 的口径取回第 index 个子元素。 */
+function stableChildAt(parent: Element, index: number): Element | null {
+  let seen = 0;
+  for (const child of parent.children) {
+    if (isEphemeral(child)) continue;
+    if (seen === index) return child;
+    seen++;
+  }
+  return null;
+}
+
 function captureFocus(): FocusState | null {
   const active = document.activeElement as HTMLElement | null;
   if (!active || active === document.body || active === document.documentElement) return null;
@@ -257,7 +287,9 @@ function captureFocus(): FocusState | null {
   while (node && node !== document.body) {
     const parent: HTMLElement | null = node.parentElement;
     if (!parent) return null;
-    path.unshift([...parent.children].indexOf(node));
+    const index = stableIndexOf(parent, node);
+    if (index < 0) return null;
+    path.unshift(index);
     node = parent;
   }
   const start =
@@ -275,7 +307,7 @@ function restoreFocus(saved: FocusState | null): void {
   if (!saved) return;
   let node: Element | null = document.body;
   for (const index of saved.path) {
-    node = node.children[index] ?? null;
+    node = stableChildAt(node, index);
     if (!node) return;
   }
   const target = node as HTMLElement;
