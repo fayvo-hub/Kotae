@@ -62,7 +62,16 @@ export function kvTable<T extends KVRow>(opts: KVTableOptions<T>): HTMLElement {
 
   // 行数变化时自己重绘（增/删/粘贴），调用方不必重建整块界面：
   // 重建会重播浮层动画、丢失输入焦点，环境与全局变量编辑器就靠这个避免闪烁。
+  let paintedOnce = false;
   const paint = (): void => {
+    // 这张表已被整页重绘换掉：批量粘贴是 await 之后才改 rows 的，对话框开着的时候若有一帧
+    // 整页 render 落到后面，kvTable 手里这具 body 已经不在文档上，画它等于没画（用户看到
+    // 粘贴成功但表格还是空的）。此时请外层按最新 state 重建，而不是靠提示条的整页重绘兜底。
+    if (paintedOnce && !body.isConnected) {
+      window.dispatchEvent(new CustomEvent("mygo:rerender-request"));
+      return;
+    }
+    paintedOnce = true;
     body.replaceChildren();
     if (rows.length === 0) {
       body.append(

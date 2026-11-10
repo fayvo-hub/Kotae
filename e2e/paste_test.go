@@ -267,3 +267,52 @@ func TestPasteQueryString(t *testing.T) {
 		t.Fatalf("带 & 的请求头被拆成了多行：%s", got)
 	}
 }
+
+// kvTable 手里的表格被整页重绘换掉之后，行数变化不能再画在已脱离文档的节点上。
+//
+// 批量粘贴是 await 之后才改 rows 的：对话框开着的时候只要有一帧整页 render 落到后面
+// （Ctrl+S、导入、切标签都会），它手里那张表就已经不在文档里，画上去用户看不到，
+// 表格还是空的。以前全靠「已粘贴 N 项」那条提示顺手整页重绘钻对，现在由表格自己
+// 发现脱离文档时请求外层重建，这条用例直接盯那个请求。
+func TestKvTableRepaintsAfterDetach(t *testing.T) {
+	h.clearOverlays(t)
+	t.Cleanup(func() {
+		h.eval(t, `(() => {
+			if (window.__origDispatch) {
+				window.dispatchEvent = window.__origDispatch;
+				delete window.__origDispatch;
+			}
+			return true;
+		})()`, nil)
+	})
+
+	// 造出「kvTable 手里的表格已被整页重绘换掉」的局面并确认它请求了外层重建。
+	// 这个循环自带重试：前一个用例可能留下排队的整页重绘，刚摘掉的表格会被换掉，
+	// 那就对换出来的新表格再摘一次，直到真正触发（每张表只试一次，避免重复加行）。
+	h.wait(t, "表格脱离文档后请求了外层重建", `(() => {
+	  if (window.__reqRebuilds > 0) return true;
+	  if (!window.__origDispatch) {
+	    window.__reqRebuilds = 0;
+	    window.__origDispatch = window.dispatchEvent;
+	    window.dispatchEvent = function (e) {
+	      if (e && e.type === 'mygo:rerender-request') window.__reqRebuilds += 1;
+	      return window.__origDispatch.call(this, e);
+	    };
+	  }
+	  const body = document.querySelector('.pane .kv-body');
+	  if (!body) return false;
+	  const wrap = body.closest('.kv');
+	  if (!wrap || wrap.dataset.detachProbe === '1') return false;
+	  wrap.dataset.detachProbe = '1';
+	  const btn = [...wrap.querySelectorAll('.link-btn')].find((b) => (b.textContent || '').includes('添加一行'));
+	  if (!btn) return false;
+	  body.remove();
+	  btn.click();
+	  return window.__reqRebuilds > 0;
+	})()`)
+	// 只认「表格回到了页面上」：行数取决于点到的子页签表格，不是这次修复的契约。
+	h.wait(t, "重建出来的表格回到页面上", `(() => {
+	  const b = document.querySelector('.pane .kv-body');
+	  return !!b && document.contains(b);
+	})()`)
+}
