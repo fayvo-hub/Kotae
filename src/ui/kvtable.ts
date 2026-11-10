@@ -396,6 +396,29 @@ let assistKey = "";
 /** 把补全层挂到 body 上，跟随输入框位置。 */
 export function mountAssist(): void {
   if (!assistHost.isConnected) document.body.append(assistHost);
+  bindAssistKeys();
+}
+
+let assistKeysBound = false;
+
+/**
+ * 补全用 document 的捕获阶段抢键：开着时 Enter / Tab / ↑↓ / Esc 先归它。
+ * 输入框自己也可能处理这些键（键值表跳下一行、编辑器缩进、地址栏发送），全靠各调用点
+ * 记得判断 assistOpen() 才不串——漏一处就两头都跑。捕获阶段先一步吃掉，就不必依赖自觉。
+ * 只在补全真的消化了这个键时截断；其余键照常往下走。
+ */
+function bindAssistKeys(): void {
+  if (assistKeysBound) return;
+  assistKeysBound = true;
+  document.addEventListener(
+    "keydown",
+    (ev) => {
+      if (!assistTarget || ev.target !== assistTarget) return;
+      if (!handleAssistKey(ev)) return;
+      ev.stopPropagation();
+    },
+    true,
+  );
 }
 
 const assistBound = new WeakSet<HTMLElement>();
@@ -435,7 +458,6 @@ export function enableVarAssist(target: TextField, key: string): void {
     assistKey = target.dataset.assistKey ?? "";
     updateAssist();
   });
-  target.addEventListener("keydown", (ev) => handleAssistKey(ev as KeyboardEvent));
   target.addEventListener("scroll", () => hideAssist());
 }
 

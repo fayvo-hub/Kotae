@@ -85,12 +85,34 @@ func TestVarAssistInKeyValueTable(t *testing.T) {
 	rows := h.count(t, ".pane .kv-row")
 
 	const valueInput = ".pane .kv-row:last-child .kv-value"
+
+	// 只打两个 {{ 就回车（不按 ↓）：落第一项，也不该新增行。
 	h.click(t, valueInput)
-	h.typeInto(t, valueInput, "{{base")
+	h.typeInto(t, valueInput, "{{")
 	h.wait(t, "键值表补全弹出", `!!document.querySelector('.assist.open')`)
+	var first string
+	h.eval(t, `(document.querySelector('.assist.open .assist-item code') || {}).textContent || ''`, &first)
+	if first == "" {
+		t.Fatal("补全层应有候选")
+	}
+	h.pressKeysOn(t, valueInput, "Enter", false, false)
+	h.wait(t, "回车直接落第一项", fmt.Sprintf(`document.querySelector(%s).value === %s`, jsString(valueInput), jsString(first)))
+	if got := h.count(t, ".pane .kv-row"); got != rows {
+		t.Fatalf("直选补全不该新增行：%d → %d", rows, got)
+	}
+
+	// ↓ 换到第二项再回车，同一个补全层也要接住。
+	h.click(t, valueInput)
+	h.typeInto(t, valueInput, "{{")
+	h.wait(t, "键值表补全又弹出", `!!document.querySelector('.assist.open')`)
+	var second string
+	h.eval(t, `(document.querySelectorAll('.assist.open .assist-item code')[1] || {}).textContent || ''`, &second)
+	if second == "" {
+		t.Fatal("补全层应有第二项")
+	}
 	h.pressKeysOn(t, valueInput, "ArrowDown", false, false)
 	h.pressKeysOn(t, valueInput, "Enter", false, false)
-	h.wait(t, "补全把变量写进值里", fmt.Sprintf(`document.querySelector(%s).value === '{{baseUrl}}'`, jsString(valueInput)))
+	h.wait(t, "↓ 后回车落第二项", fmt.Sprintf(`document.querySelector(%s).value === %s`, jsString(valueInput), jsString(second)))
 	if got := h.count(t, ".pane .kv-row"); got != rows {
 		t.Fatalf("确认补全不该新增行：%d → %d", rows, got)
 	}
