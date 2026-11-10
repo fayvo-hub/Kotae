@@ -198,6 +198,8 @@ export function kvTable<T extends KVRow>(opts: KVTableOptions<T>): HTMLElement {
 
   // Enter 跳到下一行，末尾自动新增。
   const onRowKeydown = (ev: KeyboardEvent, row: T, which: "key" | "value"): void => {
+    // 补全层开着时 Enter 归它选变量：不跳下一行、不新增行。
+    if (ev.key === "Enter" && assistOpen()) return;
     if (ev.key === "Enter") {
       ev.preventDefault();
       const inputs = [...body.querySelectorAll<HTMLElement>(which === "key" ? ".kv-key" : ".kv-value")];

@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -70,4 +71,27 @@ func TestVarAssistEverywhere(t *testing.T) {
 	}
 	h.pressKeysOn(t, ".curl-input", "Escape", false, false)
 	h.clearOverlays(t)
+}
+
+// 键值表（查询参数 / 请求头 / 环境面板）里同样是「开着补全层时 Enter 归补全用」：
+// 以前这里漏了这条约定，↓ 选候选后按 Enter 变成了新增一行。
+func TestVarAssistInKeyValueTable(t *testing.T) {
+	h.clearOverlays(t)
+	newTab(t)
+
+	clickIn(t, ".subtabs:not(.response-subtabs)", "查询参数")
+	h.wait(t, "查询参数面板", `!!document.querySelector('.pane .kv-foot')`)
+	addRequestParam(t, "page", "")
+	rows := h.count(t, ".pane .kv-row")
+
+	const valueInput = ".pane .kv-row:last-child .kv-value"
+	h.click(t, valueInput)
+	h.typeInto(t, valueInput, "{{base")
+	h.wait(t, "键值表补全弹出", `!!document.querySelector('.assist.open')`)
+	h.pressKeysOn(t, valueInput, "ArrowDown", false, false)
+	h.pressKeysOn(t, valueInput, "Enter", false, false)
+	h.wait(t, "补全把变量写进值里", fmt.Sprintf(`document.querySelector(%s).value === '{{baseUrl}}'`, jsString(valueInput)))
+	if got := h.count(t, ".pane .kv-row"); got != rows {
+		t.Fatalf("确认补全不该新增行：%d → %d", rows, got)
+	}
 }
