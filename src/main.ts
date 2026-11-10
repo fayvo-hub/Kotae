@@ -52,6 +52,7 @@ import {
   openTab,
   pasteText,
   persist,
+  saveActiveTab,
   saveRequestTo,
   send,
   setActiveTab,
@@ -899,9 +900,7 @@ function bindEvents(): void {
   window.addEventListener("mygo:copy-curl", () => {
     void copyText(currentCurl(true), "已复制 cURL 命令");
   });
-  window.addEventListener("mygo:save", () => {
-    openSaveDialog("save");
-  });
+  window.addEventListener("mygo:save", requestSave);
   window.addEventListener("mygo:send", () => {
     void send();
   });
@@ -988,6 +987,15 @@ function onKeydown(ev: KeyboardEvent): void {
   runShortcut(action);
 }
 
+/** 存一次当前标签：已进过集合就原地覆盖，只有还没归属的请求才弹保存对话框。 */
+function requestSave(): void {
+  if (saveActiveTab()) {
+    toast("已保存", "success");
+    return;
+  }
+  openSaveDialog("save");
+}
+
 /** 执行一个快捷键动作，动作 id 见 src/shortcuts.ts。 */
 function runShortcut(action: string): void {
   switch (action) {
@@ -1001,7 +1009,7 @@ function runShortcut(action: string): void {
       promptNewCollection();
       break;
     case "save":
-      openSaveDialog("save");
+      requestSave();
       break;
     case "import-curl":
       toggleUI("curlOpen", true);
@@ -1098,7 +1106,7 @@ function bindDesktop(): void {
         break;
       }
       case "save":
-        openSaveDialog("save");
+        requestSave();
         break;
       case "close-tab": {
         const tab = activeTab();

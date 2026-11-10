@@ -16,9 +16,9 @@ import {
   isStreaming,
   mutate,
   mutateDraft,
+  importCurlParsed,
   scriptLayers,
   send,
-  setPendingCurl,
   setTabSteps,
   stepsOf,
   toast,
@@ -169,7 +169,6 @@ function urlBar(tab: Tab): HTMLElement {
         const text = ev.clipboardData?.getData("text") ?? "";
         if (/^\s*curl(\.exe)?\s/i.test(text)) {
           ev.preventDefault();
-          mutate((r) => r.url);
           importCurlText(text);
         }
       },
@@ -1100,8 +1099,8 @@ export function importCurlText(text: string): void {
   void (async () => {
     try {
       const result = parseCurl(text);
-      // 带上原文：浮层里的输入框直接回填，用户不用把命令再粘一次。
-      setPendingCurl({ request: result.request, warnings: result.warnings, source: text });
+      // 空白请求直接盖上去；已经有内容才交给浮层，并带上原文免再粘一次。
+      importCurlParsed({ request: result.request, warnings: result.warnings, source: text });
     } catch (err) {
       if (err instanceof CurlError) {
         const where = err.line > 0 ? `第 ${err.line} 行` : "命令";

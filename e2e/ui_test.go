@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -234,6 +235,40 @@ func TestSaveDialogAndNewCollection(t *testing.T) {
 	h.shot(t, "10-prompt")
 	h.clickText(t, ".prompt-dialog .btn", "创建")
 	h.wait(t, "新集合出现在侧边栏", `[...document.querySelectorAll('.tree-label')].some(el => el.textContent.trim() === 'E2E 新建集合')`)
+}
+
+// 已经存进集合的请求再按 Ctrl+S 只覆盖那一条，不再弹「保存到哪个集合」；
+// 没存过的请求仍然弹对话框让用户选集合与名称。
+func TestSaveUpdatesExistingRequest(t *testing.T) {
+	const (
+		colName = "原地保存集合"
+		reqName = "原地保存请求"
+	)
+	h.clearOverlays(t)
+	newCollection(t, colName)
+	newRequestVia(t, colName)
+	typeURL(t, "{{baseUrl}}/json")
+	saveTabInto(t, reqName, colName, "")
+
+	// 改掉地址再保存：原地覆盖，不弹框，集合里也不该多出一条同名请求。
+	typeURL(t, "{{baseUrl}}/echo")
+	saveTabInPlace(t)
+	var nodes int
+	h.eval(t, fmt.Sprintf(`[...document.querySelectorAll('.tree-label')].filter(el => (el.textContent || '').trim() === %s).length`, jsString(reqName)), &nodes)
+	if nodes != 1 {
+		t.Fatalf("集合里应有 1 条「%s」，实际 %d 条", reqName, nodes)
+	}
+
+	// 关掉标签页再从集合打开：读到的必须是覆盖后的地址，证明写回了集合节点。
+	before := h.count(t, ".tab")
+	h.pressKeys(t, "w", true, false)
+	h.wait(t, "标签页关闭", fmt.Sprintf(`document.querySelectorAll('.tab').length === %d`, before-1))
+	h.openRequest(t, reqName)
+	var url string
+	h.eval(t, `document.querySelector('.url-input').value`, &url)
+	if url != "{{baseUrl}}/echo" {
+		t.Fatalf("集合里存的地址没被覆盖：%q", url)
+	}
 }
 
 func TestEnvDialogShowsVariables(t *testing.T) {

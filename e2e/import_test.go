@@ -166,39 +166,65 @@ func TestImportPostmanAndHar(t *testing.T) {
 	}
 }
 
-// 地址栏粘贴整条 curl：导入浮层打开后，输入框里要带着那段命令，别让用户再粘一次。
-func TestUrlPasteCurlPrefillsDialog(t *testing.T) {
-	h.clearOverlays(t)
-	newTab(t)
-
-	curl := `curl -X POST 'https://httpbin.org/post' -H 'X-Paste: 1' --data-raw '{"a":1}'`
+// pasteURL 在地址栏派发一次真实的粘贴事件，走应用自己的 cURL 识别。
+func pasteURL(t *testing.T, text string) {
+	t.Helper()
 	h.eval(t, fmt.Sprintf(`(() => {
 		const input = document.querySelector('.url-input');
+		if (!input) return false;
 		const dt = new DataTransfer();
 		dt.setData('text/plain', %s);
 		input.focus();
 		input.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
 		return true;
-	})()`, jsString(curl)), nil)
+	})()`, jsString(text)), nil)
+}
 
+// 地址栏粘贴整条 curl：空白请求直接盖上去，已经有内容才弹浮层让用户选替换还是新标签页。
+func TestUrlPasteCurl(t *testing.T) {
+	h.clearOverlays(t)
+	newTab(t)
+
+	curl := `curl -X POST 'https://httpbin.org/post' -H 'X-Paste: 1' --data-raw '{"a":1}'`
+	pasteURL(t, curl)
+
+	// 空白标签：不该弹浮层，方法、地址、请求头直接落到请求上。
+	h.wait(t, "地址栏填入 curl 里的地址", `document.querySelector('.url-input').value === 'https://httpbin.org/post'`)
+	if h.exists(t, ".curl-input") {
+		t.Fatal("空白请求粘贴 cURL 不该弹导入浮层")
+	}
+	if got := h.selectValue(t, ".method-select"); got != "POST" {
+		t.Fatalf("导入后方法应为 POST，实际 %q", got)
+	}
+	h.activateSubtab(t, "请求头")
+	var headers string
+	h.eval(t, `JSON.stringify([...document.querySelectorAll('.kv-row')].map(r => [r.querySelector('.kv-key')?.value, r.querySelector('.kv-value')?.value]))`, &headers)
+	if !strings.Contains(headers, `"X-Paste","1"`) {
+		t.Fatalf("curl 里的请求头没导进来：%s", headers)
+	}
+	// 内容还没进集合：标签页要有未保存标记，用户才知道要按 Ctrl+S 落库。
+	if !h.exists(t, ".tab.active .tab-dirty") {
+		t.Fatal("导入的请求没有未保存标记")
+	}
+
+	// 已经有内容：再粘一条就该弹浮层，输入框里带着原文，地址栏保持原样。
+	curl2 := `curl -X PUT 'https://httpbin.org/put'`
+	pasteURL(t, curl2)
 	h.wait(t, "cURL 导入浮层打开", `!!document.querySelector('.curl-input')`)
 
 	var value string
 	h.eval(t, `document.querySelector('.curl-input').value`, &value)
-	if value != curl {
+	if value != curl2 {
 		t.Fatalf("浮层输入框里没有带命令：%q", value)
 	}
-
 	// 有原文也要有解析结果，否则用户点不了「替换当前请求」。
 	if !h.exists(t, ".curl-result .preview-card") {
 		t.Fatalf("浮层里没有解析预览")
 	}
-
-	// 地址栏本身不该被塞进整条命令。
 	var url string
 	h.eval(t, `document.querySelector('.url-input').value`, &url)
-	if strings.Contains(url, "curl") {
-		t.Fatalf("地址栏被写入了整条命令：%q", url)
+	if url != "https://httpbin.org/post" {
+		t.Fatalf("地址栏被上一条粘贴改坏了：%q", url)
 	}
 
 	h.clearOverlays(t)

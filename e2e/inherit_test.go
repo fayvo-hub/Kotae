@@ -129,6 +129,17 @@ func saveTabInto(t *testing.T, name, collection, folder string) {
 	h.wait(t, "请求进了集合树", fmt.Sprintf(`[...document.querySelectorAll('.tree-label')].some(el => el.textContent.trim() === %s)`, jsString(name)))
 }
 
+// saveTabInPlace 按 Ctrl+S 把已经存进集合的请求原地写回：不该再弹「选集合」对话框。
+func saveTabInPlace(t *testing.T) {
+	t.Helper()
+	h.pressKeys(t, "S", true, false)
+	h.wait(t, "原地保存提示", `[...document.querySelectorAll('.toast')].some(el => (el.textContent || '').trim() === '已保存')`)
+	if h.exists(t, ".dialog") {
+		t.Fatal("已存过集合的请求再按 Ctrl+S 不该弹保存对话框")
+	}
+	h.wait(t, "未保存标记消失", `!document.querySelector('.tab.active .tab-dirty')`)
+}
+
 // deleteCollectionViaMenu 右键删除集合（确认文案是「删除」）。
 func deleteCollectionViaMenu(t *testing.T, name string) {
 	t.Helper()

@@ -973,12 +973,17 @@ export function activeTab(): Tab | undefined {
   return state.tabs.find((t) => t.id === state.activeTabId);
 }
 
-export function openTab(request: ApiRequest, name: string, origin?: Tab["origin"]): Tab {
+export function openTab(
+  request: ApiRequest,
+  name: string,
+  origin?: Tab["origin"],
+  dirty = false,
+): Tab {
   const tab: Tab = {
     id: uid("tab"),
     name,
     request,
-    dirty: false,
+    dirty,
     origin,
     sending: false,
     responseTab: "body",
@@ -2375,6 +2380,29 @@ export function openNode(collectionId: string, nodeId: string): void {
   openTab(cloneRequest(hit.node.request), hit.node.name, { collectionId, nodeId });
 }
 
+/** 当前标签对应的集合节点：只有 origin 指向真实存在的请求节点才算「存过」。 */
+function savedNode(tab: Tab): RequestNode | undefined {
+  const origin = tab.origin;
+  if (!origin || !origin.nodeId) return undefined;
+  const hit = findNode(origin.collectionId, origin.nodeId);
+  return hit && hit.node.type === "request" ? hit.node : undefined;
+}
+
+/**
+ * Ctrl+S / 保存按钮的落库路径：已经存进集合的请求直接原地覆盖，不再弹「选集合」对话框。
+ *
+ * 返回值表示是否真的原地保存了：false 时调用方打开保存对话框，让用户挑集合与名称
+ * （从未保存过、或只是从集合里新建但还没落库的标签页走这条）。
+ */
+export function saveActiveTab(): boolean {
+  const tab = activeTab();
+  if (!tab) return false;
+  const origin = tab.origin;
+  if (!origin || !savedNode(tab)) return false;
+  saveTab(origin.collectionId, undefined, tab.name);
+  return true;
+}
+
 /** 保存当前标签：已归属集合则原地更新，否则新建到目标集合。 */
 export function saveTab(collectionId: string, folderId: string | undefined, name: string): void {
   const tab = activeTab();
@@ -2877,13 +2905,55 @@ export function setPendingCurl(
   else emit();
 }
 
+/** 请求是不是还完全空白：地址、启用的参数/请求头/表单、请求体、认证都没填。 */
+function requestIsBlank(r: ApiRequest): boolean {
+  if (r.url.trim()) return false;
+  if (r.params.some((p) => p.enabled && (p.key.trim() || p.value.trim()))) return false;
+  if (r.headers.some((h) => h.enabled && (h.key.trim() || h.value.trim()))) return false;
+  if (r.form.some((f) => f.key.trim() || f.value.trim())) return false;
+  if (r.body.trim()) return false;
+  return r.auth.type === "none";
+}
+
+/**
+ * 粘贴来的 cURL（地址栏粘贴、首次引导）：当前标签还是空白请求就直接盖上去，
+ * 不用再让用户在「替换当前请求 / 新标签页打开」里选一次；已经有内容才弹导入浮层。
+ */
+export function importCurlParsed(payload: {
+  request: ApiRequest;
+  warnings: string[];
+  source: string;
+}): void {
+  const tab = activeTab();
+  if (!tab || !requestIsBlank(tab.request)) {
+    setPendingCurl(payload);
+    return;
+  }
+  const req = payload.request;
+  tab.request = cloneRequest(req);
+  // 填了内容但还没进集合：标成未保存，用户才知道要按 Ctrl+S 落到集合里。
+  tab.dirty = true;
+  tab.response = undefined;
+  tab.name = guessName(req.url, req.method);
+  persist();
+  emit();
+  const first = payload.warnings[0];
+  if (first) {
+    const more = payload.warnings.length > 1 ? `（共 ${payload.warnings.length} 处）` : "";
+    toast(`已导入 cURL 命令：${first}${more}`, "info");
+    return;
+  }
+  toast("已导入 cURL 命令", "success");
+}
+
 /** 确认导入：把解析出的请求填进当前标签（或用新标签）。 */
 export function applyPendingCurl(target: "replace" | "newTab"): void {
   const pending = state.pendingCurl;
   if (!pending) return;
   const req = pending.request;
   if (target === "newTab") {
-    openTab(cloneRequest(req), guessName(req.url, req.method));
+    // 从 cURL 开出来的标签页只有内容、还没存过，标成未保存才看得出要落库。
+    openTab(cloneRequest(req), guessName(req.url, req.method), undefined, true);
   } else {
     const tab = activeTab();
     if (tab) {
@@ -2892,7 +2962,7 @@ export function applyPendingCurl(target: "replace" | "newTab"): void {
       tab.response = undefined;
       tab.name = guessName(req.url, req.method);
     } else {
-      openTab(cloneRequest(req), guessName(req.url, req.method));
+      openTab(cloneRequest(req), guessName(req.url, req.method), undefined, true);
     }
   }
   state.pendingCurl = null;

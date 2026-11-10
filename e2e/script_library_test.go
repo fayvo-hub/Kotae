@@ -319,8 +319,8 @@ func TestScriptsPersistAcrossRestart(t *testing.T) {
 	openStepsTab(t, "pre")
 	addStep(t, "pre", "脚本")
 	fillStepSource(t, 1, `console.log("persist-request");`)
-	// 保存过的请求，改动要按 Ctrl+S 写回集合树才会落库。
-	saveTabInto(t, reqName, colName, "")
+	// 保存过的请求，改动要按 Ctrl+S 写回集合树才会落库（不再弹选集合框）。
+	saveTabInPlace(t)
 
 	waitForCommit(t, filepath.Join(h.userData, "workspace.db"), time.Now())
 	h.restart(t)
