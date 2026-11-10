@@ -615,6 +615,8 @@ function renderResponse(): void {
         tab.responseTab,
         tab.bodyView,
         tab.search,
+        // 当前命中的序号也算签名：按 Enter 只动序号，不加进来就不会重绘。
+        tab.searchIndex ?? 0,
       ].join("|")
     : "none";
   if (sig === lastResponseSig) return;

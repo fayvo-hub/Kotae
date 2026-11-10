@@ -3959,6 +3959,13 @@ textarea.kv-value {
   height: 24px;
 }
 
+.response-tools .search-count {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .error-card {
   display: flex;
   gap: 10px;
@@ -4222,6 +4229,13 @@ mark,
   color: var(--warn);
   border-radius: var(--radius-xs);
   padding: 0 1px;
+}
+
+/* 搜索命中的当前那一处：和其余命中区分开，Enter 跳转时能一眼看到跳到哪了。 */
+.code-view mark.mark-current,
+.json-line mark.mark-current {
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 /* 语法高亮 */

@@ -375,6 +375,8 @@ export interface Tab {
   bodyView: "pretty" | "raw";
   /** 响应体搜索词。 */
   search: string;
+  /** 当前命中的序号（0 开始；只在本次会话里有效，不落盘）。 */
+  searchIndex?: number;
   /** 请求编辑区的当前子页签。 */
   requestTab: "params" | "headers" | "body" | "auth" | "pre" | "post" | "options";
 }

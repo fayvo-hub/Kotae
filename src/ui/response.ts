@@ -426,12 +426,48 @@ function resTabs(tab: Tab, res: ResponseRecord, runs: ScriptRun[]): HTMLElement 
   strip.append(el("span", { class: "spacer" }), tools);
 
   wrap.append(strip);
-  if (tab.responseTab === "body") wrap.append(res.error ? errorView(res) : bodyView(tab, res));
-  else if (tab.responseTab === "headers") wrap.append(headersView(tab, res));
-  else if (tab.responseTab === "trace" && res.trace) wrap.append(traceView(res.trace));
-  else if (tab.responseTab === "console") wrap.append(consoleView(runs));
-  else wrap.append(requestView(tab));
+  let content: HTMLElement;
+  if (tab.responseTab === "body") content = res.error ? errorView(res) : bodyView(tab, res);
+  else if (tab.responseTab === "headers") content = headersView(tab, res);
+  else if (tab.responseTab === "trace" && res.trace) content = traceView(res.trace);
+  else if (tab.responseTab === "console") content = consoleView(runs);
+  else content = requestView(tab);
+  wrap.append(content);
+  if (tab.responseTab === "body") applySearchHits(tab, wrap);
   return wrap;
+}
+
+/** 在命中之间移动：总数从当前渲染里数，序号记在标签页上，重绘后落成高亮。 */
+function stepSearchHit(tab: Tab, step: number): void {
+  const total = document.querySelectorAll(".response-body .code-view mark").length;
+  if (total === 0) return;
+  tab.searchIndex = ((tab.searchIndex ?? 0) + step + total) % total;
+  window.dispatchEvent(new CustomEvent("mygo:rerender-response-body"));
+}
+
+/** 标出当前命中、写「第几个/共几个」，并把它滚进可视区。 */
+function applySearchHits(tab: Tab, host: HTMLElement): void {
+  const count = host.querySelector<HTMLElement>('[data-role="body-search-count"]');
+  if (!tab.search) {
+    tab.searchIndex = 0;
+    return;
+  }
+  const marks = [...host.querySelectorAll<HTMLElement>("mark")];
+  if (marks.length === 0) {
+    tab.searchIndex = 0;
+    if (count) count.textContent = "无匹配";
+    return;
+  }
+  const idx = Math.min(Math.max(tab.searchIndex ?? 0, 0), marks.length - 1);
+  tab.searchIndex = idx;
+  const current = marks[idx];
+  if (current) {
+    current.classList.add("mark-current");
+    requestAnimationFrame(() => {
+      if (current.isConnected) current.scrollIntoView({ block: "nearest" });
+    });
+  }
+  if (count) count.textContent = `${String(idx + 1)}/${String(marks.length)}`;
 }
 
 /** 「请求」页签：实际发出去的方法、地址、头与体，出问题时先看这里。 */
@@ -810,12 +846,19 @@ function bodyTools(tab: Tab, res: ResponseRecord): HTMLElement {
     on: {
       input: () => {
         tab.search = search.value;
+        tab.searchIndex = 0;
         window.dispatchEvent(new CustomEvent("mygo:rerender-response-body"));
       },
       keydown: (ev) => {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          stepSearchHit(tab, 1);
+          return;
+        }
         if (ev.key === "Escape") {
           search.value = "";
           tab.search = "";
+          tab.searchIndex = 0;
           window.dispatchEvent(new CustomEvent("mygo:rerender-response"));
         }
       },
@@ -824,6 +867,14 @@ function bodyTools(tab: Tab, res: ResponseRecord): HTMLElement {
   search.value = tab.search;
   search.dataset.role = "body-search";
   tools.append(search);
+  // 命中计数：具体数字要等响应体画完才知道，由 applySearchHits 填。
+  tools.append(
+    el("span", {
+      class: "search-count",
+      data: { role: "body-search-count" },
+      attr: { "aria-live": "polite" },
+    }),
+  );
 
   if (res.truncated) {
     tools.append(
