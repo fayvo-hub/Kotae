@@ -24,7 +24,7 @@ func TestBodyFocusKept(t *testing.T) {
 	clickIn(t, `.segmented[aria-label="请求体类型"]`, "JSON")
 	h.wait(t, "JSON 输入框", `(() => {
 	  const area = document.querySelector('.pane .code-input');
-	  return !!area && area.getAttribute('aria-label') === '请求体' && (area.getAttribute('placeholder') || '').includes('"name"');
+	  return !!area && area.getAttribute('aria-label') === '请求体' && (area.dataset.placeholder || '').includes('"name"');
 	})()`)
 	typeKeepingFocus(t, "JSON 请求体", ".pane .code-input", "{\n  \"name\": \"{{baseUrl}}\"\n}",
 		`node.getAttribute('aria-label') === '请求体'`)
@@ -33,7 +33,7 @@ func TestBodyFocusKept(t *testing.T) {
 	clickIn(t, `.segmented[aria-label="请求体类型"]`, "纯文本")
 	h.wait(t, "纯文本输入框", `(() => {
 	  const area = document.querySelector('.pane .code-input');
-	  return !!area && area.getAttribute('aria-label') === '请求体' && (area.getAttribute('placeholder') || '').includes('请求体正文');
+	  return !!area && area.getAttribute('aria-label') === '请求体' && (area.dataset.placeholder || '').includes('请求体正文');
 	})()`)
 	typeKeepingFocus(t, "纯文本请求体", ".pane .code-input", "hello {{baseUrl}}",
 		`node.getAttribute('aria-label') === '请求体'`)
@@ -87,11 +87,16 @@ func typeKeepingFocus(t *testing.T, what, selector, value, activeMatches string)
 	    if (window.__probeFrames < 3) requestAnimationFrame(tick);
 	  };
 	  requestAnimationFrame(tick);
-	  const proto = input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-	  Object.getOwnPropertyDescriptor(proto, 'value').set.call(input, %s);
+	  if (input instanceof HTMLTextAreaElement) {
+	    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, %s);
+	  } else if (input instanceof HTMLInputElement) {
+	    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, %s);
+	  } else {
+	    input.value = %s;
+	  }
 	  input.dispatchEvent(new Event('input', { bubbles: true }));
 	  return true;
-	})()`, jsString(selector), jsString(value)), &ok)
+	})()`, jsString(selector), jsString(value), jsString(value), jsString(value)), &ok)
 	if !ok {
 		t.Fatalf("%s：找不到可聚焦的输入框 %s", what, selector)
 	}

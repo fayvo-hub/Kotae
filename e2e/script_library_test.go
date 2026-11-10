@@ -93,10 +93,8 @@ func fillPaneSource(t *testing.T, phase string, index int, code string) {
   const sub = [...document.querySelectorAll('.settings-sub')].find(node => (node.querySelector('h4') || {}).textContent === %s);
   const area = sub && sub.querySelectorAll('.step-row')[%d]?.querySelector('.script-input');
   if (!area) return false;
-  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(area, %s);
-  area.dispatchEvent(new Event('input', { bubbles: true }));
-  return true;
-})()`, jsString(title), index-1, jsString(code))
+  return %s;
+})()`, jsString(title), index-1, setValueScript("area", jsString(code)))
 	var ok bool
 	h.eval(t, script, &ok)
 	if !ok {

@@ -194,8 +194,8 @@ func TestScreenshots(t *testing.T) {
 
 	// 06 导入集合：Postman Collection v2.1 粘进导入浮层，出集合树预览。
 	h.pressKeys(t, "i", true, true)
-	h.wait(t, "导入浮层", `document.querySelector('.dialog textarea') !== null`)
-	h.typeInto(t, ".dialog textarea", `{
+	h.wait(t, "导入浮层", `document.querySelector('.dialog .curl-input') !== null`)
+	h.typeInto(t, ".dialog .curl-input", `{
   "info": { "name": "示例 API", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json" },
   "item": [
     { "name": "用户", "item": [

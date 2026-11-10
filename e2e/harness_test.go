@@ -294,6 +294,13 @@ func (hb *harness) eval(t *testing.T, script string, out any) {
 	}
 }
 
+// settleFrames 等画面静下来：输入引发的重绘走 requestAnimationFrame 批处理，
+// 连等两帧后节点才是这一轮最终的那个（否则后续操作可能落在一个即将被换掉的节点上）。
+func (hb *harness) settleFrames(t *testing.T) {
+	t.Helper()
+	hb.eval(t, `new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))`, nil)
+}
+
 func (hb *harness) text(t *testing.T, selector string) string {
 	t.Helper()
 	var v string
@@ -528,20 +535,32 @@ func (hb *harness) shot(t *testing.T, name string) {
 	}
 }
 
+// setValue 往输入控件里写值并派发 input/change：原生输入框走原型 setter，
+// 自建代码框（div.code-editor）直接赋 value（它自带同名设置器）。
+func setValueScript(targetExpr, valueExpr string) string {
+	return fmt.Sprintf(`(() => {
+  const target = %s;
+  if (target instanceof HTMLTextAreaElement) {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(target, %s);
+  } else if (target instanceof HTMLInputElement) {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(target, %s);
+  } else {
+    target.value = %s;
+  }
+  target.dispatchEvent(new Event('input', { bubbles: true }));
+  target.dispatchEvent(new Event('change', { bubbles: true }));
+  return true;
+})()`, targetExpr, valueExpr, valueExpr, valueExpr)
+}
+
 // typeInto 往输入框里写值并触发 input 事件，模拟用户输入。
 func (hb *harness) typeInto(t *testing.T, selector, value string) {
 	t.Helper()
-	script := fmt.Sprintf(`(() => {
-  const input = document.querySelector(%s);
-  if (!input) return false;
-  const proto = input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-  Object.getOwnPropertyDescriptor(proto, 'value').set.call(input, %s);
-  input.dispatchEvent(new Event('input', { bubbles: true }));
-  input.dispatchEvent(new Event('change', { bubbles: true }));
-  return true;
-})()`, jsString(selector), jsString(value))
 	var ok bool
-	hb.eval(t, script, &ok)
+	hb.eval(t, fmt.Sprintf(`(() => {
+  if (!document.querySelector(%s)) return false;
+  return %s;
+})()`, jsString(selector), setValueScript(fmt.Sprintf("document.querySelector(%s)", jsString(selector)), jsString(value))), &ok)
 	if !ok {
 		t.Fatalf("要输入的元素不存在：%s", selector)
 	}
@@ -603,10 +622,13 @@ func (hb *harness) pressKeys(t *testing.T, key string, ctrl, shift bool) {
 // pressKeysOn 把按键事件派发到指定元素上（元素自己的 keydown 监听才会收到）。
 func (hb *harness) pressKeysOn(t *testing.T, selector, key string, ctrl, shift bool) {
 	t.Helper()
-	script := fmt.Sprintf(`(() => {
+	script := fmt.Sprintf(`(async () => {
   const node = document.querySelector(%s);
   if (!node) return false;
   node.focus();
+  // 聚焦之后浏览器还要落光标（异步发一次 selectionchange，自建代码框据此纠正），
+  // 真实用户在下一个任务里才按得下去：让出一个任务再派发按键。
+  await new Promise((resolve) => setTimeout(resolve, 0));
   node.dispatchEvent(new KeyboardEvent('keydown', {
     key: %s, ctrlKey: %t, shiftKey: %t, bubbles: true, cancelable: true,
   }));
