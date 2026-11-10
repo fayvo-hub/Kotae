@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/fayvo-hub/Kotae/actions/workflows/ci.yml/badge.svg)](https://github.com/fayvo-hub/Kotae/actions/workflows/ci.yml)
 [![Release](https://github.com/fayvo-hub/Kotae/actions/workflows/release.yml/badge.svg)](https://github.com/fayvo-hub/Kotae/actions/workflows/release.yml)
+[![Listed on Awesome MyGo](https://awesomemygo.dev/badge.svg)](https://awesomemygo.dev/apps/kotae)
 
 纯本地的轻量级 Postman：请求构建、发包、响应查看、集合与历史管理全部在这台机器上完成，不连云端、不需要后端服务。界面文案全部中文。
 
