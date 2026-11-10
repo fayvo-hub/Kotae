@@ -345,7 +345,7 @@ export function parsePairs(text: string): { key: string; value: string; disabled
 // ---- 变量补全 ----
 
 const assistHost = el("div", { class: "assist", attr: { role: "listbox" } });
-let assistTarget: HTMLInputElement | HTMLTextAreaElement | null = null;
+let assistTarget: TextField | null = null;
 let assistItems: { name: string; desc: string }[] = [];
 let assistIndex = 0;
 let assistTriggerAt = -1;
@@ -363,10 +363,22 @@ export function mountAssist(): void {
 const assistBound = new WeakSet<HTMLElement>();
 
 /**
+ * 变量补全能接的字段：原生输入框，或 codeEditor.ts 自建的编辑器。
+ * 自建编辑器提供同一套 value / selectionStart / setSelectionRange，所以补全逻辑不用分叉。
+ */
+export interface TextField extends HTMLElement {
+  value: string;
+  readonly selectionStart: number | null;
+  setSelectionRange(start: number, end: number): void;
+  /** 光标矩形（自建编辑器才有），补全层靠它贴边。 */
+  caretRect?(): DOMRect | null;
+}
+
+/**
  * 给任意输入框接上 {{变量}} 补全。表格的行内输入框、地址栏、请求体、cURL 导入框
  * 都走这一份实现，行为保持一致。
  */
-export function enableVarAssist(target: HTMLInputElement | HTMLTextAreaElement, key: string): void {
+export function enableVarAssist(target: TextField, key: string): void {
   target.dataset.assistKey = key;
   if (assistBound.has(target)) return;
   assistBound.add(target);
@@ -395,7 +407,7 @@ export function enableVarAssist(target: HTMLInputElement | HTMLTextAreaElement, 
  */
 export function resumeAssist(): void {
   if (!assistHost.classList.contains("open") || !assistKey) return;
-  const node = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+  const node = document.querySelector<TextField>(
     `[data-assist-key="${assistKey}"]`,
   );
   if (!node) {
@@ -450,11 +462,13 @@ function renderAssist(): void {
   assistHost.classList.add("open");
 }
 
-function positionAssist(target: HTMLElement): void {
-  const rect = target.getBoundingClientRect();
-  assistHost.style.left = `${Math.round(rect.left)}px`;
-  assistHost.style.top = `${Math.round(rect.bottom + 4)}px`;
-  assistHost.style.minWidth = `${Math.max(220, Math.round(rect.width))}px`;
+function positionAssist(target: TextField): void {
+  const box = target.getBoundingClientRect();
+  // 自建编辑器装的是多行大文本，盒子底部可能离光标很远，有光标矩形就贴着它。
+  const anchor = target.caretRect?.() ?? box;
+  assistHost.style.left = `${Math.round(anchor.left)}px`;
+  assistHost.style.top = `${Math.round(anchor.bottom + 4)}px`;
+  assistHost.style.minWidth = `${Math.max(220, Math.round(box.width))}px`;
 }
 
 function handleAssistKey(ev: KeyboardEvent): boolean {

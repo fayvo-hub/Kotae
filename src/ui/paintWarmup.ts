@@ -11,6 +11,7 @@
 // 实测：冷缓存下「新建脚本」首帧长帧 74ms，预热后 0ms。
 
 import { el, icon } from "./dom";
+import { codeEditor } from "./codeEditor";
 import { selectBox } from "./select";
 import { scriptApiDetails, scriptSourceField } from "./scriptEditor";
 
@@ -27,8 +28,8 @@ export function warmUpFirstPaint(): void {
     el(
       "div",
       { class: "dialog-body" },
-      // 脚本库编辑器：等宽文本域 + 高亮镜像层 + 可折叠的 API 速查。
-      // 源码给一段带注释/字符串/关键字/内置对象的样本，高亮的着色也一并预热。
+      // 脚本库编辑器：自建代码框 + 语法着色 + 右侧片段栏，
+      // 源码给一段带注释/字符串/关键字/内置对象的样本，着色也一并预热。
       scriptSourceField({
         source: `// 预热\nconst token = pm.environment.get("baseUrl");`,
         phase: "pre",
@@ -36,8 +37,14 @@ export function warmUpFirstPaint(): void {
         onInput: () => {},
       }),
       scriptApiDetails(),
-      // 请求体那种裸的等宽文本域。
-      el("textarea", { class: "code-input", attr: { spellcheck: "false", "aria-label": "预热" } }),
+      // 请求体那种裸的等宽代码框：变量高亮与占位提示的重量都在它身上。
+      codeEditor({
+        value: '{\n  "name": "{{baseUrl}}"\n}',
+        placeholder: '{\n  "name": "张三"\n}',
+        label: "预热",
+        vars: true,
+        onInput: () => {},
+      }),
       // 变量高亮的镜像层 + 变量浮层：着色、标签边框与阴影都是首次绘制才编译。
       el(
         "div",
@@ -106,7 +113,7 @@ export function warmUpFirstPaint(): void {
               el(
                 "div",
                 { class: "script-code" },
-                el("textarea", { class: "code-input script-input", attr: { spellcheck: "false", "aria-label": "预热" } }),
+                codeEditor({ value: "// 预热", className: "script-input", label: "预热", js: true, onInput: () => {} }),
                 el(
                   "div",
                   { class: "script-rail" },

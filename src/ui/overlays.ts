@@ -2,8 +2,8 @@
 
 import { databaseFile } from "../db";
 import { el, fill, icon, iconButton, icons } from "./dom";
+import { codeEditor } from "./codeEditor";
 import { enableVarAssist, kvTable } from "./kvtable";
-import { enableVarHighlight } from "./varTokens";
 import {
   activeTab,
   applyPendingCurl,
@@ -108,28 +108,25 @@ export function closeAll(): void {
 export function curlDialog(): HTMLElement {
   const body = el("div", { class: "stack" });
 
-  const textarea = el("textarea", {
-    class: "code-input curl-input",
-    attr: {
-      placeholder: "粘贴 curl 命令，例如：\ncurl 'https://httpbin.org/post' -X POST -H 'Content-Type: application/json' --data-raw '{\"name\":\"张三\"}'",
-      spellcheck: "false",
-      rows: "7",
-    },
-    on: {
-      input: () => {
-        // 手动修改文本时清掉旧预览，避免拿旧结果去覆盖当前请求。
-        state.pendingCurl = null;
-        fill(result);
-        renderFoot();
-        window.clearTimeout(autoTimer);
-        // 输入停顿后静默解析一次：成功就直接出预览，失败留给「解析」按钮报错。
-        autoTimer = window.setTimeout(() => preview(textarea.value, true), 320);
-      },
+  const editor = codeEditor({
+    value: "",
+    className: "curl-input",
+    label: "cURL 命令",
+    vars: true,
+    placeholder:
+      "粘贴 curl 命令，例如：\ncurl 'https://httpbin.org/post' -X POST -H 'Content-Type: application/json' --data-raw '{\"name\":\"张三\"}'",
+    onInput: (value) => {
+      // 手动修改文本时清掉旧预览，避免拿旧结果去覆盖当前请求。
+      state.pendingCurl = null;
+      fill(result);
+      renderFoot();
+      window.clearTimeout(autoTimer);
+      // 输入停顿后静默解析一次：成功就直接出预览，失败留给「解析」按钮报错。
+      autoTimer = window.setTimeout(() => preview(value, true), 320);
     },
   });
   let autoTimer: number | undefined;
-  enableVarAssist(textarea, "curl-input");
-  enableVarHighlight(textarea);
+  enableVarAssist(editor, "curl-input");
 
   const pasteBtn = el("button", {
     class: "btn small",
@@ -141,7 +138,7 @@ export function curlDialog(): HTMLElement {
           toast("剪贴板里没有文本", "error");
           return;
         }
-        textarea.value = text;
+        editor.value = text;
         preview(text);
       },
     },
@@ -151,7 +148,7 @@ export function curlDialog(): HTMLElement {
   const parseBtn = el("button", {
     class: "btn primary small",
     attr: { type: "button" },
-    on: { click: () => preview(textarea.value) },
+    on: { click: () => preview(editor.value) },
   });
   parseBtn.append(icon("check"), el("span", { text: "解析" }));
 
@@ -230,7 +227,7 @@ export function curlDialog(): HTMLElement {
       class: "dialog-hint",
       text: "支持浏览器「Copy as cURL」与后端文档里的命令：方法、地址、查询参数、请求头、请求体、认证、Cookie 都会自动填好。",
     }),
-    textarea,
+    editor,
     tools,
     result,
   );
@@ -238,13 +235,13 @@ export function curlDialog(): HTMLElement {
   const dialog = modal("导入 cURL 命令", body, footer, 720);
   const pending = state.pendingCurl;
   if (pending) {
-    textarea.value = pending.source;
+    editor.value = pending.source;
     fill(result, previewCard(pending.request, pending.warnings));
   }
   renderFoot();
   queueMicrotask(() => {
-    textarea.focus();
-    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    editor.focus();
+    editor.setSelectionRange(editor.value.length, editor.value.length);
   });
   return dialog;
 }
@@ -1579,19 +1576,15 @@ export function importDialog(): HTMLElement {
     text: "支持 Postman Collection v2.0 / v2.1（.json）与浏览器导出的 HAR。脚本、测试、集合级变量不会导入。",
   });
 
-  const textarea = el("textarea", {
-    class: "code-input curl-input",
-    attr: {
-      placeholder: "把 Collection 或 HAR 的 JSON 粘贴到这里，也可以直接选文件。",
-      spellcheck: "false",
-      rows: "8",
-    },
-    on: {
-      input: () => {
-        state.pendingImport = null;
-        fill(result);
-        renderFoot();
-      },
+  const editor = codeEditor({
+    value: "",
+    className: "curl-input",
+    label: "导入 JSON",
+    placeholder: "把 Collection 或 HAR 的 JSON 粘贴到这里，也可以直接选文件。",
+    onInput: () => {
+      state.pendingImport = null;
+      fill(result);
+      renderFoot();
     },
   });
 
@@ -1601,7 +1594,7 @@ export function importDialog(): HTMLElement {
   if (state.importDraft) {
     const draft = state.importDraft;
     state.importDraft = "";
-    textarea.value = draft;
+    editor.value = draft;
     queueMicrotask(() => preview(draft));
   }
 
@@ -1613,7 +1606,7 @@ export function importDialog(): HTMLElement {
         try {
           const file = await System.openText("选择 Postman Collection 或 HAR（JSON）");
           if (!file.path) return;
-          textarea.value = file.content;
+          editor.value = file.content;
           preview(file.content);
         } catch (err) {
           toast(`读取文件失败：${(err as Error).message}`, "error");
@@ -1626,7 +1619,7 @@ export function importDialog(): HTMLElement {
   const parseBtn = el("button", {
     class: "btn primary small",
     attr: { type: "button" },
-    on: { click: () => preview(textarea.value) },
+    on: { click: () => preview(editor.value) },
   });
   parseBtn.append(icon("check"), el("span", { text: "解析" }));
 
@@ -1705,7 +1698,7 @@ export function importDialog(): HTMLElement {
   }
 
   renderFoot();
-  body.append(hint, textarea, tools, result);
+  body.append(hint, editor, tools, result);
   return modal("导入 Postman / HAR", body, footer, 680);
 }
 

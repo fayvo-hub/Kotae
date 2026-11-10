@@ -3,6 +3,7 @@
 // 片段按用途分组，前置脚本只给变量与请求，后置脚本才给响应相关的那几组——
 // 前置执行时响应还不存在，把响应断言摆在那里只会让人写出必错的脚本。
 import { el } from "./dom";
+import type { CodeEditorElement } from "./codeEditor";
 import type { ScriptPhase } from "../types";
 
 interface Snippet {
@@ -111,25 +112,14 @@ function groupsOf(phase: ScriptPhase): SnippetGroup[] {
 
 /**
  * 把片段插到光标处（有选区就替换选区），插完把焦点还回输入框。
- * 走 input 事件而不是直接改值，上层的安静落库与 dirty 标记才会跟上。
+ * 插入动作在编辑器内部完成，它自己会派发 input，上层的安静落库与 dirty 标记因此能跟上。
  */
-export function insertSnippet(area: HTMLTextAreaElement, code: string): void {
-  const start = area.selectionStart ?? area.value.length;
-  const end = area.selectionEnd ?? start;
-  const before = area.value.slice(0, start);
-  const after = area.value.slice(end);
-  // 光标前不是空白行就先补一个换行，粘上去的代码不会和上一行连在一起。
-  const prefix = before.length === 0 || before.endsWith("\n") ? "" : "\n";
-  const text = prefix + code;
-  area.value = before + text + after;
-  const caret = before.length + text.length;
-  area.setSelectionRange(caret, caret);
-  area.focus();
-  area.dispatchEvent(new Event("input", { bubbles: true }));
+export function insertSnippet(area: CodeEditorElement, code: string): void {
+  area.insertSnippet(code);
 }
 
 /** 片段栏：一列分组标题 + 可点的片段行。 */
-export function snippetRail(phase: ScriptPhase, area: () => HTMLTextAreaElement | undefined): HTMLElement {
+export function snippetRail(phase: ScriptPhase, area: () => CodeEditorElement | undefined): HTMLElement {
   return el(
     "div",
     { class: "script-rail", attr: { "aria-label": "代码片段" } },

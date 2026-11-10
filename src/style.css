@@ -861,6 +861,7 @@ select.text-input,
 .code-input {
   width: 100%;
   min-height: 140px;
+  max-height: 420px;
   padding: 10px 12px;
   border-radius: var(--radius);
   border: 1px solid var(--border);
@@ -872,6 +873,23 @@ select.text-input,
   resize: vertical;
   tab-size: 2;
   transition: border-color var(--speed), box-shadow var(--speed);
+}
+
+/* 代码框本体是 contenteditable（见 src/ui/codeEditor.ts）：盒子自己画，
+   排版、选区、输入法交给浏览器。内容比盒子高就到 max-height 为止再滚。 */
+.code-editor {
+  display: block;
+  overflow-x: hidden;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/* 原生 placeholder 的替代：空值时用伪元素画提示，换行按字面渲染。 */
+.code-editor[data-empty="true"]::before {
+  content: attr(data-placeholder);
+  color: var(--text-3);
+  pointer-events: none;
 }
 
 .code-input:focus {
@@ -2215,67 +2233,41 @@ body.resizing-row * {
   color: var(--text-3);
 }
 
-/* ---- 脚本源码高亮（镜像层，与变量高亮同一套做法） ---- */
+/* ---- 代码框的着色（CSS Custom Highlight API） ----
+   着色区间由 src/ui/codeHighlight.ts 与 src/ui/varTokens.ts 算出来，
+   只有色相变，字重/斜体一律不改——Highlight 也只支持颜色类属性。 */
 
-.code-host {
-  position: relative;
+::highlight(kotae-var) {
+  color: var(--accent);
+  background-color: color-mix(in srgb, var(--accent) 13%, transparent);
 }
 
-.code-mirror {
-  position: absolute;
-  z-index: 2;
-  display: none;
-  overflow: hidden;
-  border-style: solid;
-  border-color: transparent;
-  background: transparent;
-  /* 镜像只负责上色，不能抢焦点、挡光标或挡住 resize 手柄。 */
-  pointer-events: none;
-  color: var(--text);
+::highlight(kotae-var-missing) {
+  color: var(--bad);
+  background-color: color-mix(in srgb, var(--bad) 13%, transparent);
 }
 
-.code-mirror.on {
-  display: block;
-}
-
-.code-inner {
-  white-space: inherit;
-  will-change: transform;
-}
-
-/* 文字透明，光标与选区仍由文本域自己画。着色片段一律不改字重、不加斜体，
-   否则字宽变化会让镜像与文本域的字符错位。 */
-.code-input.hl-input {
-  color: transparent;
-  caret-color: var(--text);
-}
-
-.code-input.hl-input::selection {
-  background: var(--accent-soft);
-  color: transparent;
-}
-
-.hl-comment {
+::highlight(kotae-hl-comment) {
   color: var(--text-3);
 }
 
-.hl-str {
+::highlight(kotae-hl-str) {
   color: var(--m-get);
 }
 
-.hl-num {
+::highlight(kotae-hl-num) {
   color: var(--m-post);
 }
 
-.hl-kw {
+::highlight(kotae-hl-kw) {
   color: var(--m-put);
 }
 
-.hl-builtin {
+::highlight(kotae-hl-builtin) {
   color: var(--redirect);
 }
 
-.hl-fn {
+::highlight(kotae-hl-fn) {
   color: var(--accent);
 }
 

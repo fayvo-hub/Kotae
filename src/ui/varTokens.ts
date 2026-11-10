@@ -108,26 +108,26 @@ function hook(target: VarField): boolean {
     if (tokens) inner.replaceChildren(...tokens);
     else inner.replaceChildren();
     sync();
-    if (!tokens) hideTip();
+    if (!tokens) hideVarTip();
   };
 
   target.addEventListener("input", paint);
   target.addEventListener("focus", paint);
   target.addEventListener("scroll", () => {
     syncScroll();
-    hideTip();
+    hideVarTip();
   });
   // 联合类型上的 addEventListener 取不到 MouseEvent 重载，显式换成事件监听签名。
   target.addEventListener("mousemove", ((ev: MouseEvent) => {
     // 拖动分栏或窗口改变宽度时镜像宽度会旧，借鼠标移动顺手对齐。
     sync();
     const hit = tokenAt(mirror, ev.clientX, ev.clientY);
-    if (!hit) return hideTip();
-    showTip(hit.dataset.varName ?? "", hit);
+    if (!hit) return hideVarTip();
+    showVarTip(hit.dataset.varName ?? "", hit.getBoundingClientRect());
   }) as EventListener);
-  target.addEventListener("mouseleave", hideTip);
-  target.addEventListener("blur", hideTip);
-  target.addEventListener("mousedown", hideTip);
+  target.addEventListener("mouseleave", hideVarTip);
+  target.addEventListener("blur", hideVarTip);
+  target.addEventListener("mousedown", hideVarTip);
 
   if (!listening) {
     listening = true;
@@ -143,24 +143,44 @@ function hook(target: VarField): boolean {
   return true;
 }
 
+export interface VarSpan {
+  start: number;
+  end: number;
+  name: string;
+  missing: boolean;
+}
+
+/**
+ * 扫描文本里的 {{变量}}，给出字符区间与能否解析到值。
+ * 镜像层（原生输入框）与自建编辑器都从这里取区间，只有一份解析规则。
+ */
+export function scanVars(text: string): VarSpan[] {
+  if (!text.includes("{{")) return [];
+  const vars = variableScope();
+  const out: VarSpan[] = [];
+  for (const m of text.matchAll(VAR_RE)) {
+    const start = m.index ?? 0;
+    const name = (m[1] ?? "").trim();
+    out.push({ start, end: start + m[0].length, name, missing: vars.value(name) === undefined });
+  }
+  return out;
+}
+
 /** 把值拆成文本节点与变量片段；没有完整的 {{}} 时返回 null 表示不需要高亮。 */
 function splitTokens(text: string): Node[] | null {
   if (!text.includes("{{")) return null;
-  const vars = variableScope();
   const out: Node[] = [];
   let last = 0;
-  for (const m of text.matchAll(VAR_RE)) {
-    const at = m.index ?? 0;
-    if (at > last) out.push(document.createTextNode(text.slice(last, at)));
-    const name = (m[1] ?? "").trim();
+  for (const span of scanVars(text)) {
+    if (span.start > last) out.push(document.createTextNode(text.slice(last, span.start)));
     out.push(
       el("span", {
-        class: `var-token${vars.value(name) === undefined ? " missing" : ""}`,
-        data: { varName: name },
-        text: m[0],
+        class: `var-token${span.missing ? " missing" : ""}`,
+        data: { varName: span.name },
+        text: text.slice(span.start, span.end),
       }),
     );
-    last = at + m[0].length;
+    last = span.end;
   }
   if (out.length === 0) return null;
   if (last < text.length) out.push(document.createTextNode(text.slice(last)));
@@ -189,7 +209,7 @@ function tipBox(): HTMLElement {
   return tip;
 }
 
-function showTip(name: string, anchor: HTMLElement): void {
+export function showVarTip(name: string, anchor: DOMRect): void {
   if (!name) return;
   const vars = variableScope();
   const value = vars.value(name);
@@ -215,28 +235,25 @@ function showTip(name: string, anchor: HTMLElement): void {
 }
 
 /** 浮层贴在变量上方；上方放不下就翻到下方，左右钳在视口内。 */
-function placeTip(box: HTMLElement, anchor: HTMLElement): void {
-  const rect = anchor.getClientRects()[0];
+function placeTip(box: HTMLElement, rect: DOMRect): void {
   const pad = 8;
   const gap = 6;
   const width = box.offsetWidth;
   const height = box.offsetHeight;
-  const anchorLeft = rect ? rect.left : pad;
-  const anchorTop = rect ? rect.top : pad;
-  const left = Math.min(Math.max(pad, anchorLeft), Math.max(pad, window.innerWidth - width - pad));
-  const above = anchorTop - height - gap;
-  const below = rect ? rect.bottom + gap : pad + height + gap;
+  const left = Math.min(Math.max(pad, rect.left), Math.max(pad, window.innerWidth - width - pad));
+  const above = rect.top - height - gap;
+  const below = rect.bottom + gap;
   box.style.left = `${Math.round(left)}px`;
   box.style.top = `${Math.round(above >= pad ? above : below)}px`;
 }
 
-function hideTip(): void {
+export function hideVarTip(): void {
   tip?.classList.remove("on");
   tipName = "";
 }
 
-window.addEventListener("mygo:close-popovers", hideTip);
-window.addEventListener("scroll", hideTip, true);
+window.addEventListener("mygo:close-popovers", hideVarTip);
+window.addEventListener("scroll", hideVarTip, true);
 
 /** 变量解析：给出值与它来自哪里，供浮层标注。 */
 function variableScope(): { value: (name: string) => string | undefined; source: (name: string) => string } {

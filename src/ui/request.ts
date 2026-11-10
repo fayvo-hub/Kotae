@@ -1,6 +1,7 @@
 // 请求编辑区：方法 + URL + 发送 + cURL 导入导出 + 参数/头/体/认证/前置/后置/选项 七个子页签。
 
 import { el, fill, icon, iconButton, icons } from "./dom";
+import { codeEditor } from "./codeEditor";
 import { assistOpen, enableVarAssist, kvTable } from "./kvtable";
 import { selectBox } from "./select";
 import {
@@ -636,44 +637,23 @@ function bodyPane(tab: Tab): HTMLElement {
     return host;
   }
 
-  const area = el("textarea", {
-    class: "code-input",
-    attr: {
-      placeholder:
-        tab.request.bodyMode === "json" ? '{\n  "name": "张三"\n}' : "请求体正文，支持 {{变量}}",
-      spellcheck: "false",
-      "aria-label": "请求体",
-    },
-    on: {
-      input: () => {
-        const value = area.value;
-        refreshChrome(
-          mutateDraft((r) => {
-            r.body = value;
-          }),
-        );
-        updateJsonStatus(value);
-      },
-      keydown: (ev) => {
-        if (assistOpen()) return;
-        if (ev.key === "Tab") {
-          ev.preventDefault();
-          const start = area.selectionStart;
-          area.value = `${area.value.slice(0, start)}  ${area.value.slice(area.selectionEnd)}`;
-          area.setSelectionRange(start + 2, start + 2);
-          const value = area.value;
-          refreshChrome(
-            mutateDraft((r) => {
-              r.body = value;
-            }),
-          );
-        }
-      },
+  const editor = codeEditor({
+    value: tab.request.body,
+    placeholder: tab.request.bodyMode === "json" ? '{\n  "name": "张三"\n}' : "请求体正文，支持 {{变量}}",
+    label: "请求体",
+    vars: true,
+    // 代码框里 Tab 缩进两个空格，不再拿去跳焦点。
+    tabIndent: "  ",
+    onInput: (value) => {
+      refreshChrome(
+        mutateDraft((r) => {
+          r.body = value;
+        }),
+      );
+      updateJsonStatus(value);
     },
   });
-  area.value = tab.request.body;
-  enableVarAssist(area, `body:${tab.id}`);
-  enableVarHighlight(area);
+  enableVarAssist(editor, `body:${tab.id}`);
 
   const status = el("div", { class: "pane-status" });
   const updateJsonStatus = (value: string): void => {
@@ -694,9 +674,7 @@ function bodyPane(tab: Tab): HTMLElement {
   };
   updateJsonStatus(tab.request.body);
 
-  const height = Math.min(420, Math.max(140, (tab.request.body.split("\n").length + 2) * 20));
-  area.style.minHeight = `${height}px`;
-  host.append(area, status);
+  host.append(editor, status);
   return host;
 }
 
@@ -704,48 +682,37 @@ function bodyPane(tab: Tab): HTMLElement {
 function graphqlBodyPane(tab: Tab): HTMLElement {
   const box = el("div", { class: "graphql-pane" });
 
-  const query = el("textarea", {
-    class: "code-input graphql-query",
-    attr: {
-      placeholder: "query ($id: ID!) {\n  user(id: $id) { id name }\n}",
-      spellcheck: "false",
-      "aria-label": "GraphQL 查询",
-    },
-    on: {
-      input: () => {
-        const value = query.value;
-        refreshChrome(
-          mutateDraft((r) => {
-            r.body = value;
-          }),
-        );
-      },
+  const query = codeEditor({
+    value: tab.request.body,
+    placeholder: "query ($id: ID!) {\n  user(id: $id) { id name }\n}",
+    label: "GraphQL 查询",
+    className: "graphql-query",
+    vars: true,
+    tabIndent: "  ",
+    onInput: (value) => {
+      refreshChrome(
+        mutateDraft((r) => {
+          r.body = value;
+        }),
+      );
     },
   });
-  query.value = tab.request.body;
   enableVarAssist(query, `gql:${tab.id}`);
-  enableVarHighlight(query);
 
-  const vars = el("textarea", {
-    class: "code-input graphql-vars",
-    attr: {
-      placeholder: '{\n  "id": 1\n}',
-      spellcheck: "false",
-      "aria-label": "GraphQL 变量",
-    },
-    on: {
-      input: () => {
-        const value = vars.value;
-        refreshChrome(
-          mutateDraft((r) => {
-            r.graphqlVars = value;
-          }),
-        );
-        paintVarsStatus(value);
-      },
+  const vars = codeEditor({
+    value: tab.request.graphqlVars ?? "",
+    placeholder: '{\n  "id": 1\n}',
+    label: "GraphQL 变量",
+    className: "graphql-vars",
+    onInput: (value) => {
+      refreshChrome(
+        mutateDraft((r) => {
+          r.graphqlVars = value;
+        }),
+      );
+      paintVarsStatus(value);
     },
   });
-  vars.value = tab.request.graphqlVars ?? "";
 
   const status = el("div", { class: "pane-status" });
   const paintVarsStatus = (value: string): void => {
