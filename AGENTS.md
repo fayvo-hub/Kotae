@@ -82,7 +82,7 @@ AI 代理修改本仓库时的强制规则。与 `~/.pi/agent/AGENTS.md` 冲突�
 - 图标与托盘图标的唯一来源是 `scripts/make-icons.py`：改设计就改脚本再 `python scripts/make-icons.py`，不要手改 `resources/icon.png` / `resources/tray.png`（两处尺寸与视觉要一致）
 - 本机没有 Bun：`devCommand` / `buildCommand` 走 `npm`，不要改回 `bun`
 - Windows 上做过安装/卸载实测：静默安装 `/S`、安装目录 `%LOCALAPPDATA%\Programs\Kotae`、卸载**不会**删 `%APPDATA%\Kotae`。手动跑真实二进制/安装包验证后，自己产生的 `%APPDATA%\Kotae` 与 `%APPDATA%\Kotae Dev` 必须清理干净
-- 发版（版本对齐、闸门、打标签、资产核对、重发与排查）走 `.agents/skills/mygo-release/SKILL.md`，不要在对话里临时拼命令
+- 发版（版本对齐、闸门、打标签、资产核对、重发与排查）走 `.agents/skills/mygo-release/SKILL.md`，不要在对话里临时拼命令：版本号副本用 `node scripts/bump-version.mjs <版本>` 改（含 CHANGELOG 缺段与残留校验），Release 资产用 `node scripts/wait-release-assets.mjs v<版本>` 轮询（出齐即返回）
 
 ## 禁止清单
 
@@ -112,9 +112,10 @@ AI 代理修改本仓库时的强制规则。与 `~/.pi/agent/AGENTS.md` 冲突�
 | 改 `src/db.ts` 或表结构 | 上面全部，并确认 `e2e/storage_test.go` 的迁移与重启用例通过 |
 | 改 `mygo.config.ts` / 图标 / 依赖 | `npm run build`，必要时 `MYGO_E2E_PACKAGING=1 npm run e2e` |
 | 改 `src/style.css` 或任何界面结构 | `npm run lint:ui` + `npm run build:web` + `MYGO_E2E_SHOTS=1 npm run e2e`，并比对 `e2e/artifacts/` 的浅色/深色截图 |
-| 提交前 | `npm run typecheck && npm run lint:ui && go vet ./... && npm run e2e` |
+| 提交前 | 按本次改动选上面一行对应的命令，不跑无关项；只改文档、注释、版本号时为 `npm run typecheck && npm run lint:ui` |
 
 - `npm run e2e` 默认会先 `npm run build:web`；前端没改动时用 `MYGO_E2E_SKIP_BUILD=1 npm run e2e`
+- 两套 e2e 不叠加：`MYGO_E2E_PACKAGING=1` 那轮把同一套用例跑在打包产物上，已覆盖普通 e2e，跑它就不必再跑 `npm run e2e`
 - 排障用 `MYGO_E2E_KEEP=1 npm run e2e`（保留临时目录与应用日志）；截图默认不落盘，加 `MYGO_E2E_SHOTS=1` 才写到 `e2e/artifacts/`
 - e2e 启动的窗口默认被挪到屏幕外（`desktop.go` 的 `placeE2EWindow`），不挡使用者；要盯屏跑用 `MYGO_E2E_WINDOW=visible`。每次运行的应用名带随机后缀，避免上一轮残留进程占着单实例锁把这一轮挡在启动阶段
 - e2e 每轮都是全新的 userData，WebView2 的 GPU 着色器/栅格缓存是冷的：某个控件类型第一次出现时（如脚本库的源码编辑框）会掉一次 70ms 级长帧，用同一个 userData 重启后同一步骤就只剩 8–14ms。量帧间隔或排查「首次操作卡一下」时别把它当回归。已由 `src/ui/paintWarmup.ts` 在启动时把对话框骨架 + 等宽文本域 + 折叠面板 + 前置/后置操作行与代码片段栏 + 变量高亮层与变量浮层先画两帧（实测 `新建脚本` 首帧长帧 74ms → 0）；以后新增会在首屏后首次绘制的控件，加进那份预热清单
