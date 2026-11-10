@@ -33,7 +33,8 @@ func sseHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, ": ping\n\n")
 	flusher.Flush()
 	for i := 1; i <= n; i++ {
-		fmt.Fprintf(w, "event: tick\nid: %d\ndata: {\"seq\":%d,\"text\":\"第 %d 条\"}\n\n", i, i, i)
+		// q 里带的是这次握手的原始查询串：用来断言公共参数真的进了 SSE 握手地址。
+		fmt.Fprintf(w, "event: tick\nid: %d\ndata: {\"seq\":%d,\"text\":\"第 %d 条\",\"q\":%q}\n\n", i, i, i, r.URL.RawQuery)
 		flusher.Flush()
 		time.Sleep(20 * time.Millisecond)
 	}

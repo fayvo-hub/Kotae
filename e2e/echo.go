@@ -6,9 +6,11 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -162,6 +164,28 @@ func StartEcho() *Echo {
 	// 这里把收到的目标地址原样回显，用来证明请求真的走了代理。
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"proxied": true, "target": r.RequestURI})
+	})
+	// /common 用纯文本（而不是 JSON）回显收到的查询参数与请求头：环境级公共参数的
+	// 断言直接读这份文本，不必穿过响应体的结构化视图排版。多值用逗号连接。
+	mux.HandleFunc("/common", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		query := r.URL.Query()
+		names := make([]string, 0, len(query))
+		for name := range query {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			fmt.Fprintf(w, "q:%s=%s\n", name, strings.Join(query[name], ","))
+		}
+		headers := make([]string, 0, len(r.Header))
+		for name := range r.Header {
+			headers = append(headers, strings.ToLower(name))
+		}
+		sort.Strings(headers)
+		for _, name := range headers {
+			fmt.Fprintf(w, "h:%s=%s\n", name, strings.Join(r.Header.Values(name), ","))
+		}
 	})
 	// 流式接口：SSE 推送与最小 WebSocket 回显。
 	mux.HandleFunc("/sse", sseHandler)
