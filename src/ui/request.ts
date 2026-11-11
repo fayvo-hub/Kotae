@@ -164,6 +164,16 @@ function urlBar(tab: Tab): HTMLElement {
     on: {
       input: () => {
         setUrlInvalid(urlInput, false);
+        // 逐字落库：失焦才提交的话，焦点还停在地址栏里按 Ctrl+S（或 Ctrl+Enter 发送）
+        // 用的还是上一次提交的旧地址，界面却提示「已保存」，改动就这么丢了。
+        // 这里只同步文本，拆分查询参数仍然留给失焦 / 回车时的 applyURL。
+        // 空值不提交：清空地址栏后离开，保持「没填地址」而不是把地址抹掉。
+        if (!urlInput.value.trim()) return;
+        refreshChrome(
+          mutateDraft((r) => {
+            r.url = urlInput.value;
+          }),
+        );
       },
       paste: (ev) => {
         const text = ev.clipboardData?.getData("text") ?? "";
@@ -185,16 +195,11 @@ function urlBar(tab: Tab): HTMLElement {
       // 协议在发送时按解析后的地址兜底（见 util.ensureScheme）。
       // 必须写回自己的标签：切换标签时旧输入框被移除也会触发一次 blur，
       // 那时 activeTab 已经是新标签了。
+      // 文本已经逐字写进状态了，失焦这一下只负责把查询参数从地址里拆进表格。
+      // 什么都没变时 applyURL 自己会短路，不会白重绘。
       blur: () => {
         const raw = urlInput.value;
-        if (!raw.trim()) return;
-        // 值没变就什么都别做：整页重绘会把正在就地编辑的东西（比如集合树里的
-        // 改名框）直接擦掉，输入框失焦只该在真的改了内容时落库。
-        if (raw === tab.request.url) {
-          setUrlInvalid(urlInput, false);
-          return;
-        }
-        applyURL(raw, tab.id);
+        if (raw.trim()) applyURL(raw, tab.id);
         setUrlInvalid(urlInput, false);
       },
     },
@@ -249,6 +254,21 @@ function urlBar(tab: Tab): HTMLElement {
     el("div", { class: "url-actions" }, saveBtn, snippetBtn, sendBtn),
   );
   return bar;
+}
+
+/**
+ * 按 Ctrl+S 之前把地址栏里正在编辑的地址提交完（快捷键不会先失焦）。
+ *
+ * 地址栏逐字写的是原文，查询参数要等失焦或这里调 applyURL 才拆进表格：
+ * 少了这一步，集合里存下的形态就和用户看到的地址栏不一致。
+ */
+export function commitAddressBar(): void {
+  const input = document.querySelector<HTMLInputElement>(".url-input");
+  if (!input || document.activeElement !== input) return;
+  const raw = input.value;
+  if (!raw.trim()) return;
+  const tab = activeTab();
+  if (tab) applyURL(raw, tab.id);
 }
 
 function setUrlInvalid(input: HTMLInputElement, invalid: boolean): void {

@@ -7,7 +7,7 @@ import type { ApiRequest, Tab } from "./types";
 import { el, fill, icon, iconButton, icons } from "./ui/dom";
 import { mountAssist, resumeAssist } from "./ui/kvtable";
 import { responsePanel } from "./ui/response";
-import { requestPanel } from "./ui/request";
+import { commitAddressBar, requestPanel } from "./ui/request";
 import { promptNewCollection, sidebar } from "./ui/sidebar";
 import {
   closeAll,
@@ -1001,6 +1001,8 @@ function onKeydown(ev: KeyboardEvent): void {
 
 /** 存一次当前标签：已进过集合就原地覆盖，只有还没归属的请求才弹保存对话框。 */
 function requestSave(): void {
+  // 快捷键不会先失焦，正在编辑的地址得在这里补提交（见 commitAddressBar）。
+  commitAddressBar();
   if (saveActiveTab()) {
     // 原地保存刚把集合里的那条改成当前内容，界面没有任何需要重建的地方：
     // 提示条自己刷一下就行，否则每次 Ctrl+S 都会重绘整个面板（看起来闪一下）。

@@ -124,8 +124,11 @@ func clearCommonParams(t *testing.T) {
 // addRequestParam 往请求面板的「查询参数」表里加一行。
 func addRequestParam(t *testing.T, key, value string) {
 	t.Helper()
-	clickIn(t, ".subtabs:not(.response-subtabs)", "查询参数")
+	h.activateSubtab(t, "查询参数")
 	h.wait(t, "查询参数面板", `!!document.querySelector('.pane .kv-foot')`)
+	// 页签切换的重绘是 rAF 批处理的：先记下当前行数，点完必须等它真的多一行，
+	// 否则点到的是上一次渲染留下、已脱离文档的按钮，画出来的行用户看不到。
+	before := h.count(t, ".pane .kv-row")
 	var clicked bool
 	h.eval(t, `(() => {
   const btn = [...document.querySelectorAll('.pane .kv-foot .link-btn')].find((b) => (b.textContent || '').trim().startsWith('添加一行'));
@@ -136,6 +139,7 @@ func addRequestParam(t *testing.T, key, value string) {
 	if !clicked {
 		t.Fatalf("查询参数面板里找不到「添加一行」")
 	}
+	h.wait(t, "参数行已添加", fmt.Sprintf(`document.querySelectorAll('.pane .kv-row').length === %d`, before+1))
 	h.eval(t, fmt.Sprintf(`(() => {
   const rows = [...document.querySelectorAll('.pane .kv-row')];
   const row = rows[rows.length - 1];

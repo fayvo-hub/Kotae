@@ -1107,7 +1107,10 @@ export function applyURL(raw: string, tabId?: string): void {
   const added = params
     .filter((p) => !kept.some((e) => e.key === p.key && e.value === p.value))
     .map((p) => ({ id: uid("kv"), key: p.key, value: p.value, enabled: true }));
-  const droppedEmpty = kept.length !== tab.request.params.length;
+  // 地址里带了查询串才算「表格被地址合并过」，可以清掉还没填的空行；
+  // 地址里没有查询串时什么都别删：地址栏失焦也会走到这里（比如点参数表的「添加一行」，
+  // 新行抢走焦点就会让地址栏 blur），否则用户刚加的空行会被这一次失焦吞掉。
+  const droppedEmpty = params.length > 0 && kept.length !== tab.request.params.length;
   // 地址里的 `:id` 这类占位符变了，路径变量表也得跟着变，否则参数页签会停在旧列表。
   const nextNames = pathVarNames(base);
   const currentRows = tab.request.pathVars ?? [];

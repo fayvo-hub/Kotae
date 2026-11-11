@@ -172,3 +172,98 @@ func TestFormFileRowLayout(t *testing.T) {
 	}
 	h.shot(t, "33-form-file-row")
 }
+
+// 地址栏的内容原本只在失焦、回车时才提交（见 urlBar 的 blur 处理）：焦点还停在
+// 输入框里按 Ctrl+S，集合里写进去的还是上一次提交的旧地址，界面却提示「已保存」，
+// 用户的改动就这么没了。输入后标签条要立刻标出未保存，Ctrl+S 存的必须是屏幕上这份。
+func TestSaveCommitsURLWhileFocused(t *testing.T) {
+	const (
+		colName = "焦点保存集合"
+		reqName = "焦点保存请求"
+	)
+	h.clearOverlays(t)
+	newCollection(t, colName)
+	newRequestVia(t, colName)
+	typeURL(t, "{{baseUrl}}/json")
+	saveTabInto(t, reqName, colName, "")
+
+	// 只输入、不失焦：焦点留在地址栏里，标签条要立刻标出未保存。
+	var focused bool
+	h.eval(t, `(() => {
+		const i = document.querySelector('.url-input');
+		i.focus();
+		i.value = '{{baseUrl}}/echo';
+		i.dispatchEvent(new Event('input', { bubbles: true }));
+		return document.activeElement === i;
+	})()`, &focused)
+	if !focused {
+		t.Fatal("地址栏没拿到焦点，用例没测到「焦点不移开」的场景")
+	}
+	h.wait(t, "输入后标签条立刻标出未保存", `!!document.querySelector('.tab.active .tab-dirty')`)
+
+	// 焦点不动直接 Ctrl+S：存进集合的必须是屏幕上这份地址。
+	saveTabInPlace(t)
+
+	// 关掉标签页再从集合打开：读到的必须是刚输入的地址。
+	before := h.count(t, ".tab")
+	h.pressKeys(t, "w", true, false)
+	h.wait(t, "标签页关闭", fmt.Sprintf(`document.querySelectorAll('.tab').length === %d`, before-1))
+	h.openRequest(t, reqName)
+	var url string
+	h.eval(t, `document.querySelector('.url-input').value`, &url)
+	if url != "{{baseUrl}}/echo" {
+		t.Fatalf("焦点没移开时按 Ctrl+S，集合里存的还是旧地址：%q", url)
+	}
+}
+
+// 地址栏逐字落库之后，失焦仍得把查询参数从地址里拆进「参数」表格：
+// 这条路径不能被「已经同步过文本」的捷径吃掉，否则粘贴完整 URL 就不再生成参数行。
+func TestURLBlurSplitsQuery(t *testing.T) {
+	h.clearOverlays(t)
+	newTab(t)
+
+	h.typeInto(t, ".url-input", "{{baseUrl}}/echo?a=1&b=2")
+	blurURL(t)
+	h.wait(t, "参数拆进表格", `[...document.querySelectorAll('.kv-row')].filter(r => (r.querySelector('.kv-key') || {}).value).length === 2`)
+
+	var report string
+	h.eval(t, `JSON.stringify({
+		url: document.querySelector('.url-input').value,
+		rows: [...document.querySelectorAll('.kv-row')].map(r => r.querySelector('.kv-key').value + '=' + r.querySelector('.kv-value').value),
+	})`, &report)
+	if !strings.Contains(report, `"url":"{{baseUrl}}/echo"`) {
+		t.Fatalf("失焦后地址栏没去掉查询串：%s", report)
+	}
+	if !strings.Contains(report, "a=1") || !strings.Contains(report, "b=2") {
+		t.Fatalf("查询参数没拆进表格：%s", report)
+	}
+}
+
+// 地址栏失焦不该动参数表里的空行：地址里没有查询串时，那张表没被地址合并过，
+// 空行是用户刚点「添加一行」加出来、正要填的。这条路径在真实使用里一定走到——
+// 点「添加一行」时新行抢焦点，地址栏立刻 blur。
+func TestURLBlurKeepsEmptyParamRow(t *testing.T) {
+	h.clearOverlays(t)
+	newTab(t)
+
+	typeURL(t, "{{baseUrl}}/echo")
+	h.activateSubtab(t, "查询参数")
+	h.wait(t, "查询参数面板", `!!document.querySelector('.pane .kv-foot')`)
+	var clicked bool
+	h.eval(t, `(() => {
+		const btn = [...document.querySelectorAll('.pane .kv-foot .link-btn')].find(b => (b.textContent || '').trim().startsWith('添加一行'));
+		if (!btn) return false;
+		btn.click();
+		return true;
+	})()`, &clicked)
+	if !clicked {
+		t.Fatalf("查询参数面板里找不到「添加一行」")
+	}
+	h.wait(t, "参数行已添加", `document.querySelectorAll('.pane .kv-row').length === 1`)
+
+	blurURL(t)
+	h.settleFrames(t)
+	if got := h.count(t, ".pane .kv-row"); got != 1 {
+		t.Fatalf("地址栏失焦把刚加的空行吞掉了：现在有 %d 行", got)
+	}
+}
