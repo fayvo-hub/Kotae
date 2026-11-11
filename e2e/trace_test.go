@@ -122,6 +122,34 @@ func TestTraceTabSwitchable(t *testing.T) {
 		t.Fatalf("没有重定向时应只有一跳，实际 %d", count)
 	}
 
+	// 每次发送都重新建连接：连发两次同一地址，第二次不能标成「复用了已有连接」，
+	// 否则改完 hosts / DNS 还连着旧机器。
+	connText := `[...document.querySelectorAll('.trace-view .muted.small')]
+  .map(el => (el.textContent || '').trim())
+  .find(t => t === '新建连接' || t === '复用了已有连接') || ''`
+	h.wait(t, "连接状态就位", "("+connText+") !== ''")
+	var firstConn string
+	h.eval(t, connText, &firstConn)
+	if firstConn != "新建连接" {
+		t.Fatalf("首次发送应新建连接，实际 %q", firstConn)
+	}
+
+	// 换一个带查询串的地址再发一次：URL 变化当作「这次响应已渲染」的锦点，
+	// 不能拿上一份结果当新的。
+	typeURL(t, "{{baseUrl}}/json?again=1")
+	h.send(t)
+	clickIn(t, ".response-subtabs", "链路")
+	h.wait(t, "第二次发送完成", `(() => {
+  const url = document.querySelector('.trace-hop .trace-url');
+  return document.querySelectorAll('.trace-hop').length === 1 &&
+    !!url && (url.textContent || '').includes('again=1');
+})()`)
+	var secondConn string
+	h.eval(t, connText, &secondConn)
+	if secondConn != "新建连接" {
+		t.Fatalf("换一次发送也必须新建连接（改 hosts 才能立刻生效），实际 %q", secondConn)
+	}
+
 	clickIn(t, ".response-subtabs", "响应体")
 	h.wait(t, "回到响应体", `!document.querySelector('.trace-view') && !!document.querySelector('.response-body')`)
 }

@@ -30,10 +30,49 @@ type routingTransport struct {
 
 	mu    sync.Mutex
 	cache map[string]*http.Transport
+	// sent 记录已经开头的 trace id，用来分辨「新的一次发送」与「同一请求的重定向跳」。
+	sent map[string]struct{}
 }
 
 func newRoutingTransport(base http.RoundTripper) *routingTransport {
-	return &routingTransport{base: base, cache: map[string]*http.Transport{}}
+	return &routingTransport{base: base, cache: map[string]*http.Transport{}, sent: map[string]struct{}{}}
+}
+
+// freshConn 在每次发送的第一跳之前关掉所有空闲连接。
+//
+// 调试工具的语义是「每条请求都是当下最新的状态」：浏览器与 Postman 会复用 keep-alive
+// 连接，改了 hosts / DNS 之后旧连接还连着旧机器，很容易让人以为改动没生效（连接池里
+// 的连接能活 90 秒）。所以跨请求一律新建连接；同一 trace 内跟随重定向仍复用，与浏览器
+// 跑同一串重定向的行为一致。
+func (rt *routingTransport) freshConn(traceID string) {
+	if traceID != "" {
+		rt.mu.Lock()
+		_, seen := rt.sent[traceID]
+		if !seen {
+			// trace id 每条请求一个，累积到一定数量就整块换掉：漏掉的那次最多让下一跳
+			// 再新建一次连接，不影响正确性。
+			if len(rt.sent) > 512 {
+				rt.sent = map[string]struct{}{}
+			}
+			rt.sent[traceID] = struct{}{}
+		}
+		rt.mu.Unlock()
+		if seen {
+			return
+		}
+	}
+	if closer, ok := rt.base.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
+	rt.mu.Lock()
+	cached := make([]*http.Transport, 0, len(rt.cache))
+	for _, transport := range rt.cache {
+		cached = append(cached, transport)
+	}
+	rt.mu.Unlock()
+	for _, transport := range cached {
+		transport.CloseIdleConnections()
+	}
 }
 
 func (rt *routingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -66,6 +105,9 @@ func (rt *routingTransport) RoundTrip(req *http.Request) (*http.Response, error)
 			viaProxy = true
 		}
 	}
+
+	// 新的一次发送先把空闲连接清掉，避免改完 hosts 还连到旧机器上。
+	rt.freshConn(traceID)
 
 	timer := newHopTimer()
 	if traceID != "" {

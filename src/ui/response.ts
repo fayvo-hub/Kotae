@@ -587,7 +587,7 @@ function traceView(trace: ResponseTrace): HTMLElement {
   host.append(
     el("p", {
       class: "muted small",
-      text: "对端地址是这一跳真正连上的 IP:端口：复用连接时它还是那条连接建立时连上的机器，改 hosts / DNS 后要等旧连接释放才会变。阶段耗时由 Go 侧 httptrace 采集；正文下载时间见状态栏的「读取」值。",
+      text: "对端地址是这一跳真正连上的 IP:端口。每次发送都重新建立连接，改完 hosts / DNS 之后下一条请求就按新解析连；同一请求内跟随重定向的那几跳会复用连接。阶段耗时由 Go 侧 httptrace 采集；正文下载时间见状态栏的「读取」值。",
     }),
   );
   return host;

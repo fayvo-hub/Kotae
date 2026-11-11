@@ -4,8 +4,10 @@
 package main
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"net/url"
 	"testing"
 )
@@ -127,5 +129,52 @@ func TestInsecureKeepsSystemProxy(t *testing.T) {
 	}
 	if direct.Proxy != nil {
 		t.Fatalf("同时开了直连时不能再带代理判定")
+	}
+}
+
+// 调试工具的语义：每条新请求都新建连接（改了 hosts / DNS 立刻生效），同一请求内
+// 跟随重定向的那几跳仍复用同一条连接。
+func TestFreshConnectionPerRequest(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	base := http.DefaultTransport.(*http.Transport).Clone()
+	client := &http.Client{Transport: newRoutingTransport(base)}
+	// send 返回这一跳是否复用了已有连接；body 必须读完关掉，连接才会回到空闲池。
+	send := func(traceID string) bool {
+		t.Helper()
+		reused := false
+		req, err := http.NewRequest("GET", srv.URL, nil)
+		if err != nil {
+			t.Fatalf("构造请求失败：%v", err)
+		}
+		req.Header.Set(traceIDHeader, traceID)
+		req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
+			GotConn: func(info httptrace.GotConnInfo) { reused = info.Reused },
+		}))
+		res, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("请求失败：%v", err)
+		}
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		return reused
+	}
+
+	if send("tr-a") {
+		t.Fatalf("第一条请求应该是新建连接")
+	}
+	if send("tr-b") {
+		t.Fatalf("换一次发送必须新建连接，否则改完 hosts 还连着旧机器")
+	}
+	// 同一 trace 的第二跳模拟重定向：保留复用，与浏览器跑同一串重定向一致。
+	if !send("tr-b") {
+		t.Fatalf("同一请求内的重定向跳应该复用连接")
+	}
+	// 不带 trace id（脚本里的 sendRequest）也按「新请求」处理。
+	if send("") {
+		t.Fatalf("不带 trace id 的请求也该新建连接")
 	}
 }
