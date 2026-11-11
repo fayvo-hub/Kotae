@@ -3520,8 +3520,9 @@ textarea.kv-value {
   min-height: 26px;
   padding: 4px 8px;
   line-height: 1.55;
-  resize: none;
-  overflow: hidden;
+  /* 超过自动增高的上限后拖右下角看全：拖出来的高度会被记住，重绘后仍然生效。 */
+  resize: vertical;
+  overflow-y: auto;
 }
 
 .kv-key::placeholder,
@@ -3576,6 +3577,12 @@ textarea.kv-value {
 /* 普通行里的「改为文件字段」图标按钮与输入框垂直对齐（行内是 flex-start）。 */
 .kv-row > .icon-btn:not(.kv-del) {
   align-self: center;
+}
+
+/* 多行值框被拖高时，行尾控件要贴住第一行，不能漂到整行中间。 */
+.kv-row:has(> textarea.kv-value) > .icon-btn,
+.kv-row:has(> textarea.kv-value) > .file-btn {
+  align-self: flex-start;
 }
 
 /* 环境变量的「遮住值」开关：平时低调，已遮住时点亮，鼠标划过整行都看得见。 */
