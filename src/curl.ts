@@ -5,6 +5,7 @@
 
 import type { ApiRequest, FormField, HttpMethod, KV, RequestOptions } from "./types";
 import { METHODS } from "./types";
+import { parseFormEncoded } from "./bodyConvert";
 import { pathVarNames, splitURL, stripSchemeBeforeVar, substitutePathVars, uid } from "./util";
 
 export class CurlError extends Error {
@@ -355,8 +356,17 @@ export function parseCurl(input: string): CurlParseResult {
     }
   } else if (raw.dataParts.length > 0 || raw.urlencodeParts.length > 0) {
     const merged = [...raw.dataParts, ...raw.urlencodeParts].join("&");
-    request.bodyMode = looksLikeJSON(merged) ? "json" : "text";
-    request.body = merged;
+    // `-d 'a=1&b=2'` 是表单编码：拆成键值表，省得用户再手抄一遍。
+    // 显式声明了 JSON 的 Content-Type 时按文本原样留着，尊重命令里的头。
+    const declared = request.headers.find((h) => h.key.toLowerCase() === "content-type")?.value ?? "";
+    const fields = looksLikeJSON(merged) || declared.toLowerCase().includes("json") ? null : parseFormEncoded(merged);
+    if (fields) {
+      request.bodyMode = "urlencoded";
+      request.form = fields;
+    } else {
+      request.bodyMode = looksLikeJSON(merged) ? "json" : "text";
+      request.body = merged;
+    }
     if (!request.headers.some((h) => h.key.toLowerCase() === "content-type")) {
       request.headers.push(
         kv(
@@ -369,7 +379,12 @@ export function parseCurl(input: string): CurlParseResult {
 
   // -G/--get：把请求体内容挪到查询参数上
   if (raw.getMode) {
-    if (request.body) {
+    if (request.bodyMode === "urlencoded" && request.form.length > 0) {
+      for (const f of request.form) request.params.push(kv(f.key, f.value));
+      request.form = [];
+      request.bodyMode = "none";
+      if (method === "POST" && !raw.method) request.method = "GET";
+    } else if (request.body) {
       const { params: extra } = splitURL(`?${request.body}`);
       for (const p of extra) request.params.push(kv(p.key, p.value));
       request.body = "";
@@ -773,6 +788,12 @@ export function toCurl(request: ApiRequest, opts: CurlExportOptions): string {
     lines.push(
       `--data-raw ${shellQuote(JSON.stringify({ query: opts.resolve(request.body), variables }))}`,
     );
+  } else if (request.bodyMode === "urlencoded") {
+    // 表单编码的正文只存在键值表里，按发送时的编码拼回去（变量已解析，可整体编码）。
+    const pairs = request.form
+      .filter((f) => f.enabled && f.key.trim() !== "")
+      .map((f) => `${encodeURIComponent(opts.resolve(f.key.trim()))}=${encodeURIComponent(opts.resolve(f.value))}`);
+    if (pairs.length > 0) lines.push(`--data-raw ${shellQuote(pairs.join("&"))}`);
   } else if (request.body && request.bodyMode !== "none") {
     lines.push(`--data-raw ${shellQuote(opts.resolve(request.body))}`);
   }

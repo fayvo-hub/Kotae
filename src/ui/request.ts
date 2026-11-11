@@ -26,6 +26,7 @@ import {
 } from "../store";
 import { System } from "../mygo";
 import { CurlError, parseCurl } from "../curl";
+import { switchBodyMode } from "../bodyConvert";
 import { scriptStepsPanel } from "./scriptSteps";
 import { enableVarHighlight } from "./varTokens";
 import {
@@ -542,7 +543,8 @@ function bodyPane(tab: Tab): HTMLElement {
       on: {
         click: () => {
           mutate((r) => {
-            r.bodyMode = mode.value;
+            // 纯文本与表单编码之间自动搬运内容，粘了 `a=1&b=2` 切过去就是两行字段。
+            switchBodyMode(r, mode.value);
           });
           window.dispatchEvent(new CustomEvent("mygo:rerender-request"));
         },
