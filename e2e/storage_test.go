@@ -91,6 +91,9 @@ func TestStoragePersistsAcrossRestart(t *testing.T) {
 	h.wait(t, "重启后侧边栏仍收起", `document.querySelector('.sidebar-host').classList.contains('collapsed')`)
 	h.pressKeys(t, "b", true, false)
 	h.wait(t, "侧边栏重新展开", `!document.querySelector('.sidebar-host').classList.contains('collapsed')`)
+	// 展开也要落库再走：这里不写盘，下一次重启会读回 collapsed=1，
+	// 后面的用例全都看不到集合树（侧边栏收起时侧边栏不渲染行）。
+	waitForCommit(t, filepath.Join(h.userData, "workspace.db"), time.Now())
 }
 
 // waitForCommit 等到数据库（或它的 WAL 文件）在 since 之后被写过，
