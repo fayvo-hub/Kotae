@@ -6,7 +6,7 @@ export default defineConfig({
   // 文件系统里必须用纯 ASCII 的地方（安装包文件名、Debian 包名、desktop 条目）。
   slug: "kotae",
   identifier: "com.kotae.app",
-  version: "0.2.5",
+  version: "0.2.6",
   copyright: "© 2025 Kotae",
   publisher: "Kotae",
   icon: "resources/icon.png",
@@ -35,8 +35,8 @@ export default defineConfig({
   },
   // ---- 自动更新：已启用 ----
   // publicKey 是 `npx mygo-cli keygen` 生成的公钥，私钥只在发布机上（CI secret
-  // MYGO_UPDATER_PRIVATE_KEY）。tagPrefix 默认 "v"，与本仓库的 v0.2.5 这类标签一致。
-  // 读发布说明：仓库根目录 CHANGELOG.md 里 `## 0.2.5` 那一段。
+  // MYGO_UPDATER_PRIVATE_KEY）。tagPrefix 默认 "v"，与本仓库的 v0.2.6 这类标签一致。
+  // 读发布说明：仓库根目录 CHANGELOG.md 里 `## 0.2.6` 那一段。
   // github 是 GitHub 上的仓库路径，与应用名无关。
   updates: {
     publicKey: "udSJM9PEbjCiDLdSIadYODhlRzSi/UM1sOEutcoc6FU=",
