@@ -170,6 +170,7 @@ function collectionNode(col: Collection, filter: string): HTMLElement | null {
 
   const box = el("div", { class: "tree-group" });
   const row = el("div", { class: "tree-row folder-row root", data: { kind: "collection" } });
+  row.dataset.collectionId = col.id;
   const twisty = el("span", { class: "twisty", html: icon("chevronDown").innerHTML });
   const label = el("span", { class: "tree-label", text: col.name });
   row.append(twisty, icon("collection", "tree-icon"), label);
@@ -344,8 +345,28 @@ function renamingNow(): boolean {
   return !!document.querySelector(".tree-rename");
 }
 
-function inlineRename(label: HTMLElement, current: string, commit: (name: string) => void): void {
-  if (renamingNow() || !label.parentElement) return;
+/**
+ * 拿到当前树上那一行的名字节点。
+ *
+ * 右键菜单里的回调捕获的是菜单弹出时的节点，而菜单开着的时候树会被重绘（发送完成、
+ * 同步设置都会 emit）：闭包里的节点已经脱离文档，就地改名会静默失败，点了没反应。
+ * 行上记了 collectionId / nodeId，按它从当前树上找回来。
+ */
+function liveLabel(original: HTMLElement): HTMLElement {
+  if (original.isConnected) return original;
+  const row = original.closest<HTMLElement>(".tree-row");
+  const collectionId = row?.dataset.collectionId;
+  if (!row || !collectionId) return original;
+  const nodeId = row.dataset.nodeId;
+  const selector = nodeId
+    ? `.tree-row[data-collection-id="${CSS.escape(collectionId)}"][data-node-id="${CSS.escape(nodeId)}"] > .tree-label`
+    : `.tree-row[data-collection-id="${CSS.escape(collectionId)}"] > .tree-label`;
+  return document.querySelector<HTMLElement>(selector) ?? original;
+}
+
+function inlineRename(original: HTMLElement, current: string, commit: (name: string) => void): void {
+  const label = liveLabel(original);
+  if (renamingNow() || !label.isConnected) return;
   let done = false;
   const input = el("input", {
     class: "tree-rename",
@@ -472,6 +493,8 @@ function treeItem(collectionId: string, node: TreeNode, depth: number, filter: s
 
   if (node.type === "folder") {
     const folder = node as FolderNode;
+    row.dataset.nodeId = folder.id;
+    row.dataset.collectionId = collectionId;
     const twisty = el("span", { class: `twisty${folder.open ? "" : " collapsed"}`, html: icon("chevron").innerHTML });
     const label = el("span", { class: "tree-label", text: folder.name });
     row.append(twisty, icon("folder", "tree-icon"), label);

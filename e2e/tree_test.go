@@ -159,3 +159,25 @@ func TestTreeDoubleClickRenameEsc(t *testing.T) {
 		t.Fatal("按 Esc 取消后名字应保持不变")
 	}
 }
+
+// 右键菜单开着的时候界面被重绘（发送完成、同步设置都会 emit，整棵树重建）：
+// 菜单里那句「重命名」不能再抱着上一棵树的节点，否则点了没有任何反应。
+func TestTreeRenameSurvivesRepaint(t *testing.T) {
+	h.clearOverlays(t)
+
+	rightClick(t, ".tree-row", "固定用例")
+	h.wait(t, "重命名菜单", `!!document.querySelector('.ctx-menu')`)
+	h.eval(t, `window.dispatchEvent(new CustomEvent('mygo:rerender-sidebar')); true`, nil)
+	h.settleFrames(t)
+
+	clickIn(t, ".ctx-menu", "重命名")
+	h.wait(t, "就地重命名框", `!!document.querySelector('.tree-rename')`)
+	var value string
+	h.eval(t, `(document.querySelector('.tree-rename') || {}).value || ''`, &value)
+	if value != "固定用例" {
+		t.Fatalf("重命名框应预填当前名字，实际 %q", value)
+	}
+	// 这是 fixture 集合，Esc 取消改名。
+	h.pressKeysOn(t, ".tree-rename", "Escape", false, false)
+	h.wait(t, "改名框收起", `!document.querySelector('.tree-rename')`)
+}
