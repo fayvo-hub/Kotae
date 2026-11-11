@@ -1,6 +1,6 @@
-// 单条请求自己的网络出口：代理与 TLS 校验是请求级选项，但 fetch 插件只有一个
-// 共享 http.Client，所以用两个内部请求头把选项带进来，在这里剥掉并换上对应的
-// Transport。这两个头不会出现在发往服务器的请求里。
+// 单条请求自己的网络出口：代理、直连与 TLS 校验是请求级选项，但 fetch 插件只有一个
+// 共享 http.Client，所以用三个内部请求头把选项带进来，在这里剥掉并换上对应的
+// Transport。这三个头不会出现在发往服务器的请求里。
 
 package main
 
@@ -18,6 +18,8 @@ import (
 const (
 	// proxyHeader 是每条请求自己的代理地址，空表示跟随系统代理。
 	proxyHeader = "X-Mygo-Proxy"
+	// directHeader 为 "1" 时绕过系统代理直连（设置里的「忽略系统代理」）。
+	directHeader = "X-Mygo-Direct"
 	// insecureHeader 为 "1" 时跳过证书校验。
 	insecureHeader = "X-Mygo-Insecure-Tls"
 )
@@ -38,16 +40,18 @@ func (rt *routingTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	// 复制一份再动头：原始请求还留在 http.Client 的重定向链里，改它会污染 via。
 	out := req.Clone(req.Context())
 	proxy := strings.TrimSpace(out.Header.Get(proxyHeader))
+	direct := out.Header.Get(directHeader) == "1"
 	insecure := out.Header.Get(insecureHeader) == "1"
 	traceID := out.Header.Get(traceIDHeader)
 	// 内部头一律不下发：它们只是页面和这一层之间的约定。
 	out.Header.Del(proxyHeader)
+	out.Header.Del(directHeader)
 	out.Header.Del(insecureHeader)
 	out.Header.Del(traceIDHeader)
 
 	transport := rt.base
-	if proxy != "" || insecure {
-		next, err := rt.transportFor(proxy, insecure)
+	if proxy != "" || insecure || direct {
+		next, err := rt.transportFor(proxy, insecure, direct)
 		if err != nil {
 			return nil, err
 		}
@@ -87,7 +91,7 @@ func (rt *routingTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	return res, nil
 }
 
-func (rt *routingTransport) transportFor(proxy string, insecure bool) (*http.Transport, error) {
+func (rt *routingTransport) transportFor(proxy string, insecure, direct bool) (*http.Transport, error) {
 	var target *url.URL
 	if proxy != "" {
 		parsed, err := url.Parse(proxy)
@@ -100,10 +104,16 @@ func (rt *routingTransport) transportFor(proxy string, insecure bool) (*http.Tra
 		target = parsed
 	}
 
-	key := "direct"
-	if insecure {
-		key = "insecure"
+	// 代理、直连与是否放宽 TLS 三项要分开缓存：同样是「不指定代理」，直连和
+	// 「跳过校验但仍跟随系统代理」用的是不同的出口。
+	mode := "system"
+	if direct {
+		mode = "direct"
 	}
+	if insecure {
+		mode += "|insecure"
+	}
+	key := mode
 	if target != nil {
 		key = target.String() + "|" + key
 	}
@@ -115,10 +125,18 @@ func (rt *routingTransport) transportFor(proxy string, insecure bool) (*http.Tra
 	}
 
 	transport := http.DefaultTransport.(*http.Transport).Clone()
-	if target != nil {
+	switch {
+	case target != nil:
 		transport.Proxy = http.ProxyURL(target)
-	} else {
+	case direct:
+		// 设置里勾了「忽略系统代理」：不走任何代理判定，按本机 DNS / hosts 连。
 		transport.Proxy = nil
+	default:
+		// 只是勾了「跳过证书校验」：网络出口不变，仍跟随系统代理，把 base 的
+		// 代理判定（netproxy：环境变量优先，否则读系统设置）带到这条 Transport 上。
+		if base, ok := rt.base.(*http.Transport); ok {
+			transport.Proxy = base.Proxy
+		}
 	}
 	if insecure {
 		// 用户显式勾了「跳过证书校验」，这里按他的选择放宽，不做二次确认。

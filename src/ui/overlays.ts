@@ -30,6 +30,7 @@ import {
   setEnvCommonParams,
   setPendingCurl,
   setDesktopPrefs,
+  setDirectConnection,
   setCodeFontSize,
   setShortcut,
   shortcutFor,
@@ -874,6 +875,12 @@ function desktopSection(): HTMLElement {
       hint: "在任何程序前按下都能呼出或收起窗口；被别的程序占用时会自动跳过注册。",
       checked: state.globalShortcut,
       onChange: (on) => setDesktopPrefs({ globalShortcut: on }),
+    }),
+    toggleRow({
+      label: "忽略系统代理（直连）",
+      hint: "开启后请求不经过系统代理，直接按本机 DNS / hosts 连接。排查 hosts、访问内网时用它；需要代理才能访问的接口会连不上。单条请求在「选项」里填了代理时仍以那条为准。",
+      checked: state.directConnection,
+      onChange: (on) => setDirectConnection(on),
     }),
   );
 }

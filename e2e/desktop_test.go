@@ -96,7 +96,7 @@ func TestCloseToTrayAndRestore(t *testing.T) {
 	h.shot(t, "17-restored")
 }
 
-// readDesktopToggles 读设置面板里两个桌面开关的勾选状态。
+// readDesktopToggles 读设置面板里三个开关的勾选状态（关闭到托盘 / 全局快捷键 / 忽略系统代理）。
 func readDesktopToggles(t *testing.T, out *[]bool) {
 	t.Helper()
 	var raw string
@@ -109,34 +109,63 @@ func readDesktopToggles(t *testing.T, out *[]bool) {
 // 设置面板里的桌面开关要能改、能落库、重启后保持。
 func TestDesktopPrefsToggle(t *testing.T) {
 	h.openSettingsTab(t, "desktop")
-	h.wait(t, "桌面开关就位", `document.querySelectorAll('.desktop-toggle').length === 2`)
+	h.wait(t, "桌面开关就位", `document.querySelectorAll('.desktop-toggle').length === 3`)
 
 	var states []bool
 	readDesktopToggles(t, &states)
-	if len(states) != 2 || !states[0] || !states[1] {
-		t.Fatalf("两个桌面开关默认都该勾选，实际：%v", states)
+	// 直连默认关：跟随系统代理是原来的行为，不能被默认值悄悄改掉。
+	if len(states) != 3 || !states[0] || !states[1] || states[2] {
+		t.Fatalf("桌面开关默认应为「托盘=开、快捷键=开、直连=关」，实际：%v", states)
 	}
 
-	// 关掉全局快捷键，等写库。
+	// 三个开关里直连的说明最长，两种主题都看一眼排版不能被挤坏。
+	waitSettled(t)
+	h.shot(t, "16-settings-desktop-dark")
+	for i := 0; i < 3 && !h.exists(t, `html[data-theme="light"]`); i++ {
+		h.click(t, `[data-role="theme"]`)
+	}
+	if !h.exists(t, `html[data-theme="light"]`) {
+		t.Fatalf("没能切到浅色主题")
+	}
+	waitSettled(t)
+	h.shot(t, "16-settings-desktop-light")
+	for i := 0; i < 3 && !h.exists(t, `html[data-theme="dark"]`); i++ {
+		h.click(t, `[data-role="theme"]`)
+	}
+	if !h.exists(t, `html[data-theme="dark"]`) {
+		t.Fatalf("没能切回深色主题（后续用例默认深色）")
+	}
+
+	// 关掉全局快捷键、打开直连，等写库。
 	since := time.Now()
-	h.eval(t, `(() => { document.querySelectorAll('.desktop-toggle input')[1].click(); return true; })()`, new(bool))
+	h.eval(t, `(() => {
+  const inputs = document.querySelectorAll('.desktop-toggle input');
+  inputs[1].click();
+  inputs[2].click();
+  return true;
+})()`, new(bool))
 	readDesktopToggles(t, &states)
-	if len(states) != 2 || !states[0] || states[1] {
+	if len(states) != 3 || !states[0] || states[1] || !states[2] {
 		t.Fatalf("点击后开关没变化，实际：%v", states)
 	}
 	waitForCommit(t, h.userData+"/workspace.db", since)
 
 	h.restart(t)
 	h.openSettingsTab(t, "desktop")
-	h.wait(t, "重启后桌面开关就位", `document.querySelectorAll('.desktop-toggle').length === 2`)
+	h.wait(t, "重启后桌面开关就位", `document.querySelectorAll('.desktop-toggle').length === 3`)
 	readDesktopToggles(t, &states)
-	if len(states) != 2 || !states[0] || states[1] {
-		t.Fatalf("重启后应该是「关闭到托盘=开、全局快捷键=关」，实际：%v", states)
+	if len(states) != 3 || !states[0] || states[1] || !states[2] {
+		t.Fatalf("重启后应该是「托盘=开、快捷键=关、直连=开」，实际：%v", states)
 	}
 
 	// 改回来，避免影响后续用例。
 	since = time.Now()
-	h.eval(t, `(() => { document.querySelectorAll('.desktop-toggle input')[1].click(); return true; })()`, new(bool))
+	h.eval(t, `(() => {
+  const inputs = document.querySelectorAll('.desktop-toggle input');
+  inputs[1].click();
+  inputs[2].click();
+  return true;
+})()`, new(bool))
 	waitForCommit(t, h.userData+"/workspace.db", since)
 	h.clearOverlays(t)
 }

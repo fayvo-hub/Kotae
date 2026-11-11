@@ -433,6 +433,8 @@ export interface PersistedWorkspace {
   closeToTray: boolean;
   /** 是否注册系统级快捷键（CmdOrCtrl+Shift+M 唤起窗口）。 */
   globalShortcut: boolean;
+  /** 忽略系统代理：开启后请求直连，按本机 DNS / hosts 解析。 */
+  directConnection: boolean;
   /** 界面缩放，1 = 100%。走 WebView 的真实缩放，重启后恢复。 */
   zoom: number;
   /** 代码区（请求体 / 响应体 / 脚本）的字号，单位 px。 */

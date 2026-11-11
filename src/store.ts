@@ -93,6 +93,8 @@ export interface State {
   closeToTray: boolean;
   /** 是否注册系统级快捷键。同上，托盘菜单与设置面板都能改。 */
   globalShortcut: boolean;
+  /** 忽略系统代理：开启后所有请求直连，不按系统代理判定（设置面板与数据库都存这个）。 */
+  directConnection: boolean;
   /** 侧边栏是否收起。 */
   sidebarCollapsed: boolean;
   /** 界面缩放，1 = 100%。 */
@@ -160,6 +162,7 @@ function blankState(): State {
     onboardingDone: false,
     closeToTray: true,
     globalShortcut: true,
+    directConnection: false,
     sidebarCollapsed: false,
     zoom: 1,
     codeFontSize: DEFAULT_CODE_FS,
@@ -234,6 +237,7 @@ function snapshot(): PersistedWorkspace {
     onboardingDone: state.onboardingDone,
     closeToTray: state.closeToTray,
     globalShortcut: state.globalShortcut,
+    directConnection: state.directConnection,
     zoom: state.zoom,
     codeFontSize: state.codeFontSize,
     shortcuts: state.shortcuts,
@@ -307,6 +311,8 @@ function applyPersisted(p: Partial<PersistedWorkspace>): void {
   // 桌面偏好默认开：只有明确存了 false 才关，缺字段（旧库）按默认处理。
   state.closeToTray = p.closeToTray !== false;
   state.globalShortcut = p.globalShortcut !== false;
+  // 直连默认关：跟随系统代理是原来的行为，只有明确存了 true 才改。
+  state.directConnection = p.directConnection === true;
   state.zoom = clamp(round2(p.zoom ?? 1), ZOOM_MIN, ZOOM_MAX);
   state.shortcuts = sanitizeShortcuts(p.shortcuts);
   state.codeFontSize = clamp(Math.round(p.codeFontSize ?? DEFAULT_CODE_FS), CODE_FS_MIN, CODE_FS_MAX);
@@ -1148,9 +1154,10 @@ export function abortSend(tabId: string): void {
 
 /** 按界面上的请求头与认证设置拼出实际发送的头；头名非法时把那个头名当字符串返回。 */
 // ---- 请求级网络出口 ----
-// 代理与 TLS 校验是单条请求的选项，但 Go 侧只有一个共享的 http.Client，
-// 所以用两个内部头把选项带过去：transport.go 会在发出前把它们删掉。
+// 代理、直连与 TLS 校验是请求级选项，但 Go 侧只有一个共享的 http.Client，
+// 所以用内部头把选项带过去：transport.go 会在发出前把它们删掉。
 const PROXY_HEADER = "X-Mygo-Proxy";
+const DIRECT_HEADER = "X-Mygo-Direct";
 const INSECURE_HEADER = "X-Mygo-Insecure-Tls";
 const TRACE_ID_HEADER = "X-Mygo-Trace-Id";
 const TRACE_RESULT_HEADER = "x-mygo-trace";
@@ -1158,6 +1165,9 @@ const TRACE_RESULT_HEADER = "x-mygo-trace";
 function applyNetworkOptions(headers: Headers, options: RequestOptions): void {
   const proxy = (options.proxy ?? "").trim();
   if (proxy) headers.set(PROXY_HEADER, proxy);
+  // 设置里开了「忽略系统代理（直连）」：不经过系统代理，按本机 DNS / hosts 连接。
+  // 这一条请求自己填了代理地址时以那条为准。
+  else if (state.directConnection) headers.set(DIRECT_HEADER, "1");
   if (options.insecureTLS) headers.set(INSECURE_HEADER, "1");
   // 链路与分阶段耗时也靠内部头回传：Go 侧用这个 id 记住这条请求的每一跳。
   headers.set(TRACE_ID_HEADER, uid("tr"));
@@ -3024,8 +3034,7 @@ export function setGlobalShortcutFromShell(on: boolean): void {
   emit();
 }
 
-/** 设置面板改桌面偏好：先写库，再让 Go 侧立刻生效。 */
-export function setDesktopPrefs(next: { closeToTray?: boolean; globalShortcut?: boolean }): void {
+/** 设置面板改桌面偏好：先写库，再让 Go 侧立刻生效。 */export function setDesktopPrefs(next: { closeToTray?: boolean; globalShortcut?: boolean }): void {
   const closeToTray = next.closeToTray ?? state.closeToTray;
   const globalShortcut = next.globalShortcut ?? state.globalShortcut;
   if (closeToTray === state.closeToTray && globalShortcut === state.globalShortcut) return;
@@ -3033,5 +3042,13 @@ export function setDesktopPrefs(next: { closeToTray?: boolean; globalShortcut?: 
   state.globalShortcut = globalShortcut;
   persist();
   void System.applyDesktopPrefs(closeToTray, globalShortcut).catch(() => {});
+  emit();
+}
+
+/** 设置面板改「忽略系统代理」：只影响之后的请求，落库即可。 */
+export function setDirectConnection(on: boolean): void {
+  if (state.directConnection === on) return;
+  state.directConnection = on;
+  persist();
   emit();
 }

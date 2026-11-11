@@ -79,7 +79,7 @@ func TestSettingsTabs(t *testing.T) {
 		ready string
 	}{
 		{"shortcuts", "快捷键", `document.querySelectorAll('.settings-content .shortcut-row').length > 0`},
-		{"desktop", "桌面", `document.querySelectorAll('.settings-content .desktop-toggle').length === 2`},
+		{"desktop", "桌面", `document.querySelectorAll('.settings-content .desktop-toggle').length === 3`},
 		{"vars", "变量", `document.querySelectorAll('.settings-content .settings-section').length === 2 &&
   document.querySelector('.settings-content .var-row code') !== null`},
 		{"steps", "全局操作", `document.querySelectorAll('.settings-content .settings-sub').length === 2 &&
