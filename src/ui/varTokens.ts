@@ -134,6 +134,13 @@ function hook(target: VarField): boolean {
     window.addEventListener("resize", syncAll);
   }
 
+  // 拖动文本域右下角改高度不会派发事件：用观察器把镜像跟上去，否则高亮层会停在旧高度。
+  const observer = new ResizeObserver(() => {
+    if (target.isConnected) sync();
+    else observer.disconnect();
+  });
+  observer.observe(target);
+
   paint();
   if (mirror.classList.contains("on")) {
     syncers.add({ node: target, sync });

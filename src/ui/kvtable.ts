@@ -82,6 +82,14 @@ export function kvTable<T extends KVRow>(opts: KVTableOptions<T>): HTMLElement {
     opts.onChange();
   };
 
+  /** 删掉一行：顺带清掉记住的高度，免得 map 随会话一直长。 */
+  const dropRow = (row: T): void => {
+    const i = rows.indexOf(row);
+    if (i >= 0) rows.splice(i, 1);
+    if (row.id) manualHeights.delete(row.id);
+    refresh();
+  };
+
   function paintRow(row: T, index: number): void {
     const line = el("div", { class: "kv-row" });
     if (opts.toggle !== false) {
@@ -134,7 +142,7 @@ export function kvTable<T extends KVRow>(opts: KVTableOptions<T>): HTMLElement {
           on: {
             input: () => {
               row.value = valueInput.value;
-              autoGrow(valueInput as HTMLTextAreaElement);
+              autoGrow(valueInput as HTMLTextAreaElement, row.id);
               opts.onChange();
             },
             keydown: (ev) => onRowKeydown(ev, row, "value"),
@@ -159,7 +167,10 @@ export function kvTable<T extends KVRow>(opts: KVTableOptions<T>): HTMLElement {
     valueInput.value = row.value;
     enableVarAssist(valueInput, `kv:${row.id}:value`);
     enableVarHighlight(valueInput);
-    if (opts.multiline) queueMicrotask(() => autoGrow(valueInput as HTMLTextAreaElement));
+    if (opts.multiline) {
+      watchRowResize(valueInput as HTMLTextAreaElement, row.id);
+      queueMicrotask(() => autoGrow(valueInput as HTMLTextAreaElement, row.id));
+    }
 
     line.append(keyInput, valueInput);
 
@@ -181,16 +192,7 @@ export function kvTable<T extends KVRow>(opts: KVTableOptions<T>): HTMLElement {
     }
 
     line.append(
-      iconButton(
-        "close",
-        "删除这一行",
-        () => {
-          const i = rows.indexOf(row);
-          if (i >= 0) rows.splice(i, 1);
-          refresh();
-        },
-        "kv-del",
-      ),
+      iconButton("close", "删除这一行", () => dropRow(row), "kv-del"),
     );
 
     body.append(line);
@@ -208,13 +210,9 @@ export function kvTable<T extends KVRow>(opts: KVTableOptions<T>): HTMLElement {
     if (ev.key === "Backspace") {
       // 键与值都为空时，Backspace 直接删掉这一行。
       const input = ev.target as HTMLInputElement;
-      if (input.value === "" && row.key === "") {
-        const i = rows.indexOf(row);
-        if (i >= 0) {
-          ev.preventDefault();
-          rows.splice(i, 1);
-          refresh();
-        }
+      if (input.value === "" && row.key === "" && rows.includes(row)) {
+        ev.preventDefault();
+        dropRow(row);
       }
     }
   };
@@ -248,9 +246,39 @@ function newId(): string {
   return `kv_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function autoGrow(area: HTMLTextAreaElement): void {
+/** 多行值框按内容增高的上限；超过就滚动，想看得全由用户拖高右下角。 */
+const AUTO_GROW_MAX = 160;
+/** 用户拖出来的值框高度，按行 id 记：表格每次重绘都会换掉 textarea 元素。 */
+const manualHeights = new Map<string, number>();
+/** 上一次由 autoGrow 写下的高度，用来分辨「这次高度变化是不是用户拖的」。 */
+const lastAutoHeight = new WeakMap<HTMLTextAreaElement, number>();
+
+function autoGrow(area: HTMLTextAreaElement, rowId: string): void {
+  const manual = manualHeights.get(rowId) ?? 0;
   area.style.height = "auto";
-  area.style.height = `${Math.min(160, area.scrollHeight)}px`;
+  const content = area.scrollHeight;
+  // 拖过右下角就以拖出来的高度为下限，内容再多也继续往下长，保证全部可见。
+  const next = manual > 0 ? Math.max(manual, content) : Math.min(content, AUTO_GROW_MAX);
+  area.style.height = `${next}px`;
+  lastAutoHeight.set(area, next);
+}
+
+/**
+ * 原生拖拽只改内联 style、不派发事件，所以在右下角手柄按下时接一次全局 pointerup，
+ * 抬手后比对高度：变了就是用户拖的，记下来当作重绘后的下限（重绘会换掉这个元素）。
+ */
+function watchRowResize(area: HTMLTextAreaElement, rowId: string): void {
+  area.addEventListener("pointerdown", (ev) => {
+    const rect = area.getBoundingClientRect();
+    const HANDLE = 16;
+    if (ev.clientX < rect.right - HANDLE || ev.clientY < rect.bottom - HANDLE) return;
+    const done = (): void => {
+      document.removeEventListener("pointerup", done);
+      const height = Math.round(area.getBoundingClientRect().height);
+      if (height !== lastAutoHeight.get(area)) manualHeights.set(rowId, height);
+    };
+    document.addEventListener("pointerup", done);
+  });
 }
 
 /** 把表格里的行拍成批量粘贴的文本，禁用行加 `# ` 前缀。 */
