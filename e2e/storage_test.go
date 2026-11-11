@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/egoist/mygo/plugins/sqlite"
 )
 
 // TestStorageMigratesLegacyWorkspace 验证存储层改造后的首次启动行为：
@@ -107,6 +110,67 @@ func waitForCommit(t *testing.T, db string, since time.Time) {
 		}
 		time.Sleep(80 * time.Millisecond)
 	}
+}
+
+// TestStorageMigratesDirectConnection v2 库里的「忽略系统代理」存的是旧默认值 0，
+// 升到 v3 时应刷成 1（新默认直连）：旧版本没让用户选过这个开关，存量 0 与
+// 「用户主动关掉」无法区分，不刷就会让内网请求继续被系统代理接管。
+func TestStorageMigratesDirectConnection(t *testing.T) {
+	db := filepath.Join(h.userData, "workspace.db")
+	h.kill()
+
+	// 把库改回 v2 的旧状态：直连存 0，版本号降回 2。
+	conn, err := sqlite.Open(context.Background(), db, sqlite.OpenOptions{})
+	if err != nil {
+		t.Fatalf("打开数据库失败：%v", err)
+	}
+	for _, sql := range []string{
+		"UPDATE settings SET value = '0' WHERE key = 'directConnection'",
+		"UPDATE meta SET value = '2' WHERE key = 'schema_version'",
+	} {
+		if _, err := conn.Execute(context.Background(), sql); err != nil {
+			_ = conn.Close()
+			t.Fatalf("改库失败（%s）：%v", sql, err)
+		}
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatalf("关闭数据库失败：%v", err)
+	}
+
+	if err := h.launch(); err != nil {
+		t.Fatalf("重新启动应用失败：%v\n应用日志：\n%s", err, h.appLog())
+	}
+	h.openSettingsTab(t, "desktop")
+	h.wait(t, "桌面开关就位", `document.querySelectorAll('.desktop-toggle').length === 3`)
+	var states []bool
+	readDesktopToggles(t, &states)
+	if len(states) != 3 || !states[2] {
+		t.Fatalf("v2 库升级后直连应为开，实际：%v", states)
+	}
+	h.clearOverlays(t)
+
+	// 版本号必须真的写回 3，否则每次启动都重跑迁移，把用户关掉的直连又打开。
+	if version := schemaVersion(t, db); version != "3" {
+		t.Fatalf("迁移后 schema_version 应为 3，实际 %q", version)
+	}
+}
+
+// schemaVersion 读库里 meta.schema_version。
+func schemaVersion(t *testing.T, db string) string {
+	t.Helper()
+	conn, err := sqlite.Open(context.Background(), db, sqlite.OpenOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatalf("打开数据库失败：%v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	rows, err := conn.Query(context.Background(), "SELECT value FROM meta WHERE key = 'schema_version'")
+	if err != nil {
+		t.Fatalf("读版本号失败：%v", err)
+	}
+	if len(rows.Values) == 0 || len(rows.Values[0]) == 0 {
+		t.Fatalf("库里没有 schema_version 行")
+	}
+	return fmt.Sprint(rows.Values[0][0])
 }
 
 // listDir 列出目录内容，断言失败时贴进报告里，方便判断是没写文件还是路径不对。

@@ -202,9 +202,8 @@ func (hb *harness) launch() error {
 })()`, nil)
 }
 
-// restart 杀掉进程再用同一个用户数据目录启动一次，用来验证数据真的落了盘。
-func (hb *harness) restart(t *testing.T) {
-	t.Helper()
+// kill 停掉应用进程，保留用户数据、桩服务与临时目录：用来在两个进程之间改库。
+func (hb *harness) kill() {
 	if hb.client != nil {
 		_ = hb.client.Close()
 		hb.client = nil
@@ -214,6 +213,12 @@ func (hb *harness) restart(t *testing.T) {
 		_, _ = hb.cmd.Process.Wait()
 		hb.cmd = nil
 	}
+}
+
+// restart 杀掉进程再用同一个用户数据目录启动一次，用来验证数据真的落了盘。
+func (hb *harness) restart(t *testing.T) {
+	t.Helper()
+	hb.kill()
 	if err := hb.launch(); err != nil {
 		t.Fatalf("重启应用失败：%v\n应用日志：\n%s", err, hb.appLog())
 	}

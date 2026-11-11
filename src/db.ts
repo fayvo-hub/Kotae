@@ -34,8 +34,12 @@ import {
 /** 数据库文件名。SQLite 插件只接受文件名，实际落在 userData 目录。 */
 const DB_FILE = "workspace.db";
 
-/** 表结构版本。2：脚本从「一个全局有序列表」改成「脚本库 + 各层的前置/后置操作」。 */
-const SCHEMA_VERSION = 2;
+/**
+ * 表结构版本。
+ * 2：脚本从「一个全局有序列表」改成「脚本库 + 各层的前置/后置操作」。
+ * 3：「忽略系统代理（直连）」的默认值从关改成开。
+ */
+const SCHEMA_VERSION = 3;
 
 const SCHEMA: string[] = [
   `CREATE TABLE IF NOT EXISTS meta (
@@ -261,7 +265,17 @@ export async function init(): Promise<Migration> {
 /** 按库里的版本号往上升，每步做完才写新版本号。 */
 async function migrate(db: Database, from: number): Promise<void> {
   if (from < 2) await migrateScriptsToLayers(db);
+  if (from < 3) await migrateDirectConnection(db);
   await db.execute("UPDATE meta SET value = ? WHERE key = 'schema_version'", [String(SCHEMA_VERSION)]);
+}
+
+/**
+ * v2 → v3：「忽略系统代理（直连）」默认值从关改成开。
+ * 旧版本没让用户做过这个选择（默认关），库里存的 "0" 基本就是默认值，与「用户主动
+ * 关掉」无法区分；升级时统一刷成 "1"，需要跟随系统代理的用户在设置里关掉即可。
+ */
+async function migrateDirectConnection(db: Database): Promise<void> {
+  await db.execute("UPDATE settings SET value = '1' WHERE key = 'directConnection' AND value = '0'");
 }
 
 /**
@@ -440,7 +454,7 @@ export async function load(): Promise<PersistedWorkspace> {
     onboardingDone: settings.get("onboardingDone") === "1",
     closeToTray: settings.get("closeToTray") !== "0",
     globalShortcut: settings.get("globalShortcut") !== "0",
-    directConnection: settings.get("directConnection") === "1",
+    directConnection: settings.get("directConnection") !== "0",
     zoom: float(settings.get("zoom"), 1),
     codeFontSize: int(settings.get("codeFontSize"), 12),
     shortcuts: parseShortcuts(settings.get("shortcuts")),
@@ -826,7 +840,7 @@ function normalize(p: Partial<PersistedWorkspace>): PersistedWorkspace {
     onboardingDone: p.onboardingDone === true,
     closeToTray: p.closeToTray !== false,
     globalShortcut: p.globalShortcut !== false,
-    directConnection: p.directConnection === true,
+    directConnection: p.directConnection !== false,
     zoom: typeof p.zoom === "number" && p.zoom > 0 ? p.zoom : 1,
     codeFontSize: typeof p.codeFontSize === "number" && p.codeFontSize > 0 ? p.codeFontSize : 12,
     shortcuts: p.shortcuts && typeof p.shortcuts === "object" ? p.shortcuts : {},

@@ -113,9 +113,10 @@ func TestDesktopPrefsToggle(t *testing.T) {
 
 	var states []bool
 	readDesktopToggles(t, &states)
-	// 直连默认关：跟随系统代理是原来的行为，不能被默认值悄悄改掉。
-	if len(states) != 3 || !states[0] || !states[1] || states[2] {
-		t.Fatalf("桌面开关默认应为「托盘=开、快捷键=开、直连=关」，实际：%v", states)
+	// 直连默认开：调试工具按本机 DNS / hosts 连，才看得出真实解析结果；
+	// 要跟随系统代理得自己关掉这个开关。
+	if len(states) != 3 || !states[0] || !states[1] || !states[2] {
+		t.Fatalf("桌面开关默认应为「托盘=开、快捷键=开、直连=开」，实际：%v", states)
 	}
 
 	// 三个开关里直连的说明最长，两种主题都看一眼排版不能被挤坏。
@@ -136,7 +137,7 @@ func TestDesktopPrefsToggle(t *testing.T) {
 		t.Fatalf("没能切回深色主题（后续用例默认深色）")
 	}
 
-	// 关掉全局快捷键、打开直连，等写库。
+	// 关掉全局快捷键、关掉直连，等写库。
 	since := time.Now()
 	h.eval(t, `(() => {
   const inputs = document.querySelectorAll('.desktop-toggle input');
@@ -145,7 +146,7 @@ func TestDesktopPrefsToggle(t *testing.T) {
   return true;
 })()`, new(bool))
 	readDesktopToggles(t, &states)
-	if len(states) != 3 || !states[0] || states[1] || !states[2] {
+	if len(states) != 3 || !states[0] || states[1] || states[2] {
 		t.Fatalf("点击后开关没变化，实际：%v", states)
 	}
 	waitForCommit(t, h.userData+"/workspace.db", since)
@@ -154,8 +155,8 @@ func TestDesktopPrefsToggle(t *testing.T) {
 	h.openSettingsTab(t, "desktop")
 	h.wait(t, "重启后桌面开关就位", `document.querySelectorAll('.desktop-toggle').length === 3`)
 	readDesktopToggles(t, &states)
-	if len(states) != 3 || !states[0] || states[1] || !states[2] {
-		t.Fatalf("重启后应该是「托盘=开、快捷键=关、直连=开」，实际：%v", states)
+	if len(states) != 3 || !states[0] || states[1] || states[2] {
+		t.Fatalf("重启后应该是「托盘=开、快捷键=关、直连=关」，实际：%v", states)
 	}
 
 	// 改回来，避免影响后续用例。

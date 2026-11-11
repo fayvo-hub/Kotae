@@ -878,7 +878,7 @@ function desktopSection(): HTMLElement {
     }),
     toggleRow({
       label: "忽略系统代理（直连）",
-      hint: "开启后请求不经过系统代理，直接按本机 DNS / hosts 连接。排查 hosts、访问内网时用它；需要代理才能访问的接口会连不上。单条请求在「选项」里填了代理时仍以那条为准。",
+      hint: "默认开启：请求不经过系统代理，直接按本机 DNS / hosts 连接。排查 hosts、访问内网时用它；需要代理才能访问的接口会连不上。单条请求在「选项」里填了代理时仍以那条为准。",
       checked: state.directConnection,
       onChange: (on) => setDirectConnection(on),
     }),

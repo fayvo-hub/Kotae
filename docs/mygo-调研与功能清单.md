@@ -311,7 +311,7 @@ error: the dev server exited: exit status 1
 | Cookie 会话保持开关 | 多次请求共享 Cookie（登录态链路调试）；可选开启/关闭 | 必须 | 是 | mygo 直接支撑（`fetch.New` 传带 `Jar` 的 `http.Client`）；开关与展示需自研 |
 | 超时设置 | 自定义超时秒数（默认 30s，0 为不限），超时给中文提示 | 必须 | 是 | mygo 直接支撑（abort 在 Go 侧取消）；计时与 UI 需自研 |
 | 重定向策略 | follow / manual（展示 3xx 与 Location）/ error 三选 | 必须 | 是 | mygo 直接支撑（fetch 的 `redirect` 选项）；UI 需自研 |
-| 跟随系统代理 | 默认使用系统代理与 `HTTPS_PROXY`/`NO_PROXY` 环境变量 | 必须 | 是 | mygo 直接支撑（默认 `netproxy.Transport()`） |
+| 网络出口 | 默认直连（按本机 DNS / hosts 解析）；设置里可关掉「忽略系统代理（直连）」改为跟随系统代理与 `HTTPS_PROXY`/`NO_PROXY` 环境变量 | 必须 | 是 | mygo 直接支撑（默认 `netproxy.Transport()`，页面用内部头切直连） |
 | 自定义代理配置 | 手动指定 HTTP/HTTPS 代理地址 | 可选 | 否 | 需自研（自定义 `http.Transport`） |
 | 忽略 TLS 证书校验 | 调试自签证书接口时跳过证书校验 | 可选 | 否 | mygo 直接支撑（可传自定义 `http.Client`）；UI 需自研 |
 

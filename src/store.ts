@@ -93,7 +93,11 @@ export interface State {
   closeToTray: boolean;
   /** 是否注册系统级快捷键。同上，托盘菜单与设置面板都能改。 */
   globalShortcut: boolean;
-  /** 忽略系统代理：开启后所有请求直连，不按系统代理判定（设置面板与数据库都存这个）。 */
+  /**
+   * 忽略系统代理：开启后所有请求直连，不按系统代理判定（设置面板与数据库都存这个）。
+   * 默认开启：调试工具按本机 DNS / hosts 连才看得出真实解析结果，跟随系统代理会把
+   * 解析交给代理（内网域名被接管时表现为「错误域名也请求成功」）。
+   */
   directConnection: boolean;
   /** 侧边栏是否收起。 */
   sidebarCollapsed: boolean;
@@ -162,7 +166,7 @@ function blankState(): State {
     onboardingDone: false,
     closeToTray: true,
     globalShortcut: true,
-    directConnection: false,
+    directConnection: true,
     sidebarCollapsed: false,
     zoom: 1,
     codeFontSize: DEFAULT_CODE_FS,
