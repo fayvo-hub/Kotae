@@ -18,6 +18,20 @@ func TestRedirectChainAndTimings(t *testing.T) {
 		t.Fatalf("跟随后应拿到 200，实际 %q\n%s", status, h.responseText(t))
 	}
 
+	// 状态栏要显示实际连上的服务器地址：域名只是输入，改过 hosts / DNS
+	// 之后只有对端地址能看出请求还连着旧机器。
+	h.wait(t, "服务器地址", `[...document.querySelectorAll('.status-meta .chip-label')]
+		.some(el => (el.textContent || '') === '服务器')`)
+	var serverAddr string
+	h.eval(t, `(() => {
+		const chip = [...document.querySelectorAll('.status-meta .chip')]
+			.find(c => (c.querySelector('.chip-label') || {}).textContent === '服务器');
+		return chip ? (chip.querySelector('.chip-value') || {}).textContent || '' : '';
+	})()`, &serverAddr)
+	if !strings.HasPrefix(serverAddr, "127.0.0.1:") {
+		t.Fatalf("服务器地址应指向本机桩服务 127.0.0.1:端口，实际 %q", serverAddr)
+	}
+
 	h.wait(t, "链路页签出现", `[...document.querySelectorAll('.response-subtabs .subtab')]
 		.some(el => (el.textContent || '').includes('链路'))`)
 	clickIn(t, ".response-subtabs", "链路")
@@ -42,6 +56,34 @@ func TestRedirectChainAndTimings(t *testing.T) {
 	}
 	if !strings.HasSuffix(hops[0].URL, "/redirect") || !strings.HasSuffix(hops[1].URL, "/json") {
 		t.Fatalf("跳链地址不对：%q → %q", hops[0].URL, hops[1].URL)
+	}
+
+	// 每跳行里也要写出对端地址，且和状态栏（最后一跳）一致。
+	var hopAddrs []string
+	h.eval(t, `[...document.querySelectorAll('.trace-hop .trace-addr')].map(el => (el.textContent || '').trim())`, &hopAddrs)
+	if len(hopAddrs) != len(hops) {
+		t.Fatalf("每跳都要有对端地址，实际 %d 个地址 / %d 跳：%v", len(hopAddrs), len(hops), hopAddrs)
+	}
+	for i, addr := range hopAddrs {
+		if addr != serverAddr {
+			t.Fatalf("第 %d 跳的对端地址应与状态栏一致：%q vs %q", i+1, addr, serverAddr)
+		}
+	}
+
+	// 两种主题都看一眼：每跳多了一列对端地址，窄窗口下不能把状态码挤出去。
+	h.shot(t, "72-trace-addrs-dark")
+	for i := 0; i < 3 && !h.exists(t, `html[data-theme="light"]`); i++ {
+		h.click(t, `[data-role="theme"]`)
+	}
+	if !h.exists(t, `html[data-theme="light"]`) {
+		t.Fatalf("没能切到浅色主题")
+	}
+	h.shot(t, "73-trace-addrs-light")
+	for i := 0; i < 3 && !h.exists(t, `html[data-theme="dark"]`); i++ {
+		h.click(t, `[data-role="theme"]`)
+	}
+	if !h.exists(t, `html[data-theme="dark"]`) {
+		t.Fatalf("没能切回深色主题（后续用例默认深色）")
 	}
 
 	// 耗时拆解：本机回环通常没有 DNS/连接/TLS 开销，至少要有「总计」一行。

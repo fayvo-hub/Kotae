@@ -4580,7 +4580,7 @@ mark,
 
 .trace-hop {
   display: grid;
-  grid-template-columns: 24px 48px minmax(0, 1fr) auto;
+  grid-template-columns: 24px 48px minmax(0, 1fr) auto auto;
   gap: 10px;
   align-items: center;
   padding: 6px 10px;
@@ -4617,6 +4617,25 @@ mark,
   font-family: var(--mono);
   font-size: var(--fs-sm);
   font-weight: 600;
+}
+
+/* 对端地址：让人一眼看出域名背后连的是哪台机器（复用连接时是旧地址）。 */
+.trace-addr {
+  max-width: 200px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+  user-select: text;
+}
+
+.trace-dns {
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+  user-select: text;
 }
 
 .trace-phases {

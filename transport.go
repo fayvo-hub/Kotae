@@ -54,6 +54,15 @@ func (rt *routingTransport) RoundTrip(req *http.Request) (*http.Response, error)
 		transport = next
 	}
 
+	// 是否经代理决定了对端地址的含义（代理地址，而不是目标服务器），所以先问一次
+	// 这条 Transport 的代理判定：netproxy 按 scheme+host 缓存 5 秒，这里几乎不额外花钱。
+	viaProxy := false
+	if t, ok := transport.(*http.Transport); ok && t.Proxy != nil {
+		if proxyURL, perr := t.Proxy(out); perr == nil && proxyURL != nil {
+			viaProxy = true
+		}
+	}
+
 	timer := newHopTimer()
 	if traceID != "" {
 		out = out.WithContext(httptrace.WithClientTrace(out.Context(), timer.trace()))
@@ -64,7 +73,13 @@ func (rt *routingTransport) RoundTrip(req *http.Request) (*http.Response, error)
 		return nil, err
 	}
 	if traceID != "" {
-		hop := traceHop{Method: out.Method, URL: out.URL.String(), Status: res.StatusCode}
+		hop := traceHop{
+			Method:   out.Method,
+			URL:      out.URL.String(),
+			Status:   res.StatusCode,
+			Addr:     timer.remoteAddr,
+			ViaProxy: viaProxy,
+		}
 		if blob := traces.addHop(traceID, hop, timer.timing()); blob != "" {
 			res.Header.Set(traceResultHeader, blob)
 		}

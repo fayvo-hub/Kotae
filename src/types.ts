@@ -240,6 +240,10 @@ export interface TraceHop {
   method: string;
   url: string;
   status: number;
+  /** 实际连上的对端（IP:端口）。经代理时是代理地址，不是目标服务器。 */
+  addr?: string;
+  /** 这一跳走了代理，则 addr 是代理地址。 */
+  viaProxy?: boolean;
 }
 
 /** 一跳的分阶段耗时（毫秒），没有发生的阶段为 0。 */
@@ -250,6 +254,8 @@ export interface TraceTiming {
   ttfbMs: number;
   totalMs: number;
   reused: boolean;
+  /** 本跳真的做过 DNS 解析时的结果；复用连接时为空。 */
+  dnsAddrs?: string[];
 }
 
 export interface ResponseTrace {

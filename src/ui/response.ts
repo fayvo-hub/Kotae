@@ -320,6 +320,16 @@ function statusBar(tab: Tab, res: ResponseRecord): HTMLElement {
     ),
   );
   if (!res.error) {
+    const lastHop = res.trace?.hops[res.trace.hops.length - 1];
+    if (lastHop?.addr) {
+      // 域名只是输入：到底连到哪台机器由对端地址说了算。改过 hosts / DNS 之后
+      // 页面上的地址不会变，只能靠这一项判断请求是不是还连着旧地址。
+      meta.append(
+        lastHop.viaProxy
+          ? chip("经代理", lastHop.addr, "这条请求经代理转发，显示的是代理地址；目标服务器由代理解析。")
+          : chip("服务器", lastHop.addr, "这条请求实际连上的服务器地址（IP:端口）。"),
+      );
+    }
     meta.append(chip("大小", formatBytes(res.bytes)));
     meta.append(chip("类型", res.contentType || "未知"));
   }
@@ -517,6 +527,20 @@ function traceView(trace: ResponseTrace): HTMLElement {
     row.append(el("span", { class: "trace-index", text: String(i + 1) }));
     row.append(el("span", { class: `method-tag tone-${hop.method.toLowerCase()}`, text: hop.method }));
     row.append(el("span", { class: "trace-url", attr: { title: hop.url }, text: hop.url }));
+    // 对端地址：域名没变但连到的机器可能已经变了（改 hosts、DNS 生效、连接复用）。
+    row.append(
+      el("span", {
+        class: "trace-addr",
+        attr: {
+          title: hop.addr
+            ? hop.viaProxy
+              ? `${hop.addr}（代理地址，不是目标服务器）`
+              : `实际连上的服务器 ${hop.addr}`
+            : "这一跳没有拿到对端地址",
+        },
+        text: hop.addr ?? "",
+      }),
+    );
     row.append(el("span", { class: `trace-status tone-${statusTone(hop.status)}`, text: String(hop.status) }));
     hops.append(row);
   });
@@ -542,14 +566,28 @@ function traceView(trace: ResponseTrace): HTMLElement {
     list.append(el("p", { class: "muted small", text: "这次没有产生 DNS、连接或 TLS 开销（本机地址或复用连接）。" }));
   }
   list.append(phaseRow("总计", timing.totalMs, widest, true));
-  host.append(sentSection("耗时拆解（最后一跳）", [
-    timing.reused ? el("span", { class: "muted small", text: "复用了已有连接" }) : el("span", { class: "muted small", text: "新建连接" }),
-  ]));
+  const dnsAddrs = timing.dnsAddrs ?? [];
+  host.append(
+    sentSection("耗时拆解（最后一跳）", [
+      timing.reused
+        ? el("span", { class: "muted small", text: "复用了已有连接" })
+        : el("span", { class: "muted small", text: "新建连接" }),
+      ...(dnsAddrs.length > 0
+        ? [
+            el("span", {
+              class: "trace-dns",
+              attr: { title: "这一跳 DNS 解析到的地址，按尝试顺序" },
+              text: `解析到 ${dnsAddrs.join("、")}`,
+            }),
+          ]
+        : []),
+    ]),
+  );
   host.append(list);
   host.append(
     el("p", {
       class: "muted small",
-      text: "阶段耗时由 Go 侧 httptrace 采集；正文下载时间见状态栏的「读取」值。",
+      text: "对端地址是这一跳真正连上的 IP:端口：复用连接时它还是那条连接建立时连上的机器，改 hosts / DNS 后要等旧连接释放才会变。阶段耗时由 Go 侧 httptrace 采集；正文下载时间见状态栏的「读取」值。",
     }),
   );
   return host;
