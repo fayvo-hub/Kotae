@@ -1025,7 +1025,7 @@ function optionsPane(tab: Tab): HTMLElement {
     class: "text-input",
     attr: {
       type: "text",
-      placeholder: "留空跟随系统代理，例如 http://127.0.0.1:7897",
+      placeholder: "留空不单独指定，例如 http://127.0.0.1:7897",
       spellcheck: "false",
       "aria-label": "代理地址",
     },
@@ -1108,7 +1108,7 @@ function optionsPane(tab: Tab): HTMLElement {
     ),
     el("p", {
       class: "pane-hint",
-      text: "默认使用系统代理与 HTTPS_PROXY / NO_PROXY 环境变量，无需额外配置。",
+      text: "默认直连，按本机 DNS / hosts 解析；在设置里关掉「忽略系统代理（直连）」后才会跟随系统代理与 HTTPS_PROXY / NO_PROXY 环境变量。这里填了代理时以这里为准。",
     }),
   );
   return host;
