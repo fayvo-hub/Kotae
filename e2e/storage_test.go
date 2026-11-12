@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -94,6 +95,114 @@ func TestStoragePersistsAcrossRestart(t *testing.T) {
 	// 展开也要落库再走：这里不写盘，下一次重启会读回 collapsed=1，
 	// 后面的用例全都看不到集合树（侧边栏收起时侧边栏不渲染行）。
 	waitForCommit(t, filepath.Join(h.userData, "workspace.db"), time.Now())
+}
+
+// TestStorageWritesOnlyChangedRows 锁住「差异提交」的核心性质：改一个设置项，
+// 只允许写它自己那一行。一旦 updated_at 这类时间戳回到内容指纹里，每次保存都会
+// 重写全库（旧版 JSON 存储就是这样反复磨盘的）；启动后第一次保存另算——它会顺带
+// 收敛读回时被归一化的行，所以先预热一次再量。
+func TestStorageWritesOnlyChangedRows(t *testing.T) {
+	db := filepath.Join(h.userData, "workspace.db")
+
+	setSidebarCollapsed(t, db, true) // 预热：把起点归一化到「收起」，这次允许写别的行
+	before := writeFingerprints(t, db)
+	setSidebarCollapsed(t, db, false) // 这一下只该写 settings:sidebarCollapsed
+	after := writeFingerprints(t, db)
+
+	var changed []string
+	for key, value := range after {
+		if before[key] != value {
+			changed = append(changed, key)
+		}
+	}
+	for key := range before {
+		if _, ok := after[key]; !ok {
+			changed = append(changed, key+"（被删）")
+		}
+	}
+	sort.Strings(changed)
+	if len(changed) != 1 || changed[0] != "settings:sidebarCollapsed" {
+		t.Fatalf("改一个设置项只该写一行，实际写了 %d 行：%v", len(changed), changed)
+	}
+}
+
+// setSidebarCollapsed 用 Ctrl+B 把侧边栏切到目标状态，并等到这次改动真的落库。
+func setSidebarCollapsed(t *testing.T, db string, collapse bool) {
+	t.Helper()
+	want := "0"
+	if collapse {
+		want = "1"
+	}
+	if settingValue(t, db, "sidebarCollapsed") == want {
+		return
+	}
+	h.pressKeys(t, "b", true, false)
+	if collapse {
+		h.wait(t, "侧边栏收起", `document.querySelector('.sidebar-host').classList.contains('collapsed')`)
+	} else {
+		h.wait(t, "侧边栏展开", `!document.querySelector('.sidebar-host').classList.contains('collapsed')`)
+	}
+	// 页面写库有 220ms 防抖，等库里真的变成目标值，不靠 sleep。
+	deadline := time.Now().Add(10 * time.Second)
+	for settingValue(t, db, "sidebarCollapsed") != want {
+		if time.Now().After(deadline) {
+			t.Fatalf("等侧边栏状态落库超时（期望 collapsed=%s）\n目录内容：%s", want, listDir(filepath.Dir(db)))
+		}
+		time.Sleep(80 * time.Millisecond)
+	}
+}
+
+// writeFingerprints 给每行取一个「被重写过就会变」的值：时间戳列与内容列都在里面，
+// 保存时如果全库重写，指纹就会大面积变化。
+func writeFingerprints(t *testing.T, db string) map[string]string {
+	t.Helper()
+	conn, err := sqlite.Open(context.Background(), db, sqlite.OpenOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatalf("打开数据库失败：%v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	queries := []struct{ table, columns string }{
+		{"collections", "id, updated_at"},
+		{"requests", "id, updated_at"},
+		{"environments", "id, active, position, name"},
+		{"variables", "id, position, value"},
+		{"tabs", "id, active, position, dirty"},
+		{"settings", "key, value"},
+	}
+	out := map[string]string{}
+	for _, q := range queries {
+		rows, err := conn.Query(context.Background(), "SELECT "+q.columns+" FROM "+q.table)
+		if err != nil {
+			t.Fatalf("读 %s 失败：%v", q.table, err)
+		}
+		for _, row := range rows.Values {
+			values := make([]string, 0, len(row)-1)
+			for _, v := range row[1:] {
+				values = append(values, fmt.Sprint(v))
+			}
+			out[q.table+":"+fmt.Sprint(row[0])] = strings.Join(values, "|")
+		}
+	}
+	return out
+}
+
+// settingValue 读 settings 表里的一项，读不到返回空串。
+func settingValue(t *testing.T, db, key string) string {
+	t.Helper()
+	conn, err := sqlite.Open(context.Background(), db, sqlite.OpenOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatalf("打开数据库失败：%v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	rows, err := conn.Query(context.Background(), "SELECT value FROM settings WHERE key = '"+key+"'")
+	if err != nil {
+		t.Fatalf("读设置 %s 失败：%v", key, err)
+	}
+	if len(rows.Values) == 0 || len(rows.Values[0]) == 0 {
+		return ""
+	}
+	return fmt.Sprint(rows.Values[0][0])
 }
 
 // waitForCommit 等到数据库（或它的 WAL 文件）在 since 之后被写过，
