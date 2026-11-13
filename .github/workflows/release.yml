@@ -93,7 +93,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx mygo-cli build -platform ${{ matrix.platform }} -skip-notarize -upload
       # 免安装版不能只发裸 exe：SQLite 原生库（mygo-sqlite3.dll）与托盘图标就在 exe
-      # 旁边，单独拎出去会打不开工作区。整目录打成 zip，用户解压后双击 Kotae.exe。
+      # 旁边，单独拎出去会打不开工作区。只挑运行时文件打成 zip：安装包、install 脚本、
+      # 更新清单/更新包与 SHA256SUMS 都不是用户该解压出来的东西。
       # -upload 只传安装包与更新文件，这份自己补上去。
       - name: 免安装版压缩包
         if: runner.os == 'Windows'
@@ -108,7 +109,12 @@ jobs:
           $dir = Join-Path build 'windows-amd64'
           $stage = Join-Path $dir 'portable'
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
-          Get-ChildItem $dir -File | Where-Object { $_.Name -notlike '*setup*' } | Copy-Item -Destination $stage
+          Get-ChildItem $dir -File | Where-Object {
+            $_.Name -notlike '*setup*' -and
+            $_.Name -ne 'install.ps1' -and $_.Name -ne 'install.sh' -and
+            $_.Name -notlike 'update-*.json' -and
+            $_.Extension -notin '.gz', '.zip', '.delta', '.sig'
+          } | Copy-Item -Destination $stage
           $zip = "kotae-$version-portable.zip"
           Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -Force
           Write-Host "免安装版：$zip"
