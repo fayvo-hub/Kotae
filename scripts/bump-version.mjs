@@ -20,7 +20,7 @@ const next = args.find((a) => !a.startsWith("--"));
 const dryRun = args.includes("--dry-run");
 
 if (!next || !/^\d+\.\d+\.\d+$/.test(next)) {
-  console.error("✗ 用法：node scripts/bump-version.mjs <新版本> [--dry-run]，版本形如 0.2.6");
+  console.error("✗ 用法：node scripts/bump-version.mjs <新版本> [--dry-run]，版本形如 1.2.3");
   process.exit(1);
 }
 
@@ -40,13 +40,6 @@ const edits = [
   { file: "mygo.config.ts", from: `与本仓库的 v${current} 这类标签一致`, to: `与本仓库的 v${next} 这类标签一致` },
   { file: "mygo.config.ts", from: "`## " + current + "` 那一段", to: "`## " + next + "` 那一段" },
   { file: "README.md", from: `${slug}-setup-${current}-amd64.exe`, to: `${slug}-setup-${next}-amd64.exe` },
-  {
-    file: "README.md",
-    from: `# 发布 ${current}：先把 mygo.config.ts 的 version 改成 ${current} 并提交`,
-    to: `# 发布 ${next}：先把 mygo.config.ts 的 version 改成 ${next} 并提交`,
-  },
-  { file: "README.md", from: `git tag v${current}`, to: `git tag v${next}` },
-  { file: "README.md", from: `git push origin v${current}`, to: `git push origin v${next}` },
   { file: "docs/设计系统.md", from: `# 设计系统 —— ${name} ${current}`, to: `# 设计系统 —— ${name} ${next}` },
   { file: "AGENTS.md", from: `已发 ${current}。`, to: `已发 ${next}。` },
 ];

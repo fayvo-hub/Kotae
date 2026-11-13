@@ -1,30 +1,75 @@
 name: Release
 
-# 打 tag（v0.1.0 这种）或手动触发时，构建各平台安装包并挂到 GitHub Release。
-# 版本号来自 mygo.config.ts 的 version，tag 只用来标 Release 名字，两者要对齐。
+# 打 tag（v0.3.0 这种）触发发布，流程照 mygo 官方 docs/github-actions.md：
+# preflight 校验版本与密钥 → 各平台 `mygo build -upload` 把安装包与签名更新文件
+# 传进 Release 草稿 → publish 把草稿转正。草稿这一步由 mygo 自己做（缺 Release
+# 时它会建，发布说明取自 CHANGELOG.md 的 `## <版本>` 段），所以这里不再单独建。
+# 手动触发用于「重发同一版本」：填要重发的 tag，留空则用 v<mygo.config.ts 的 version>。
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 要重发的 tag（如 v0.3.0）；留空则用 v<mygo.config.ts 的 version>
+        required: false
 
 permissions:
   contents: write
 
 jobs:
+  preflight:
+    name: 校验版本与密钥
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          UPDATER_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
+        run: |
+          set -eu
+          version=$(sed -n 's/^ *version: *"\([^"]*\)".*/\1/p' mygo.config.ts | head -n1)
+          if [ -z "$version" ]; then echo "::error::mygo.config.ts 里读不到 version"; exit 1; fi
+          tag="${INPUT_TAG:-}"
+          if [ -z "$tag" ] && [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then tag="$GITHUB_REF_NAME"; fi
+          if [ -z "$tag" ]; then tag="v$version"; fi
+          # 产物名带的是配置里的 version，tag 只决定 Release 名字：两者不一致必然 404。
+          if [ "$tag" != "v$version" ]; then
+            echo "::error::tag $tag 与 mygo.config.ts 的 version $version 不一致，先跑 node scripts/bump-version.mjs $tag"
+            exit 1
+          fi
+          # mygo 从 CHANGELOG.md 的 `## <版本>` 段取发布说明，缺了打包会失败。
+          if ! grep -qE "^## ${version//./\\.}\s*$" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md 缺少「## $version」段落，打包取不到发布说明"
+            exit 1
+          fi
+          # 没有私钥就签不出 update-*.json，装好的旧版本永远收不到这一版：与其发一个
+          # 无法升级的 Release，不如在这里红掉（0.2 系列踩过的坑）。
+          if [ -z "${UPDATER_KEY:-}" ]; then
+            echo "::error::仓库 secret MYGO_UPDATER_PRIVATE_KEY 没配，构建不出签名更新文件"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
   build:
     name: 构建 ${{ matrix.name }}
+    needs: preflight
     strategy:
       fail-fast: false
+      # 串行：两个平台都会把本平台产物的校验和并进同一个 SHA256SUMS，并行时后传的
+      # 会覆盖先传的，结果可能缺行（install.ps1 就靠它校验安装包）。
+      max-parallel: 1
       matrix:
         include:
           - name: Windows
             os: windows-latest
             platform: windows/amd64
-            artifact: windows
           - name: macOS
             os: macos-latest
             platform: darwin/universal
-            artifact: macos
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -37,85 +82,47 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      # 前端产物会被 mygo 嵌进二进制，所以构建安装包前先跑一次 Vite 构建。
-      - name: 前端构建
-        run: npm run build:web
+      # mygo build 自己会跑 buildCommand（npm run build:web），不用另跑一次。
       # 未配置签名证书，跳过签名与公证：产物能装能跑，但 Windows 首次运行会有
-      # SmartScreen 提示、macOS 需要右键「打开」。要正式签名按 README「发布与签名」补配置。
-      # MYGO_UPDATER_PRIVATE_KEY 没配时会跳过签名更新包（构建不红），配了才会产出
-      # update-<os>-<arch>.json 与 .tar.gz/.delta，自动更新才能真正生效。
-      - name: 打包安装包
+      # SmartScreen 提示、macOS 需要右键「打开」。要正式签名按 README 补配置。
+      # -upload 把安装包、update-<os>-<arch>.json、<slug>-<版本>-<target>.tar.gz、
+      # install.ps1/.sh 与 SHA256SUMS 传进 Release 草稿；缺私钥或缺 gh 认证直接报错。
+      - name: 打包并上传
         env:
           MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
-        run: npx mygo-cli build -platform ${{ matrix.platform }} -skip-notarize
-      # 裸 exe 默认叫「Kotae.exe」，上传到 Release 会被空格变成点，不好看也不好写文档；
-      # 复制一份带版本号的便携版名字，和安装包一起发。
-      - name: 整理便携版
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx mygo-cli build -platform ${{ matrix.platform }} -skip-notarize -upload
+      # 免安装版不能只发裸 exe：SQLite 原生库（mygo-sqlite3.dll）与托盘图标就在 exe
+      # 旁边，单独拎出去会打不开工作区。整目录打成 zip，用户解压后双击 Kotae.exe。
+      # -upload 只传安装包与更新文件，这份自己补上去。
+      - name: 免安装版压缩包
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.preflight.outputs.tag }}
         run: |
           $config = Get-Content mygo.config.ts -Raw
           $version = [regex]::Match($config, 'version:\s*"([^"]+)"').Groups[1].Value
           if (-not $version) { throw 'mygo.config.ts 里没读到 version' }
-          $exe = Get-ChildItem build -Recurse -Filter '*.exe' | Where-Object { $_.Name -notlike '*setup*' } | Select-Object -First 1
-          if (-not $exe) { throw '没有找到可执行文件' }
-          $target = Join-Path $exe.Directory "kotae-$version-portable.exe"
-          Copy-Item $exe.FullName $target -Force
-          Remove-Item $exe.FullName -Force
-          Write-Host "便携版：$target"
-      - name: 收集产物
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          # Windows 出 .exe 安装包，macOS 出 .dmg；只收这两类，避免把中间目录传上去。
-          path: |
-            build/**/*.exe
-            build/**/*.dmg
-            build/**/update-*.json
-            build/**/*.tar.gz
-            build/**/*.delta
-          if-no-files-found: error
+          $dir = Join-Path build 'windows-amd64'
+          $stage = Join-Path $dir 'portable'
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+          Get-ChildItem $dir -File | Where-Object { $_.Name -notlike '*setup*' } | Copy-Item -Destination $stage
+          $zip = "kotae-$version-portable.zip"
+          Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -Force
+          Write-Host "免安装版：$zip"
+          gh release upload "$env:TAG" $zip --repo "${{ github.repository }}" --clobber
 
-  release:
+  publish:
     name: 发布 Release
-    needs: build
+    needs: [preflight, build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist-assets
-          merge-multiple: true
-      - name: 列出待发布文件
-        run: ls -lh dist-assets
-      # 重新发同一个 tag 时先删掉旧 Release，避免残留上一个版本命名方式的资产。
-      - name: 清理同名 Release
+      # 两个平台的资产都到齐了才转正：草稿期间装好的应用看不到这一版。
+      # --latest 是必要的：配置了 tagPrefix 时 mygo 建 Release 会带 --latest=false。
+      - name: 草稿转正
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          tag="${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v0.0.0-build{0}', github.run_number) }}"
-          gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || echo "没有同名 Release"
-          git tag -d "$tag" 2>/dev/null || true
-      - uses: softprops/action-gh-release@v2
-        with:
-          name: Kotae ${{ github.ref_name }}
-          # 手动触发时 ref_name 是分支名，用运行编号兜底，避免覆盖已有 tag 的 Release。
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v0.0.0-build{0}', github.run_number) }}
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-          body: |
-            ## 下载
-
-            - Windows：`kotae-setup-*.exe`（NSIS 安装包，装到 `%LOCALAPPDATA%\Programs\Kotae`）、`kotae-*-portable.exe`（免安装单文件）
-            - macOS：`kotae-*.dmg`（未签名，首次打开请右键 →「打开」）
-
-            ## 说明
-
-            安装包未做代码签名：Windows 首次运行会被 SmartScreen 拦一次（点「更多信息」→「仍要运行」），
-            macOS 需要右键打开一次放行。数据全部保存在本机，安装包不联网。
-          files: |
-            dist-assets/**/*.exe
-            dist-assets/**/*.dmg
-            dist-assets/**/update-*.json
-            dist-assets/**/*.tar.gz
-            dist-assets/**/*.delta
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: gh release edit "$TAG" --repo "${{ github.repository }}" --draft=false --latest

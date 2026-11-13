@@ -69,6 +69,8 @@ export interface PickedFile {
 export interface UpdateState {
   /** Supported 表示这个构建能不能自我更新。 */
   supported: boolean;
+  /** Portable 表示这是免安装形态（从便携压缩包解出来的），此时不能自我更新。 */
+  portable: boolean;
   /** Available 是上次检查发现的新版本号，没有新版本时为空。 */
   available: string;
   /** LastCheck 是上次检查成功的时间（Unix 毫秒），0 表示还没检查过。 */

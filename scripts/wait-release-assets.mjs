@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// 发布后核对 Release 资产：轮询 expanded_assets 页面，三个产物出齐就停，
+// 发布后核对 Release 资产：轮询 expanded_assets 页面，资产出齐就停，
 // 不用再按固定时长等流水线。口径见 .agents/skills/mygo-release/SKILL.md 第 6 步。
 //
-// 用法：node scripts/wait-release-assets.mjs v0.2.6 [--timeout=600] [--interval=15] [--proxy=http://127.0.0.1:7897]
+// 用法：node scripts/wait-release-assets.mjs vX.Y.Z [--timeout=600] [--interval=15] [--proxy=http://127.0.0.1:7897]
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -21,7 +21,7 @@ const timeoutMs = Number(flag("timeout", "600")) * 1000;
 const intervalMs = Number(flag("interval", "15")) * 1000;
 
 if (!tag || !/^v\d+\.\d+\.\d+$/.test(tag)) {
-  console.error("✗ 用法：node scripts/wait-release-assets.mjs v0.2.6 [--timeout=600] [--interval=15] [--proxy=URL]");
+  console.error("✗ 用法：node scripts/wait-release-assets.mjs vX.Y.Z [--timeout=600] [--interval=15] [--proxy=URL]");
   process.exit(1);
 }
 
@@ -41,11 +41,21 @@ if (tag.slice(1) !== version) {
   process.exit(1);
 }
 
+// 产物名里的点用 [.] 表示（等价于转义点），避免字符串里堆反斜杠。
+const v = version.replace(/\./g, "[.]");
 const expected = [
-  { label: "NSIS 安装包", re: new RegExp(`^${slug}-setup-${version.replace(/\./g, "\\.")}-.*\\.exe$`) },
-  { label: "免安装 exe", re: new RegExp(`^${slug}-${version.replace(/\./g, "\\.")}-portable\\.exe$`) },
-  { label: "macOS dmg", re: new RegExp(`^${slug}-${version.replace(/\./g, "\\.")}\\.dmg$`) },
+  { label: "NSIS 安装包", re: new RegExp(`^${slug}-setup-${v}-.*[.]exe$`) },
+  { label: "免安装压缩包", re: new RegExp(`^${slug}-${v}-portable[.]zip$`) },
+  { label: "macOS dmg", re: new RegExp(`^${slug}-${v}[.]dmg$`) },
+  { label: "Windows 更新包", re: new RegExp(`^${slug}-${v}-windows-amd64[.]tar[.]gz$`) },
+  { label: "macOS 更新包", re: new RegExp(`^${slug}-${v}-darwin-universal[.]tar[.]gz$`) },
+  { label: "Windows 更新清单", re: /^update-windows-amd64[.]json$/ },
+  { label: "macOS 更新清单", re: /^update-darwin-universal[.]json$/ },
+  { label: "PowerShell 安装脚本", re: /^install[.]ps1$/ },
+  { label: "Shell 安装脚本", re: /^install[.]sh$/ },
+  { label: "校验和", re: /^SHA256SUMS$/ },
 ];
+const total = expected.length;
 
 // 代理优先取参数，其次环境变量，最后沿用 git 已配的 http.proxy（本机直连 github 会超时）。
 const gitProxy = () => {
@@ -87,7 +97,7 @@ for (;;) {
   const missing = expected.filter((e) => !names.some((n) => e.re.test(n)));
 
   if (missing.length === 0) {
-    console.log(`✓ ${tag} 的三个资产已出齐（第 ${attempt} 次抓取）：`);
+    console.log(`✓ ${tag} 的 ${total} 个资产已出齐（第 ${attempt} 次抓取）：`);
     for (const e of expected) console.log(`  ${names.find((n) => e.re.test(n))}  ${e.label}`);
     process.exit(0);
   }
@@ -102,6 +112,6 @@ for (;;) {
   }
 
   const note = failure ? `（抓取失败：${failure}）` : "";
-  console.log(`· 第 ${attempt} 次：已出 ${found.length}/3，缺 ${missing.map((e) => e.label).join("、")}${note}，${intervalMs / 1000}s 后重试`);
+  console.log(`· 第 ${attempt} 次：已出 ${found.length}/${total}，缺 ${missing.map((e) => e.label).join("、")}${note}，${intervalMs / 1000}s 后重试`);
   await sleep(intervalMs);
 }

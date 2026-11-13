@@ -44,10 +44,9 @@ jobs:
         run: go vet ./...
       - name: mygo vet（原生 UI 生命周期与配置检查）
         run: npx mygo-cli vet .
-      - name: 前端构建
-        run: npm run build:web
       # 走完整打包链路（含嵌入式前端与图标），但不生成安装器：NSIS 在 CI 上要额外下载，
-      # 安装器只在发布时由 publish job 生成。
+      # 安装器只在发布时由 release.yml 生成。mygo build 自己会跑 buildCommand，
+      # 不用先单独跑一次 npm run build:web。
       - name: 打包可执行文件
         run: npx mygo-cli build -skip-installer
       - uses: actions/upload-artifact@v4

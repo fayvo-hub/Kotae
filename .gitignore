@@ -5,5 +5,9 @@ node_modules/
 mygo_windows_*.syso
 e2e/artifacts/
 
+# 更新签名密钥（`npx mygo-cli keygen` 的产物）：私钥绝不入库。
+mygo-update.key
+mygo-update.pub
+
 # 本地临时产物（脚本草稿、截图等），不进版本控制。
 tmp/

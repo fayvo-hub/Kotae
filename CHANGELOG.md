@@ -1,5 +1,18 @@
 # 更新日志
 
+## 0.3.0
+
+### 打包与发布
+
+- 发版流水线改成 MyGo 官方流程：打 tag 后先校验「tag 与配置版本一致 / CHANGELOG 有对应段落 / 更新私钥已配置」，再串行构建两个平台并用 `mygo build -upload` 直接上传到 Release 草稿，最后一个 job 转正。Release 里现在有签名更新文件（`update-<平台>.json` 与更新用 tar.gz/delta）、`install.ps1` / `install.sh` 与 `SHA256SUMS`，装好的应用才真能自动升级。
+- 两个平台串行构建：两边都要把本平台的行并进同一个 `SHA256SUMS`，并行会互相覆盖导致 `install.ps1` 校验失败。
+- Windows 免安装版改成压缩包 `kotae-<版本>-portable.zip`（解压后连同 `mygo-sqlite3.dll` 与图标一起用）。此前发的单文件 exe 缺 SQLite 原生库，打开工作区会报 `mygo-sqlite3.dll is missing`。
+
+### 自动更新
+
+- 更新签名密钥换成新的一对。0.2 系列安装包用的是已丢失的旧私钥，那些版本无法自动升级，装一次新版安装包即可（工作区数据在 `%APPDATA%\Kotae`，不受影响）。
+- 设置页的更新区按安装形态如实区分：免安装版、开发版与包管理器安装的版本写明不能自我更新，「检查更新」按钮置灰，不再点了才报错。
+
 ## 0.2.6
 
 ### 网络出口

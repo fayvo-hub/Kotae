@@ -16,9 +16,17 @@
 
 | 平台 | 产物 | 说明 |
 | --- | --- | --- |
-| Windows 10/11 | `kotae-setup-<版本>-amd64.exe` | 按用户安装到 `%LOCALAPPDATA%\Programs\Kotae`，不需要管理员权限；需要 WebView2（Win11 自带） |
-| Windows 免安装 | `kotae-<版本>-portable.exe` | 单文件双击即用，适合放 U 盘或临时机器 |
+| Windows 10/11 | `kotae-setup-<版本>-amd64.exe` | 按用户安装到 `%LOCALAPPDATA%\Programs\Kotae`，不需要管理员权限；需要 WebView2（Win11 自带）。只有安装版会自己检查更新 |
+| Windows 免安装 | `kotae-<版本>-portable.zip` | 解压后双击 `Kotae.exe`（SQLite 原生库与图标就在旁边，不要单独拷 exe）；不能自动更新，新版请重新下载 |
 | macOS 12+ | `kotae-<版本>.dmg` | Apple Silicon 与 Intel 通用；未做代码签名，首次打开请右键 →「打开」 |
+
+Windows 也可以用一行命令装/升级最新版（下载安装包、校验 SHA-256、关掉正在运行的 Kotae、静默安装并启动）：
+
+```powershell
+irm https://github.com/fayvo-hub/Kotae/releases/latest/download/install.ps1 | iex
+```
+
+**从 0.2 系列升级**：0.2 及更早的 Release 里没有签名更新文件（当时用的还是后来丢弃的旧密钥），那些版本无法自动升级，装一次新版安装包即可——工作区数据在 `%APPDATA%\Kotae`，升级不会动它。
 
 安装包没有代码签名：Windows 首次运行会被 SmartScreen 拦一次（「更多信息」→「仍要运行」）。想自己编译见「[打包与安装](#打包与安装)」。
 
@@ -144,7 +152,7 @@ MYGO_E2E_SHOTS=1 npm run e2e       # 把关键界面截图到 e2e/artifacts/（�
 元数据都在 `mygo.config.ts`：`name`（用户看到的名字，安装包与快捷方式用它）、`slug`（安装包文件名、Debian 包名等纯 ASCII 场景）、`identifier`（系统登记用的反向域名）、`icon`、`windows.displayName` / `windows.installDirName`（Windows 显示名与 `%LOCALAPPDATA%\Programs\Kotae` 目录名）、`linux.*`（Debian 包与 desktop 条目）、`urlSchemes`（深链）。
 
 ```bash
-npm run build                         # build/windows-amd64/：Kotae.exe + kotae-setup-0.2.6-amd64.exe
+npm run build                         # build/windows-amd64/：Kotae.exe + kotae-setup-0.3.0-amd64.exe
 npx mygo-cli build -skip-installer    # 只要可执行文件
 npx mygo-cli build -platform linux/amd64,darwin/universal   # 交叉编译（需要各平台的打包工具）
 ```
@@ -157,7 +165,8 @@ Windows 安装包是 NSIS 做的按用户安装：装到 `%LOCALAPPDATA%\Program
 
 - Windows 代码签名：配 `windows.certificate`（.pfx 路径）并设置环境变量 `MYGO_WINDOWS_CERTIFICATE_PASSWORD`，时间戳服务用 `windows.timestampUrl`；也可以改用 `windows.signCommand`（`%1` 是待签文件路径）。**没有签名的安装包会被 SmartScreen 拦一次**，属于预期行为。
 - macOS 签名与公证：`macos.signingIdentity` + `macos.notarize.keychainProfile`；未签名时用户要手动「右键 → 打开」。
-- 自动更新：`updates` 已配好（`publicKey` + `github: fayvo-hub/Kotae` + `tagPrefix: v` + `changelog: CHANGELOG.md`）。发布机设好 `MYGO_UPDATER_PRIVATE_KEY` 后，构建会额外产出签名更新包与 `update-<platform>.json`；没有私钥时构建照常出安装包，只是不带更新文件。密钥对由 `npx mygo-cli keygen` 生成，公钥写进配置、私钥不入库。发布说明取自 `CHANGELOG.md` 里 `## <版本>` 那一段，没有这一段打包会报错。
+- 自动更新：`updates` 已配好（`publicKey` + `github: fayvo-hub/Kotae` + `tagPrefix: v` + `changelog: CHANGELOG.md`）。发版时流水线带 `MYGO_UPDATER_PRIVATE_KEY` 构建，额外产出 `update-<target>.json`、`<slug>-<版本>-<target>.tar.gz` 与增量 delta，装好的应用每天检查一次，设置页可手动检查。**私钥丢了就把老用户锁在旧版本上**（应用只认这把私钥签的名），所以它只在密码管理器和 GitHub Secrets 里；密钥对由 `npx mygo-cli keygen` 生成，公钥写进配置、私钥不入库（`.gitignore` 已挡 `mygo-update.key`）。发布说明取自 `CHANGELOG.md` 里 `## <版本>` 那一段，没有这一段打包会报错。
+- **哪些版本能自更新**：安装版（程序目录里有 `Uninstall.exe`）才行；免安装 zip 解出来的目录不行——MyGo 的 Windows 更新只替换程序目录里其它文件、保留正在运行的可执行文件本身，单文件形态没有可换的东西，所以 `updates.go` 按这个特征判定并在设置页如实显示「免安装版不能自我更新」。开发版（`go build`）与包管理器安装的版本同样显示不支持。
 
 ### 持续集成
 
@@ -166,22 +175,31 @@ Windows 安装包是 NSIS 做的按用户安装：装到 `%LOCALAPPDATA%\Program
 | job | 触发 | 做什么 |
 | --- | --- | --- |
 | `web` | 每次推送 / PR | `npm ci` → `typecheck` → `lint:ui` → `build:web` |
-| `windows` | 每次推送 / PR | `go vet` → `mygo-cli vet` → `build:web` → `mygo-cli build -skip-installer`，产物作为 artifact 上传 |
+| `windows` | 每次推送 / PR | `go vet` → `mygo-cli vet` → `mygo-cli build -skip-installer`（构建自己会跑 `build:web`），产物作为 artifact 上传 |
 | `e2e` | 手动触发（Actions 页面「Run workflow」） | 在 Windows runner 上跑真实窗口的端到端用例，失败时上传截图 |
 
 端到端用例没有挂在每次推送里：它要开真实窗口、要 WebView2 与桌面会话，比静态检查慢且更依赖 runner 环境，所以留成手动触发，日常靠本地 `npm run e2e`。
 
 ### 发布
 
-`.github/workflows/release.yml` 在推送 `v*` tag（或在 Actions 页面手动触发）时构建两个平台的安装包并挂到 GitHub Release：
+`.github/workflows/release.yml` 在推送 `v*` tag（或在 Actions 页面手动触发）时构建两个平台的安装包与签名更新文件，由 `mygo build -upload` 挂到 GitHub Release。流程照 MyGo 的 `docs/github-actions.md`：
+
+| job | 做什么 |
+| --- | --- |
+| `preflight` | 校验 tag 与 `mygo.config.ts` 的 `version` 一致、`CHANGELOG.md` 有 `## <版本>` 段、`MYGO_UPDATER_PRIVATE_KEY` 已配置；缺一样就红，不会发一个装不上更新文件的 Release |
+| `build` | 两个平台串行跑 `mygo-cli build -platform … -skip-notarize -upload`：安装包、`update-<target>.json`、更新用 tar.gz/delta、`install.ps1`/`install.sh`、`SHA256SUMS` 一起进 Release 草稿（草稿由 mygo 建，发布说明取自 CHANGELOG）；Windows 额外把免安装目录打成 zip 用 `gh release upload` 补上 |
+| `publish` | 两个平台都传完后 `gh release edit --draft=false --latest` 转正，装好的应用这才看得到这一版 |
 
 ```bash
-# 发布 0.2.6：先把 mygo.config.ts 的 version 改成 0.2.6 并提交
-git tag v0.2.6
-git push origin v0.2.6
+# 1. 先写好 CHANGELOG 里 `## <新版本>` 那一段，再对齐版本号副本（配置与文档里的副本由脚本改）
+node scripts/bump-version.mjs X.Y.Z
+# 2. 打 tag 触发流水线
+```
+git tag vX.Y.Z
+git push origin vX.Y.Z
 ```
 
-两个平台并行构建：`windows-latest` 跑 `mygo-cli build -platform windows/amd64`（出 exe、NSIS 安装包，并把裸 exe 改名成 `kotae-<版本>-portable.exe`），`macos-latest` 跑 `-platform darwin/universal`（出 `.app` 与 `.dmg`），最后由 `release` job 汇总上传。没有配签名证书时构建带 `-skip-notarize`，产物能装能跑但需要用户手动放行；接入签名后去掉这个参数，并按上一节补配置。
+没配签名证书时构建带 `-skip-notarize`，产物能装能跑但需要用户手动放行；接入签名后去掉这个参数，并按上一节补配置。用 GitHub 命令行重发同一版本时可用 `workflow_dispatch` 并填入要重发的 tag（同名资产按 `--clobber` 覆盖，改名留下的旧资产要手动删）。
 
 发完整流程（版本号对齐清单、资产核对命令、重发同一版本、失败排查）见 `.agents/skills/mygo-release/SKILL.md`。
 
@@ -191,7 +209,7 @@ git push origin v0.2.6
 2. `npm run typecheck && npm run lint:ui && go vet ./... && npx mygo-cli vet . && npm run e2e`。
 3. `npm run build`，确认 `build/windows-amd64/` 里有 exe、`mygo-sqlite3.dll` 与 setup 安装包。
 4. 装一次安装包（含 `/S` 静默安装）验证快捷方式、卸载项与「数据目录保留」。
-5. 打 tag 触发发布流水线：`git tag vX.Y.Z && git push origin vX.Y.Z`；要签名/自动更新的话先按「代码签名与自动更新」补配置，并把 `release.yml` 里的 `-skip-notarize` 去掉。
-6. 等 5 分钟左右到 Release 页面确认资产齐了：setup 安装包、portable、dmg 三个都在。
+5. 打 tag 触发发布流水线：`git tag vX.Y.Z && git push origin vX.Y.Z`；要签名的话先按「代码签名与自动更新」补配置，并把 `release.yml` 里的 `-skip-notarize` 去掉。
+6. `node scripts/wait-release-assets.mjs vX.Y.Z` 等资产出齐：安装包、免安装 zip、dmg、两平台的更新 tar.gz 与 `update-*.json`、`install.ps1`/`install.sh`、`SHA256SUMS` 共十件。
 
 图标由 `scripts/make-icons.py` 生成（需要 Pillow）：`python scripts/make-icons.py` 会重写 `resources/icon.png`（1024×1024 应用图标）与 `resources/tray.png`（32×32 托盘图标），两者是同一套品牌渐变加 `>_` 字形，改配色只改脚本顶部的两个颜色常量。

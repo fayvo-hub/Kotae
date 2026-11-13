@@ -6,7 +6,7 @@ export default defineConfig({
   // 文件系统里必须用纯 ASCII 的地方（安装包文件名、Debian 包名、desktop 条目）。
   slug: "kotae",
   identifier: "com.kotae.app",
-  version: "0.2.6",
+  version: "0.3.0",
   copyright: "© 2025 Kotae",
   publisher: "Kotae",
   icon: "resources/icon.png",
@@ -34,12 +34,17 @@ export default defineConfig({
     installDirName: "Kotae",
   },
   // ---- 自动更新：已启用 ----
-  // publicKey 是 `npx mygo-cli keygen` 生成的公钥，私钥只在发布机上（CI secret
-  // MYGO_UPDATER_PRIVATE_KEY）。tagPrefix 默认 "v"，与本仓库的 v0.2.6 这类标签一致。
-  // 读发布说明：仓库根目录 CHANGELOG.md 里 `## 0.2.6` 那一段。
+  // publicKey 是 `npx mygo-cli keygen` 生成的公钥，私钥只放在发布机上（CI secret
+  // MYGO_UPDATER_PRIVATE_KEY 与本机 %APPDATA%\mygo\update-keys，都不入库）。
+  // 装好的应用只接受这把私钥签名的更新：私钥丢了就等于把老用户锁在旧版本上，
+  // 所以它不在仓库、不在 issue、不在聊天记录里，只在密码管理器和 GitHub Secrets。
+  // 更早的构建（0.2.x）用的是另一把已丢失的旧密钥，而那些 Release 里也没有
+  // update-*.json，实际上从未能自更新：这些安装无法自动升级，只能手动装一次新版。
+  // tagPrefix 默认 "v"，与本仓库的 v0.3.0 这类标签一致。
+  // 读发布说明：仓库根目录 CHANGELOG.md 里 `## 0.3.0` 那一段。
   // github 是 GitHub 上的仓库路径，与应用名无关。
   updates: {
-    publicKey: "udSJM9PEbjCiDLdSIadYODhlRzSi/UM1sOEutcoc6FU=",
+    publicKey: "CtcUvQdCctZj4latrNASsoYCkD7+Kr3y35il7TwdJH8=",
     github: "fayvo-hub/Kotae",
     tagPrefix: "v",
     changelog: "CHANGELOG.md",

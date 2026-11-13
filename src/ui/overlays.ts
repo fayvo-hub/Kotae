@@ -759,7 +759,9 @@ function updateSection(): HTMLElement {
           ? st.available
             ? `发现新版本 ${st.available}`
             : "已是最新版本"
-          : "这个构建不能自我更新（开发版或包管理器安装的版本）";
+          : st.portable
+            ? "免安装版不能自我更新，请到 Releases 下载新版"
+            : "这个构建不能自我更新（开发版或包管理器安装的版本）";
         const row = el("div", { class: "info-row" });
         row.append(
           el("span", {
@@ -779,6 +781,7 @@ function updateSection(): HTMLElement {
         checks.disabled = !st.supported;
         downloads.checked = st.automaticDownloads;
         downloads.disabled = !st.supported;
+        checkBtn.disabled = !st.supported;
       })
       .catch((err: unknown) => {
         fill(status, el("div", { class: "info-row", text: `读不到更新状态：${(err as Error).message}` }));

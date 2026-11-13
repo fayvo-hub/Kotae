@@ -1,11 +1,11 @@
 ---
 name: mygo-release
-description: 给 MyGo 桌面应用发版：打 tag 触发 GitHub Actions 并行构建 Windows 安装包/免安装 exe 与 macOS dmg，自动挂到 GitHub Release，并核对资产。当用户说「发版」「发布新版本」「打个 tag」「出安装包」「重新发同一版本」「Release 里没文件/名字不对」「发布流水线红了」「发版太慢」「打包报文件被占用」时使用。覆盖版本对齐（scripts/bump-version.mjs）、按改动分层的发布前闸门、推送与打标签、资产命名规则、资产轮询核对（scripts/wait-release-assets.mjs）、重发与失败排查。
+description: 给 MyGo 桌面应用发版：打 tag 触发 GitHub Actions 串行构建 Windows 安装包/免安装 zip 与 macOS dmg、签名更新文件、安装脚本与校验和，自动挂到 GitHub Release 草稿并转正。当用户说「发版」「发布新版本」「打个 tag」「出安装包」「重新发同一版本」「Release 里没文件/名字不对」「发布流水线红了」「发版太慢」「打包报文件被占用」「自动更新失效」时使用。覆盖版本对齐（scripts/bump-version.mjs）、按改动分层的发布前闸门、推送与打标签、资产命名规则、资产轮询核对（scripts/wait-release-assets.mjs）、重发与失败排查。
 ---
 
 # Kotae 发版
 
-本仓库的发布是一条单行道：`main` 上全绿 → 打 `vX.Y.Z` 标签 → GitHub Actions 并行构建 → Release 自动挂产物。
+本仓库的发布是一条单行道：`main` 上全绿 → 打 `vX.Y.Z` 标签 → GitHub Actions 串行构建两个平台 → 建 Release 草稿 → 资产传齐后转正。
 **不要手工上传安装包，不要本地凑 dmg**（`mygo build` 的说明写明磁盘镜像需要 macOS）。
 
 ## 本仓库的固定事实
@@ -14,9 +14,10 @@ description: 给 MyGo 桌面应用发版：打 tag 触发 GitHub Actions 并行�
 | --- | --- |
 | 远端 | `origin` = `https://github.com/fayvo-hub/Kotae.git`（仓库原名 `mygo-api`，GitHub 上 301 重定向，本地 remote 已改到新名） |
 | 版本号唯一真源 | `mygo.config.ts` 的 `version`（`slug` = `kotae` 决定产物名） |
-| 发布流水线 | `.github/workflows/release.yml`（`push: tags: v*` 或手动触发） |
-| 构建矩阵 | Windows `windows/amd64`、macOS `darwin/universal`，`fail-fast: false` |
-| Release 产物 | `kotae-setup-<版本>-amd64.exe`、`kotae-<版本>-portable.exe`、`kotae-<版本>.dmg` |
+| 发布流水线 | `.github/workflows/release.yml`（`push: tags: v*`，或 `workflow_dispatch` 填 tag 重发）：`preflight` → `build` → `publish` |
+| 构建矩阵 | Windows `windows/amd64`、macOS `darwin/universal`，**串行**（`max-parallel: 1`：两边都要把本平台的行并进同一个 `SHA256SUMS`，并行会互相覆盖导致缺行、`install.ps1` 校验失败），`fail-fast: false` |
+| Release 产物 | 十件：`kotae-setup-<版本>-amd64.exe`、`kotae-<版本>-portable.zip`、`kotae-<版本>.dmg`、`kotae-<版本>-windows-amd64.tar.gz`、`kotae-<版本>-darwin-universal.tar.gz`、`update-windows-amd64.json`、`update-darwin-universal.json`、`install.ps1`、`install.sh`、`SHA256SUMS` |
+| 更新签名 | 私钥在发布机 `%APPDATA%\mygo\update-keys\mygo-update.key`，CI 里是 Secrets `MYGO_UPDATER_PRIVATE_KEY`；公钥写死在 `mygo.config.ts` 的 `updates.publicKey`，两者必须配对。**私钥丢了就把所有已装用户锁在旧版本上**（应用只认这把私钥签的名），换新密钥只能手动重装 |
 | 网络 | 直连 github.com 会超时；git 已在本仓库配 `http.proxy`，`curl` 要显式加 `--proxy` |
 
 ## 发版步骤
@@ -24,8 +25,8 @@ description: 给 MyGo 桌面应用发版：打 tag 触发 GitHub Actions 并行�
 ### 1. 对齐版本号
 
 ```bash
-node scripts/bump-version.mjs 0.2.6 --dry-run   # 先看要改哪几处
-node scripts/bump-version.mjs 0.2.6             # 真改
+node scripts/bump-version.mjs 0.3.0 --dry-run   # 先看要改哪几处
+node scripts/bump-version.mjs 0.3.0             # 真改
 ```
 
 脚本读 `mygo.config.ts` 的 `name`/`slug`/`version`（`version` 是唯一真源），一次改完仓库里写死的副本：
@@ -34,7 +35,7 @@ node scripts/bump-version.mjs 0.2.6             # 真改
 | --- | --- | --- |
 | `mygo.config.ts` | `version:` | 要，它是唯一真源 |
 | `mygo.config.ts` | `tagPrefix` 注释里的 `v<版本>` 示例、读发布说明的 `## <版本>` 注释 | 要 |
-| `README.md` | 「下载」示例路径、「发布」小节里的 `git tag` / `git push origin v<版本>` 示例 | 要 |
+| `README.md` | 「下载」表里的 `kotae-setup-<版本>-amd64.exe` 示例 | 要（后来加了 `build/` 输出注释里的同名示例；tag 与 push 示例已改成通用 `vX.Y.Z`，不再由脚本托管） |
 | `docs/设计系统.md` | 第 1 行标题里的版本号 | 要 |
 | `AGENTS.md` | 第 3 行「已发 <版本>」 | 要 |
 | `docs/mygo-调研与功能清单.md` | 调研时的命令输出与配置片段 | **不改**，它是历史归档 |
@@ -99,8 +100,8 @@ Stop-Process -Id <pid> -Force
 
 ### 4. 提交并推送 main
 
-提交信息中文、Conventional Commits 前缀（`chore(release): 发布 0.2.6`）。只 `git add` 本次涉及的路径。
-下面几步里的 `0.2.6` 都是示例，换成当前要发的版本号。
+提交信息中文、Conventional Commits 前缀（`chore(release): 发布 0.3.0`）。只 `git add` 本次涉及的路径。
+下面几步里的 `0.3.0` 都是示例，换成当前要发的版本号。
 
 ```bash
 git push origin main
@@ -111,30 +112,31 @@ git push origin main
 ### 5. 打标签并推送
 
 ```bash
-git tag -a v0.2.6 -m "Kotae 0.2.6"
-git push origin v0.2.6
+git tag -a v0.3.0 -m "Kotae 0.3.0"
+git push origin v0.3.0
 ```
 
-推到标签的那一刻流水线就开始跑，两平台并行。
+推到标签的那一刻流水线就开始跑：`preflight` 先校验三件事（tag 与 `mygo.config.ts` 的 `version` 一致、`CHANGELOG.md` 有 `## <版本>` 段、`MYGO_UPDATER_PRIVATE_KEY` 已配），不过就红，不会发一个装不上更新文件的 Release；然后两个平台串行 `mygo-cli build -platform … -skip-notarize -upload`（`-upload` 自己建草稿、自己传资产）；最后 `publish` 用 `gh release edit --draft=false --latest` 转正。
 
 ### 6. 核对 Release 资产
 
 ```bash
-node scripts/wait-release-assets.mjs v0.2.6
+node scripts/wait-release-assets.mjs v0.3.0
 ```
 
-默认 15s 轮询、最多等 10 分钟，**三件资产出齐立刻返回**（不按固定时长干等），超时打印缺哪一件并提示去 Actions 看红在哪个平台。它还会先校验 tag 与 `mygo.config.ts` 的 `version` 一致（不一致必然 404），代理取 `--proxy` > `RELEASE_PROXY`/`HTTPS_PROXY` > `git config --get http.proxy`。
+默认 15s 轮询、最多等 10 分钟，**十件资产出齐立刻返回**（不按固定时长干等），超时打印缺哪几件并提示去 Actions 看红在哪个平台。它还会先校验 tag 与 `mygo.config.ts` 的 `version` 一致（不一致必然 404），代理取 `--proxy` > `RELEASE_PROXY`/`HTTPS_PROXY` > `git config --get http.proxy`。
 
 手工兜底（脚本报错或要确认资产名时）。**不要用 GitHub REST API**：匿名调用会 403 限流（本机未装 `gh`）。直接抓资产列表网页：
 
 ```bash
 curl -s --proxy http://127.0.0.1:7897 \
-  "https://github.com/fayvo-hub/Kotae/releases/expanded_assets/v0.2.6" \
-  | grep -oE "kotae[a-zA-Z0-9._-]*\.(exe|dmg)" | sort -u
+  "https://github.com/fayvo-hub/Kotae/releases/expanded_assets/v0.3.0" \
+  | grep -oE "[a-zA-Z0-9._-]+\.(exe|dmg|zip|gz|json|ps1|sh)|SHA256SUMS" | sort -u
 ```
 
-期望**恰好三个**：setup 安装包、portable、dmg。少一个说明对应平台构建失败，去 Actions 页面看 job 日志。
-从打标签到资产出齐常要 5 分钟上下，交给轮询脚本等，不要手写 `sleep` 估时间，也不要没出齐就急着重发。
+期望十件（见上面「固定事实」表）。少了 `update-*.json` 或 `SHA256SUMS` 说明私钥没进构建或 `-upload` 没跑；少了某个平台的 tar.gz 就是那个平台构建失败。去 Actions 页面看 job 日志。
+从打标签到资产出齐常要 5 分钟上下（串行两平台比并行慢一倍），交给轮询脚本等，不要手写 `sleep` 估时间，也不要没出齐就急着重发。
+**注意发布不是原子操作**：`build` job 每传完一个平台就多几件资产，但 Release 还是草稿；`publish` 没跑完之前用户看不到这一版，所以草稿期间出问题可以直接重跑。
 
 ### 7. 发布后
 
@@ -142,44 +144,53 @@ curl -s --proxy http://127.0.0.1:7897 \
 - 界面有可见变化时重出截图：
 
 ```bash
-MYGO_E2E_SCREENSHOTS=1 go test -tags e2e ./e2e/ -run TestScreenshots -count=1
+MYGO_E2E_SHOTS=1 npm run e2e
 ```
 
 ## 重发同一个版本
 
-产物命名方式改了、某个平台构建挂了要重跑，都会遇到「tag 已存在」。流程：
+产物命名方式改了、某个平台构建挂了要重跑，都会遇到「tag 已存在」。两种做法：
+
+**A. 同一个 tag 重跑流水线**（推荐，不改 tag）：Actions 页面选 `Release` → `Run workflow` → 填要重发的 tag。`-upload` 走 `gh release upload --clobber`，同名资产直接覆盖；Release 已存在时 mygo 会先把线上的 `SHA256SUMS` 下载下来、只合并本平台的行再传，所以两边不会互相抹掉。
+
+**B. 删了 tag 重推**（要改 tag 指向、或草稿被弄脏时）：
 
 ```bash
-git push origin --delete v0.2.6   # 删远端标签
-git tag -d v0.2.6                 # 删本地标签
-git tag -a v0.2.6 -m "Kotae 0.2.6"
-git push origin v0.2.6
+git push origin --delete v0.3.0   # 删远端标签
+git tag -d v0.3.0                 # 删本地标签
+git tag -a v0.3.0 -m "Kotae 0.3.0"
+git push origin v0.3.0
 ```
 
-流水线的 release job 会先 `gh release delete <tag> --cleanup-tag` 清掉旧 Release，所以不会残留上一次的资产名。
-**不要 `git push -f` 去改已有 tag 指向**，也不要在旧 Release 上手工删文件凑数。
+**不要 `git push -f` 去改已有 tag 指向**。
+改名之后留下的旧资产（比如以前那个 `kotae-<版本>-portable.exe`）不会自动消失，只能到 Release 页面手动删——`--clobber` 只覆盖同名文件。
 
 ## 产物命名为什么这样
 
-- 裸可执行文件叫 `Kotae.exe`，不带版本号 → 流水线在 Windows job 里把它复制成 `kotae-<版本>-portable.exe` 再删原件，资产名一眼能看出是哪个版本
+- 裸可执行文件叫 `Kotae.exe`，不带版本号
+- **免安装版是 zip，不是单文件 exe**：`mygo-sqlite3.dll` 必须和 exe 放在一起（`plugins/sqlite` 只在这两处找它），只发裸 exe 的包一打开工作区就报 `mygo-sqlite3.dll is missing`。流水线在 Windows job 里把 `build\windows-amd64` 下除安装包以外的文件（exe、dll、icon.png、tray.png）复制进 `portable` 子目录再 `Compress-Archive` 成 `kotae-<版本>-portable.zip`，用 `gh release upload --clobber` 补进草稿
+- 免安装版**不能自我更新**（MyGo 的 Windows 更新只替换目录里其它文件、保留正在运行的可执行文件本身），所以 `updates.go` 用「同级有没有 `Uninstall.exe`」判定安装形态，设置页对免安装版如实写明并置灰检查按钮
 - 安装包由 `mygo build` 生成，名字是 `<slug>-setup-<版本>-<arch>.exe`，NSIS 装在 `%LOCALAPPDATA%\Programs\Kotae`（按用户安装，不需要管理员）
 - dmg 名字是 `<slug>-<版本>.dmg`，`darwin/universal` 时**不带架构后缀**
+- `update-<target>.json` + `<slug>-<版本>-<target>.tar.gz`(+delta) 是自动更新的实际载荷，`install.ps1`/`install.sh`/`SHA256SUMS` 由 `mygo build` 生成——**这五类只有配了 `updates` 且带私钥构建时才有**，这也是为什么流水线要求 `MYGO_UPDATER_PRIVATE_KEY`
 
 ## 失败排查
 
 | 现象 | 原因与处置 |
 | --- | --- |
 | 流水线没触发 | 标签没推上去，或标签名不是 `v*`；`git ls-remote --tags origin` 确认 |
+| `preflight` 红 | 三种原因（报错原文会写）：tag 与 `mygo.config.ts` 的 `version` 不一致（打 tag 前忘了跑 `bump-version.mjs`）、`CHANGELOG.md` 缺 `## <版本>` 段、Secrets 里没有 `MYGO_UPDATER_PRIVATE_KEY` |
 | Windows job 红在「打包安装包」 | 多半是 NSIS 下载失败；重跑 job 即可，`mygo build` 会自动下载 makensis |
 | macOS job 红在 dmg | `-skip-notarize` 已加；若报签名相关，检查是否误配了 `macos.signingIdentity` |
 | Release 只有一个平台的包 | 另一个 job 挂了；`fail-fast: false` 保证不会互相取消，去 Actions 看是哪个 |
-| 资产里出现 `Kotae.exe` | 便携版改名步骤没跑到；检查 Windows job 里 `整理便携版` 的 pwsh 步骤 |
+| Release 里有包但没有 `update-*.json` / `SHA256SUMS` | 老流程（没用 `-upload`）或私钥没进构建。现在的流水线缺私钥会在 `preflight` 红掉，出现这种 Release 就是用了旧 tag 或手工上传，处理办法：确认私钥后同 tag 重跑 |
+| 资产里出现裸 `Kotae.exe` 或 `portable` 目录 | 免安装打包步骤没跑到；检查 Windows job 里 `打包免安装版` 的 pwsh 步骤 |
 | 打包报 `rename … The process cannot access the file` | 输出目录被别的进程持有（本机是搜狗 `SogouCloud.exe`）；见第 3 步的 handle64 处置 |
 | 打包时读不到版本号 | pwsh 里用正则读 `mygo.config.ts` 的 `version:`，改配置格式（比如换成反引号）会打断它 |
 
 ## 不要做
 
-- 不带标签就手动 `workflow_dispatch` 发正式版：那条路径会用 `v<版本>-build<run_number>` 当标签，只适合试跑
+- 不带标签就手动 `workflow_dispatch` 发正式版：现在的 `workflow_dispatch` 需要填 tag，走的是同一条路径；不填 tag 或填的 tag 与 `version` 不一致会被 `preflight` 拦下
 - 用固定 `sleep` 等流水线出资产：用 `scripts/wait-release-assets.mjs`，出齐就返回
 - 发版时无条件跑两套 e2e：按第 2 步的分层表只跑一套
 - 手工往 Release 传文件，或本地 `mygo build` 之后直接发出去

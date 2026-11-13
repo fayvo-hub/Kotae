@@ -2,6 +2,10 @@ package main
 
 import (
 	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"runtime"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/plugins/updater"
@@ -18,10 +22,27 @@ import (
 // 开发版与包管理器安装的版本 mygo.Updater.Enabled() 为 false，此时一律如实告诉用户
 // 「这个构建不能自我更新」，而不是假装检查。
 
+// 免安装形态（从便携压缩包里解出来的目录）同样不能自我更新：MyGo 的 Windows 更新
+// 只替换程序目录里“其它”文件、保留正在运行的可执行文件本身，单文件形态没有别的文件
+// 可换，装完重启还是旧版本。安装器会把 Uninstall.exe 写进程序目录，没有它就是免安装形态。
+func isPortable() bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(filepath.Join(filepath.Dir(exe), "Uninstall.exe"))
+	return errors.Is(err, fs.ErrNotExist)
+}
+
 // UpdateState 是设置面板「更新」一节需要的状态。
 type UpdateState struct {
 	// Supported 表示这个构建能不能自我更新。
 	Supported bool `json:"supported"`
+	// Portable 表示这是免安装形态（从便携压缩包解出来的），此时不能自我更新。
+	Portable bool `json:"portable"`
 	// Available 是上次检查发现的新版本号，没有新版本时为空。
 	Available string `json:"available"`
 	// LastCheck 是上次检查成功的时间（Unix 毫秒），0 表示还没检查过。
@@ -34,8 +55,9 @@ type UpdateState struct {
 
 // UpdateState 返回更新相关的当前状态，供设置面板渲染。
 func (s *System) UpdateState() UpdateState {
-	if !mygo.Updater.Enabled() {
-		return UpdateState{}
+	portable := isPortable()
+	if !mygo.Updater.Enabled() || portable {
+		return UpdateState{Portable: portable}
 	}
 	st := UpdateState{
 		Supported:          true,
@@ -51,6 +73,9 @@ func (s *System) UpdateState() UpdateState {
 
 // CheckForUpdates 打开更新窗口检查新版本，用户点菜单或设置页按钮时调用。
 func (s *System) CheckForUpdates() error {
+	if isPortable() {
+		return errors.New("免安装版不能自我更新，请到 Releases 下载新版压缩包")
+	}
 	if !mygo.Updater.Enabled() {
 		return errors.New("这个构建没有配置更新源，无法检查更新")
 	}
@@ -60,7 +85,7 @@ func (s *System) CheckForUpdates() error {
 
 // SetUpdatePrefs 保存更新偏好（后台自动检查、自动下载安装）。
 func (s *System) SetUpdatePrefs(automaticChecks bool, automaticDownloads bool) error {
-	if !mygo.Updater.Enabled() {
+	if !mygo.Updater.Enabled() || isPortable() {
 		return nil
 	}
 	updater.SetAutomaticChecks(automaticChecks)
