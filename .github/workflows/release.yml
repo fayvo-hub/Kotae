@@ -46,6 +46,19 @@ jobs:
             echo "::error::CHANGELOG.md 缺少「## $version」段落，打包取不到发布说明"
             exit 1
           fi
+          # 应用自己接管了更新清单的取法（updates.go 的 updateFeedBase）：那里的地址是
+          # 配置里 github + “默认 tagPrefix”拼出来的同一个地址，两边不一致时更新会静默
+          # 失效（装的用户永远查不到新版），所以在这里挡一道。
+          repo=$(sed -n 's/^ *github: *"\([^"]*\)".*/\1/p' mygo.config.ts | head -n1)
+          prefix=$(sed -n 's/^ *tagPrefix: *"\([^"]*\)".*/\1/p' mygo.config.ts | head -n1)
+          if [ "$prefix" != "v" ]; then
+            echo "::error::tagPrefix 是「$prefix」：清单改走 tagged feed，updates.go 的 updateFeedBase 要一起改"
+            exit 1
+          fi
+          if ! grep -qF "https://github.com/$repo/releases/latest/download/" updates.go; then
+            echo "::error::updates.go 的 updateFeedBase 与 mygo.config.ts 的 github（$repo）不一致"
+            exit 1
+          fi
           # 没有私钥就签不出 update-*.json，装好的旧版本永远收不到这一版：与其发一个
           # 无法升级的 Release，不如在这里红掉（0.2 系列踩过的坑）。
           if [ -z "${UPDATER_KEY:-}" ]; then

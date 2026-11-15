@@ -274,6 +274,8 @@ func main() {
 	// 自动更新：后台每天检查一次，发现新版本时弹 mygo 自带的更新窗口（发布说明 /
 	// 跳过此版本 / 下载进度 / 重启进入新版本）。界面语言固定中文。
 	mygo.Use(updater.New(updater.Options{Language: "zh"}))
+	// 取清单与更新包改用自己的更新源：带重试，失败时给出能照着做的提示（见 updates.go）。
+	mygo.Updater.SetSource(newUpdateSource())
 	mygo.Bind(&System{jar: jar})
 
 	setupAppHooks()

@@ -167,6 +167,7 @@ Windows 安装包是 NSIS 做的按用户安装：装到 `%LOCALAPPDATA%\Program
 - macOS 签名与公证：`macos.signingIdentity` + `macos.notarize.keychainProfile`；未签名时用户要手动「右键 → 打开」。
 - 自动更新：`updates` 已配好（`publicKey` + `github: fayvo-hub/Kotae` + `tagPrefix: v` + `changelog: CHANGELOG.md`）。发版时流水线带 `MYGO_UPDATER_PRIVATE_KEY` 构建，额外产出 `update-<target>.json`、`<slug>-<版本>-<target>.tar.gz` 与增量 delta，装好的应用每天检查一次，设置页可手动检查。**私钥丢了就把老用户锁在旧版本上**（应用只认这把私钥签的名），所以它只在密码管理器和 GitHub Secrets 里；密钥对由 `npx mygo-cli keygen` 生成，公钥写进配置、私钥不入库（`.gitignore` 已挡 `mygo-update.key`）。发布说明取自 `CHANGELOG.md` 里 `## <版本>` 那一段，没有这一段打包会报错。
 - **哪些版本能自更新**：安装版（程序目录里有 `Uninstall.exe`）才行；免安装 zip 解出来的目录不行——MyGo 的 Windows 更新只替换程序目录里其它文件、保留正在运行的可执行文件本身，单文件形态没有可换的东西，所以 `updates.go` 按这个特征判定并在设置页如实显示「免安装版不能自我更新」。开发版（`go build`）与包管理器安装的版本同样显示不支持。
+- **取清单与下载走自己的更新源**：`updates.go` 的 `updateSource` 用 `mygo.Updater.SetSource` 接管了清单与更新包的取法，网络错误（国内直连 GitHub 经常在传输中途被重置，报 `unexpected EOF`）会隔 0.5s / 1.5s 重试两次，仍然失败时提示「连不上 GitHub 更新服务，请检查网络或代理后重试，或到 Releases 手动下载」。清单地址 `updateFeedBase` 与配置里的 `github` 是同一处地址，两边不一致时发布流水线的 preflight 会红掉。签名校验仍由 mygo 用编进二进制的公钥完成，这一层只负责把文件搬下来。
 
 ### 持续集成
 
